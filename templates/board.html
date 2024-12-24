@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}掲示板（テスト運用中）{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-4">
+    <h1 class="text-center mb-4">お知らせ</h1>
+
+    {% if current_user.is_authenticated %}
+    <!-- 投稿フォーム -->
+    <form method="post" enctype="multipart/form-data" class="form-container">
+        {{ form.hidden_tag() }}
+        
+        <div class="mb-3">
+            {{ form.title.label(class="form-label") }}
+            {{ form.title(class="form-control", placeholder="タイトルを入力してください") }}
+            {% for error in form.title.errors %}
+                <div class="text-danger">{{ error }}</div>
+            {% endfor %}
+        </div>
+    
+        <div class="mb-3">
+            {{ form.content.label(class="form-label") }}
+            {{ form.content(class="form-control", rows="8", placeholder="内容を入力してください") }}
+            {% for error in form.content.errors %}
+                <div class="text-danger">{{ error }}</div>
+            {% endfor %}
+        </div>
+    
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <div class="mb-3">
+            {{ form.admin_memo.label(class="form-label") }}
+            {{ form.admin_memo(class="form-control", rows="6", placeholder="管理者用メモを入力してください") }}
+            {% for error in form.admin_memo.errors %}
+                <div class="text-danger">{{ error }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    
+        <div class="mb-3">
+            {{ form.image.label(class="form-label") }}
+            {{ form.image(class="form-control") }}
+            {% for error in form.image.errors %}
+                <div class="text-danger">{{ error }}</div>
+            {% endfor %}
+        </div>
+    
+        <div class="text-center">
+            {{ form.submit(class="btn btn-primary") }}
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<div class="container">
+    <div class="row">
+        {% for post in posts %}
+        <div class="col-12">
+            <div class="card mb-4">
+                <div class="card-header fw-bold" style="background-color: #8ea604;">
+                    {{ post.title }}
+                </div>
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            投稿者: {{ post.author_name }}
+                            {% if post.organization %}
+                                <span class="text-muted">({{ post.organization }})</span>
+                            {% endif %}
+                        </div>
+                            <small class="text-muted">
+                                投稿日時: {{ post.created_at }}<br>
+                                最終更新: {{ post.updated_at }}
+                            </small>  
+                        </div>
+
+                 
+                </div>
+                <div class="card-body">
+                    <p class="card-text" style="white-space: pre-wrap;">{{ post.content }}</p>
+                    {% if post.image_url %}
+                        <img src="{{ post.image_url }}" alt="投稿画像" class="img-fluid mb-3" style="max-width: 100%; height: auto;">
+                    {% endif %}
+                    
+                    <!-- 管理者専用メモ（表示と編集フォーム） -->
+                    {% if current_user.is_authenticated and current_user.is_admin %}
+                    <div class="card-body border-top bg-light">
+                        <h6 class="text-muted mb-2">管理者用メモ</h6>
+                        {% if post.admin_memo %}
+                        <p class="mb-3" style="white-space: pre-wrap;">{{ post.admin_memo }}</p>
+                        {% endif %}
+                        <form method="post" action="{{ url_for('update_admin_memo', post_user_id=post.get('post_user_id', '') ) }}">
+                            <input type="hidden" name="updated_at" value="{{ post.get('updated_at', '') }}">
+                            <textarea class="form-control form-control-sm" name="admin_memo" rows="6">{{ post.get('admin_memo', '') }}</textarea>
+                            <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>                
+                    <div class="card-footer">
+                        {% if current_user.is_authenticated and current_user.id == post['user#user_id'] %}                       
+                            
+                        <a href="{{ url_for('edit_post', post_user_id=post['post_user_id']) }}?updated_at={{ post['updated_at'] }}" class="btn btn-warning btn-sm">編集</a>
+                            <form method="post" action="{{ url_for('delete_post', post_user_id=post['post_user_id']) }}" style="display:inline;">
+                                <input type="hidden" name="updated_at" value="{{ post['updated_at'] }}">
+                                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('本当に削除しますか？');">削除</button>
+                            </form>
+                        {% endif %}
+                    </div>
+            
+        </div>
+        </div>
+        {% endfor %}
+    
+</div></div>
+{% endblock %}

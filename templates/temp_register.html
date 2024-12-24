@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}仮登録{% endblock %}
+{% block content %}
+<section id="temp-register">
+    <div class="container my-5">
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <!-- 注意事項カード -->
+                <div class="card mb-4 border-warning">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            参加にあたっての注意事項
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <i class="bi bi-dot"></i>
+                                会場によっては<strong class="text-danger">未経験者、初級者は参加受付できない</strong>場合があります
+                            </li>
+                            <li class="mb-2">
+                                <i class="bi bi-dot"></i>
+                                経験年数・レベルは正確に記入してください
+                            </li>
+                            <li class="mb-2">
+                                <i class="bi bi-dot"></i>
+                                ご質問、ご相談はLINEでお願いします
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 登録フォームカード -->
+                <div class="card shadow" style="background-color: #8ea604; border-color: #647503;">
+                    <div class="card-body text-light">
+                        <h3 class="text-center mb-4">仮登録フォーム</h3>
+                        <form method="POST" action="">
+                            {{ form.hidden_tag() }}
+
+                            <!-- 表示名 -->
+                            <div class="mb-3">
+                                <label class="form-label">表示名 <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.display_name, placeholder="LINE名など、活動時に使用する名前", class="form-control form-control-lg") }}
+                                <div class="form-text text-light">※他の参加者に表示される名前になります</div>
+                                {% if form.display_name.errors %}
+                                    <p class="text-warning">{{ form.display_name.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+                           
+                            <!-- 名前 -->
+                            <div class="mb-3">
+                                <label class="form-label">氏名 <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.user_name, placeholder="本名をご記入ください", class="form-control form-control-lg") }}
+                                {% if form.user_name.errors %}
+                                    <p class="text-warning">{{ form.user_name.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- 性別 -->
+                            <div class="mb-3">
+                                <label class="form-label">性別 <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.gender, class="form-control form-control-lg") }}
+                                {% if form.gender.errors %}
+                                    <p class="text-warning">{{ form.gender.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- バドミントン歴 -->
+                            <div class="mb-3">
+                                <label class="form-label">バドミントン経験 <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.badminton_experience, placeholder="例: 経験3年・社会人サークルで活動中", class="form-control form-control-lg") }}
+                                <div class="form-text text-light">※できるだけ詳しくご記入ください</div>
+                                {% if form.badminton_experience.errors %}
+                                    <p class="text-danger">{{ form.badminton_experience.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- メールアドレス -->
+                            <div class="mb-3">
+                                <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg") }}
+                                {% if form.email.errors %}
+                                    <p class="text-danger">{{ form.email.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- パスワード -->
+                            <div class="mb-3">
+                                <label class="form-label">パスワード <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.password, placeholder="8文字以上で設定してください", class="form-control form-control-lg") }}
+                                {% if form.password.errors %}
+                                    <p class="text-danger">{{ form.password.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- 登録ボタン -->
+                            <div class="mt-4">
+                                {{ form.submit(class="btn btn-outline-light btn-lg w-100") }}
+                            </div>
+                        </form>
+                        <script>
+
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const birthdateInput = document.querySelector('input[name="date_of_birth"]');
+                                const guardianSection = document.getElementById('guardianSection');
+                            
+                                function calculateAge(birthdate) {
+                                    const today = new Date();
+                                    const birthDate = new Date(birthdate);
+                                    let age = today.getFullYear() - birthDate.getFullYear();
+                                    const monthDiff = today.getMonth() - birthDate.getMonth();
+                                    
+                                    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+                                        age--;
+                                    }
+                                    return age;
+                                }
+                            
+                                if (birthdateInput) {
+                                    function checkAge() {
+                                        if (birthdateInput.value) {
+                                            const age = calculateAge(birthdateInput.value);
+                                            console.log('Calculated age:', age); // デバッグ用
+                                            if (age < 18) {
+                                                guardianSection.style.display = 'block';
+                                            } else {
+                                                guardianSection.style.display = 'none';
+                                            }
+                                        }
+                                    }
+                            
+                                    // 初期チェック
+                                    checkAge();
+                            
+                                    // 生年月日が変更されたときのチェック
+                                    birthdateInput.addEventListener('change', checkAge);
+                                }
+                            });
+                            
+                            document.querySelector('form').addEventListener('submit', function(e) {
+                                console.log('Form submission attempted');
+                                // フォームの各フィールドの値をログ出力
+                                const formData = new FormData(this);
+                                for (let [key, value] of formData.entries()) {
+                                    console.log(key + ': ' + value);
+                                }
+                            });
+
+                        </script>
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Bootstrap Iconsのリンクをheadに追加 -->
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+{% endblock %}
+
+{% endblock %}

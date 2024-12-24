@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<form method="post" enctype="multipart/form-data">
+    {{ form.hidden_tag() }}
+
+    <div>
+        <label>{{ form.title.label }}</label>
+        {{ form.title(class="form-control") }}
+    </div>
+
+    <div>
+        <label>{{ form.content.label }}</label>
+        {{ form.content(class="form-control", rows=5) }}
+    </div>
+
+    <div>
+        <label>{{ form.image.label }}</label>
+        {{ form.image(class="form-control") }}
+        {% if post.image_url %}
+            <p>現在の画像: <img src="{{ post.image_url }}" alt="投稿画像" style="max-width: 200px;"></p>
+            <div>
+                {{ form.remove_image() }} {{ form.remove_image.label }}
+            </div>
+        {% endif %}
+    </div>
+
+    <div>
+        <button type="submit" class="btn btn-primary">更新</button>
+        <a href="{{ url_for('board') }}" class="btn btn-secondary">キャンセル</a>
+    </div>
+</form>
+{% endblock %}

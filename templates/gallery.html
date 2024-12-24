@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}gallery{% endblock %}
+{% block content %} 
+
+{% if current_user.is_authenticated %}
+<div class="container mt-4">
+    <h1 class="mb-4">画像アップロード</h1>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label for="image" class="form-label">画像を選択</label>
+            <input type="file" class="form-control" name="image" id="image" accept="image/*" required>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">アップロード</button>
+    </form>  
+    {% endif %}
+</div>
+
+
+
+
+<div class="container mt-4">
+    <h1 class="mb-4 text-center">Gallery</h1>
+    <div class="row justify-content-center">
+        {% for post in posts %}
+            <div class="col-md-6 mb-4 text-center">
+                <img src="{{ post.image_url }}" alt="S3 Image" class="img-fluid rounded mb-2" style="max-width: 500px; width: 100%; height: auto;">
+                
+                {% if current_user.is_authenticated %}
+                <form action="{{ url_for('delete_image', filename=post.image_url.split('/')[-1]) }}" method="POST" style="display: inline;">
+                    <button type="submit" class="btn btn-danger btn-sm">削除</button>
+                </form>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% endblock %}

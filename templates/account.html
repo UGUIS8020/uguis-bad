@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block content %}
+    
+    <!-- 削除ボタン -->
+<section id="menu">
+    <div class="container my-3 py-4 bg-light">
+        <div class="row">
+            <div class="col-md-3">
+                <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#del_modal">
+                    ユーザーを削除
+                </button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 削除確認モーダル -->
+<div class="modal fade" id="del_modal" tabindex="-1" aria-labelledby="del_modalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="del_modalLabel">アカウント削除の確認</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                このアカウントを削除してもよろしいですか？
+                <br>この操作は取り消せません。
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <a href="{{ url_for('delete_user', user_id=user.user_id) }}" class="btn btn-danger">削除する</a>
+            </div>
+        </div>
+    </div>
+</div>   
+    
+
+    <section id="user_update">
+        <div class="container my-3">
+            <div class="row">
+                <div class="col-lg-5 mx-auto">
+                    <div class="card bg-success text-center">
+                        <div class="card-body text-light">
+                            <h3>ユーザー情報</h3>
+                            <p>ユーザー情報を変更出来ます。</p>
+                            <form method="POST">
+                                {{ form.hidden_tag() }}
+                                
+                                <div class="mb-3">
+                                    <label for="display_name" class="form-label">表示名 (表示されますのであだ名やLINE名など)</label>
+                                    {{ render_field(form.display_name, placeholder="例: 太郎 / Taro / LINE名など", class="form-control form-control-lg", aria_describedby="display_name_help") }}                                    
+                                    {% if form.display_name.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.display_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="user_name" class="form-label">本名</label>
+                                    {{ render_field(form.user_name, placeholder="名前", class="form-control form-control-lg") }}
+                                    {% if form.user_name.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.display_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="furigana" class="form-label">フリガナ</label>
+                                    {{ render_field(form.furigana, placeholder="フリガナ", class="form-control form-control-lg") }}
+                                    {% if form.furigana.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.display_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="gender" class="form-label">性別</label>
+                                    {{ render_field(form.gender, placeholder="性別", class="form-control form-control-lg") }}
+                                    {% if form.gender.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.display_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div> 
+
+                                <div class="mb-3">
+                                    <label for="organization" class="form-label">所属を選択してください</label>
+                                    {{ render_field(form.organization, class="form-control form-control-lg") }}
+                                    {% if form.organization.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.organization.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+
+                                <!-- バドミントン歴フィールドを追加 -->
+                            <div class="mb-3">
+                                <label for="badminton_experience" class="form-label">バドミントン歴を選択してください</label>
+                                {{ render_field(form.badminton_experience, class="form-control form-control-lg") }}
+                                {% if form.badminton_experience.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.badminton_experience.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="phone" class="form-label">携帯電話番号</label>
+                                {{ render_field(form.phone, placeholder="電話番号", class="form-control form-control-lg") }}
+                                {% if form.phone.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.phone.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>  
+
+                            <div class="mb-3">
+                                <label for="date_of_birth" class="form-label">生年月日</label>
+                                {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date") }}
+                                {% if form.date_of_birth.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.date_of_birth.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                                
+                                
+                            <!-- 保護者情報入力欄（デフォルトで非表示） -->
+                            <div id="guardianSection" style="display: none;" aria-hidden="true">
+                                <div class="mb-3">
+                                    <label for="guardian_name" class="form-label">保護者氏名</label>
+                                    {{ render_field(form.guardian_name, class="form-control form-control-lg") }}
+                                    {% if form.guardian_name.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.guardian_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="emergency_phone" class="form-label">緊急連絡先電話番号</label>
+                                    {{ render_field(form.emergency_phone, class="form-control form-control-lg", id="emergency_phone") }}
+                                    {% if form.emergency_phone.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.emergency_phone.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                </div>  
+                            </div>                               
+                                
+    
+                            <div class="mb-3">
+                                <label for="post_code" class="form-label">郵便番号(ハイフン無し)</label>
+                                {{ render_field(form.post_code, placeholder="郵便番号", class="form-control form-control-lg") }}
+                                {% if form.post_code.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.post_code.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div> 
+    
+                                <div class="mb-3">
+                                    <label for="address" class="form-label">住所</label>
+                                    {{ render_field(form.address, placeholder="住所", class="form-control form-control-lg") }}
+                                    {% if form.address.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.address.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="email-field" class="form-label">メールアドレス</label>
+                                    <input type="text" id="email-field" name="email" class="form-control form-control-lg" readonly value="{{ form.email.data }}">
+                                    
+                                </div>
+                                
+                                <div class="mb-3" id="email-confirm-field" style="display: none;">
+                                    <label for="email-confirm" class="form-label">メールアドレス(確認)</label>
+                                    <input type="text" id="email-confirm" name="email_confirm" class="form-control form-control-lg">
+                                </div>
+                                
+                                <button type="button" id="edit-email-btn" class="btn btn-primary mb-3">メールアドレスを変更する場合はこちらをクリック</button>
+                                
+                                
+                                
+                                <div class="mb-3">
+                                    <label for="emergency_phone" class="form-label">パスワードを更新する場合は入力してください</label>
+                                    {{ render_field(form.password, placeholder="更新しなければこのまま空欄です", class="form-control form-control-lg") }}
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="emergency_phone" class="form-label">パスワード(確認)</label>
+                                    {{ render_field(form.pass_confirm, placeholder="パスワード(確認)", class="form-control form-control-lg") }}
+                                </div>                                                    
+                                
+                                {{ form.submit(class="btn btn-outline-light w-100") }}
+                            </form>    
+                            
+    
+        </div>
+      </div>
+    </div>
+    </div>
+    </section>
+    
+    <script>
+        document.getElementById('edit-email-btn').addEventListener('click', function() {
+            const emailField = document.getElementById('email-field');
+            const emailConfirmField = document.getElementById('email-confirm-field');
+            const confirmInput = emailConfirmField.querySelector('input');
+            
+            // email欄と確認欄が存在することを確認
+            if (emailField && emailConfirmField) {
+                // email欄を編集可能にする
+                emailField.removeAttribute('readonly');
+        
+                // email確認欄を表示
+                emailConfirmField.style.display = 'block';
+        
+                // 編集モードでない場合は空欄を防ぐ
+                if (!emailField.value) {
+                    emailField.value = '{{ form.email.data }}';  // 初期値を設定
+                }
+        
+                if (confirmInput && !confirmInput.value) {
+                    confirmInput.value = '{{ form.email.data }}';  // 初期値を設定
+                }
+            } else {
+                console.error('メールアドレス欄または確認欄が見つかりません。');
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const birthdateInput = document.querySelector('input[name="date_of_birth"]');
+            const guardianSection = document.getElementById('guardianSection');
+        
+            function calculateAge(birthdate) {
+                const today = new Date();
+                const birthDate = new Date(birthdate);
+                let age = today.getFullYear() - birthDate.getFullYear();
+                const monthDiff = today.getMonth() - birthDate.getMonth();
+                
+                if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+                    age--;
+                }
+                return age;
+            }
+        
+            if (birthdateInput) {
+                function checkAge() {
+                    if (birthdateInput.value) {
+                        const age = calculateAge(birthdateInput.value);
+                        console.log('Calculated age:', age); // デバッグ用
+                        if (age < 18) {
+                            guardianSection.style.display = 'block';
+                        } else {
+                            guardianSection.style.display = 'none';
+                        }
+                    }
+                }
+        
+                // 初期チェック
+                checkAge();
+        
+                // 生年月日が変更されたときのチェック
+                birthdateInput.addEventListener('change', checkAge);
+            }
+        });
+        
+        document.querySelector('form').addEventListener('submit', function(e) {
+            console.log('Form submission attempted');
+            // フォームの各フィールドの値をログ出力
+            const formData = new FormData(this);
+            for (let [key, value] of formData.entries()) {
+                console.log(key + ': ' + value);
+            }
+        });
+
+    </script>
+ 
+
+{% endblock %}

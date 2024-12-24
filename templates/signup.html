@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}signup{% endblock %}
+{% block content %}
+<section id="signup">
+    <div class="container my-5">
+        <div class="row">
+            <div class="col-lg-6 mx-auto">
+                <div class="card text-center" style="background-color: #8ea604; border-color: #647503;">
+                    <div class="card-body text-light">
+                        <h3>ユーザー登録</h3>
+                        <p>ユーザー情報を入力してください。</p>
+                        <form method="POST" action="{{ url_for('signup') }}" novalidate>
+                            {{ form.hidden_tag() }}
+                            
+                            <div class="mb-3">
+                                    <label for="display_name" class="form-label">表示名 (表示されますのであだ名やLINE名など)</label>
+                                    {{ render_field(form.display_name, placeholder="例: 太郎 / Taro / LINE名など", class="form-control form-control-lg", aria_describedby="display_name_help") }}                                    
+                                    {% if form.display_name.errors %}
+                                        <div class="text-danger">
+                                            {% for error in form.display_name.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            
+                            <div class="mb-3">
+                                <label for="user_name" class="form-label">本名</label>
+                                {{ render_field(form.user_name, placeholder="名前", class="form-control form-control-lg") }}
+                                {% if form.user_name.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.user_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="furigana" class="form-label">フリガナ</label>
+                                {{ render_field(form.furigana, placeholder="フリガナ", class="form-control form-control-lg") }}
+                                {% if form.furigana.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.display_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="gender" class="form-label">性別</label>
+                                {{ render_field(form.gender, placeholder="性別", class="form-control form-control-lg") }}
+                                {% if form.gender.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.display_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>  
+
+                            <div class="mb-3">
+                                <label for="organization" class="form-label">所属を選択してください</label>
+                                {{ render_field(form.organization, class="form-control form-control-lg") }}
+                                {% if form.organization.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.organization.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            
+                            <!-- バドミントン歴フィールドを追加 -->
+                            <div class="mb-3">
+                                <label for="badminton_experience" class="form-label">バドミントン歴を選択してください</label>
+                                {{ render_field(form.badminton_experience, class="form-control form-control-lg") }}
+                                {% if form.badminton_experience.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.badminton_experience.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>  
+
+                            <div class="mb-3">
+                                <label for="phone" class="form-label">携帯電話番号</label>
+                                {{ render_field(form.phone, placeholder="電話番号", class="form-control form-control-lg") }}
+                                {% if form.phone.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.badminton_experience.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div> 
+                            
+                            <div class="mb-3">
+                                <label for="date_of_birth" class="form-label">生年月日</label>
+                                {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date") }}
+                                {% if form.date_of_birth.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.date_of_birth.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            
+                            <!-- 保護者情報入力欄（デフォルトで非表示） -->
+                            <div id="guardianSection" style="display: none;" aria-hidden="true">
+                                <div class="mb-3">
+                                    <label for="guardian_name" class="form-label">保護者氏名</label>
+                                    {{ render_field(form.guardian_name, class="form-control form-control-lg") }}
+                                    {% if form.guardian_name.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.guardian_name.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                                <div class="mb-3">
+                                    <label for="emergency_phone" class="form-label">緊急連絡先電話番号</label>
+                                    {{ render_field(form.emergency_phone, class="form-control form-control-lg", id="emergency_phone") }}
+                                    {% if form.emergency_phone.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.emergency_phone.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div> 
+                        </div> 
+
+                            <div class="mb-3">
+                                <label for="post_code" class="form-label">郵便番号(ハイフン無し)</label>
+                                {{ render_field(form.post_code, placeholder="郵便番号", class="form-control form-control-lg") }}
+                                {% if form.post_code.errors %}
+                                    <div class="text-warning mt-1">
+                                        {% for error in form.post_code.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="address" class="form-label">住所</label>
+                                {{ render_field(form.address, placeholder="住所", class="form-control form-control-lg") }}
+                                {% if form.address.errors %}
+                                <div class="text-danger">
+                                    {% for error in form.address.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg") }}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ render_field(form.email_confirm, placeholder="メールアドレス(確認)", class="form-control form-control-lg") }}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ render_field(form.password, placeholder="8文字以上のパスワード", class="form-control form-control-lg") }}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ render_field(form.pass_confirm, placeholder="パスワード(確認)", class="form-control form-control-lg") }}
+                            </div>                                                    
+                            
+                            
+                            <div class="mb-3">
+                                {% with messages = get_flashed_messages(with_categories=true) %}
+                                    {% if messages %}
+                                        {% for category, message in messages %}
+                                            <div class="alert alert-{{ category }}">{{ message }}</div>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% endwith %}
+                            </div>
+                        
+                            <div class="mb-3">
+                                {{ form.submit(class="btn btn-outline-light w-100") }}
+                            </div>
+                        </form>
+
+                        <script>
+
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const birthdateInput = document.querySelector('input[name="date_of_birth"]');
+                                const guardianSection = document.getElementById('guardianSection');
+                            
+                                function calculateAge(birthdate) {
+                                    const today = new Date();
+                                    const birthDate = new Date(birthdate);
+                                    let age = today.getFullYear() - birthDate.getFullYear();
+                                    const monthDiff = today.getMonth() - birthDate.getMonth();
+                                    
+                                    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+                                        age--;
+                                    }
+                                    return age;
+                                }
+                            
+                                if (birthdateInput) {
+                                    function checkAge() {
+                                        if (birthdateInput.value) {
+                                            const age = calculateAge(birthdateInput.value);
+                                            console.log('Calculated age:', age); // デバッグ用
+                                            if (age < 18) {
+                                                guardianSection.style.display = 'block';
+                                            } else {
+                                                guardianSection.style.display = 'none';
+                                            }
+                                        }
+                                    }
+                            
+                                    // 初期チェック
+                                    checkAge();
+                            
+                                    // 生年月日が変更されたときのチェック
+                                    birthdateInput.addEventListener('change', checkAge);
+                                }
+                            });
+                            
+                            document.querySelector('form').addEventListener('submit', function(e) {
+                                console.log('Form submission attempted');
+                                // フォームの各フィールドの値をログ出力
+                                const formData = new FormData(this);
+                                for (let [key, value] of formData.entries()) {
+                                    console.log(key + ': ' + value);
+                                }
+                            });
+
+                        </script>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,67 @@
+.body{
+      
+  padding: 0;
+  margin: 0;
+}
+
+#about h3 {
+  color: #333333;
+  font-weight: bold;
+}
+
+#about h2 {
+  color: #333333;
+  font-weight: bold;
+}
+
+#about p {
+  font-size: 1.1rem; 
+  color: #444444;
+}
+
+.schedule {
+  font-family: sans-serif;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.schedule h1 {
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.schedule h2 {
+  color: #333;
+  margin: 0;
+}
+
+.schedule table th {
+  padding: 10px 0% ;
+  margin: 5px 0;   
+  background-color: #8ea604;
+}
+
+.schedule td {
+  padding: 10px 0% ;
+  margin: 5px 0;                  
+  background-color: #ebe8e6;
+  
+}
+
+.schedule-title {
+  justify-content: center;
+  background-color: #8ea604;
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 8px;
+}
+
+.special-venue {
+  color: #2c5282;
+  font-weight: bold;
+}
+
+
+.btn-danger:disabled {
+  opacity: 1; /* デフォルトで0.65程度になっているので1に戻す */
+}

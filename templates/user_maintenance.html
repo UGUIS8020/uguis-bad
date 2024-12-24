@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+
+    <header id="page-header">
+        <div class="container my-3 py-3 bg-light">
+            <div class="row">
+                <div class="col-md-6 m-auto text-center">
+                    <h1>ユーザー管理</h1>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    {% if current_user.is_authenticated and current_user.is_admin %}
+    <section id="menu">
+        <div class="container my-3 py-3 bg-light">
+            <div class="row">
+                <div class="col-md-3">
+                    <a href="{{ url_for('signup') }}" class="btn btn-primary w-100">
+                        ユーザー登録
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    <section id="list">
+        <div class="container my-3">
+            <div class="row">
+                <div class="col-md-10">
+                    <div class="card">
+                        <div class="card-header">
+                            <h4>最新のユーザー</h4>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-striped text-nowrap">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>ユーザー名</th>
+                                        <th>名前</th>
+                                        <th>メールアドレス</th>
+                                        <th>電話番号</th>      
+                                        <th>緊急連絡先</th>                                  
+                                        <th>変更</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for user in users %}
+                                    <tr>
+                                        <td>{{ '%06d' % loop.index }}</td>  <!-- インデックスを6桁の番号で表示 -->
+                                        <td>{{ user.display_name | truncate(10) }}</td>
+                                        <td>{{ user.user_name | truncate(10) }}</td>
+                                        <td>{{ user.email | truncate(20) }}</td>
+                                        <td>{{ user.phone | truncate(15) }}</td> 
+                                        <td>{{ user.emergency_phone | truncate(15) }}</td>                                       
+                                        <td>
+                                            
+                                            <a href="{{ url_for('account', user_id=user.user_id) }}" class="btn btn-secondary">変更</a>
+                                               
+                                            
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>    
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <nav>
+        <ul class="pagination">
+            {% if page > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('user_maintenance', page=page-1) }}">前へ</a>
+            </li>
+            {% endif %}
+            
+            {% if has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('user_maintenance', page=page+1) }}">次へ</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+    
+<!-- <h1>編集画面</h1>
+<form method="POST">
+    <label for="title">タイトル</label>
+    <input type="text" name="title" value={{ post.title }}>
+    <label for="body">内容</label>
+    <input type="text" name="body" value={{ post.body }}>
+    <input type="submit" value="編集">
+</form> -->
+
+<h1>編集画面</h1>
+<form method="POST" enctype="multipart/form-data"> <!-- enctypeを追加 -->
+    <label for="title">タイトル</label>
+    <input type="text" name="title" value="{{ post.title }}">
+    
+    <label for="body">内容</label>
+    <textarea name="body" id="body" rows="10" cols="50">{{ post.body }}</textarea> <!-- テキストエリアに変更 -->
+    
+    {% if post.image_url %}
+        <p>現在の画像:</p>
+        <img src="{{ post.image_url }}" alt="Post Image" style="max-width: 100%; height: auto;">
+        <p>画像を変更する場合は新しい画像を選択してください:</p>
+    {% endif %}
+    
+    <label for="image">新しい画像</label>
+    <input type="file" name="image" id="image">
+    
+    <input type="submit" value="編集">
+
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}鶯杯2024{% endblock %}
+{% block content %}
+
+<style>
+   
+    body {
+        background-color: #eb5312; /* ページ全体の背景色 */
+        color: #ffffff; /* 必要に応じてテキストカラーも設定 */
+    }
+
+    .img-container {
+        margin-bottom: 20px;
+        text-align: center;
+    }
+
+    .img-container img {
+        display: inline-block;
+        border-radius: 8px;
+    }
+
+    .img-container {
+        margin-bottom: 20px;
+    }
+    .img-container img {
+        
+        height: auto;
+        border-radius: 8px;
+    }
+</style>
+</head>
+<body>
+<div class="container my-5 text-center"> <!-- コンテナ全体を中央揃え -->
+    <h1>第一回鶯杯2024</h1>
+    <h1>バドミントン大会</h1>
+    
+    <!-- トップ画像（1枚目） -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <img src="{{ url_for('static', filename='images/2024/top.jpg') }}" alt="トップ画像" class="img-fluid mx-auto d-block">
+        </div>
+    </div>
+
+    <!-- 2枚ずつのグリッド -->
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/001.jpg') }}" alt="練習風景1" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/004.jpg') }}" alt="練習風景2" class="mx-auto d-block">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/003.jpg') }}" alt="練習風景3" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/002.jpg') }}" alt="練習風景4" class="mx-auto d-block">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/005.jpg') }}" alt="練習風景5" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/006.jpg') }}" alt="練習風景6" class="mx-auto d-block">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/007.jpg') }}" alt="練習風景7" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/008.jpg') }}" alt="練習風景8" class="mx-auto d-block">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/009.jpg') }}" alt="練習風景9" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/010.jpg') }}" alt="練習風景10" class="mx-auto d-block">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/011.jpg') }}" alt="練習風景11" class="mx-auto d-block">
+        </div>
+        <div class="col-md-6 img-container">
+            <img src="{{ url_for('static', filename='images/2024/013.jpg') }}" alt="練習風景12" class="mx-auto d-block">
+        </div>
+    </div>
+</div>
+{% endblock %}
