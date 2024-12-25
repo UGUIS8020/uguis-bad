@@ -128,6 +128,9 @@
                                                         {% if participant.experience %}
                                                             <span class="badge bg-primary ms-2">{{ participant.experience }}</span>
                                                         {% endif %}
+                                                        {% if participant.badminton_experience %}
+                                                            <span class="badge bg-success ms-2">{{ participant.badminton_experience }}</span>
+                                                        {% endif %}
                                                     </div>
                                                 </div>
                                             </div>
@@ -339,72 +342,163 @@
     </div>   
 </div>
 
-    <script>
-        async function joinSchedule(button) {
-            const scheduleId = button.getAttribute('data-schedule-id');
-            const date = button.getAttribute('data-schedule-date');
-        
-            console.log('Schedule ID:', scheduleId);
-            console.log('Date:', date);
-        
-            if (!scheduleId || !date) {
-                alert('スケジュール情報が不足しています。');
-                console.error('Invalid scheduleId or date:', { scheduleId, date });
+<script>
+    async function joinSchedule(button) {
+        const scheduleId = button.getAttribute('data-schedule-id');
+        const date = button.getAttribute('data-schedule-date');
+    
+        console.log('Schedule ID:', scheduleId);
+        console.log('Date:', date);
+    
+        if (!scheduleId || !date) {
+            alert('スケジュール情報が不足しています。');
+            console.error('Invalid scheduleId or date:', { scheduleId, date });
+            return;
+        }
+    
+        try {
+            const response = await fetch(`/schedule/${scheduleId}/join`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ date })
+            });
+    
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('Error response:', errorData);
+                alert(errorData.message || 'エラーが発生しました');
                 return;
             }
-        
-            try {
-                const response = await fetch(`/schedule/${scheduleId}/join`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: JSON.stringify({ date })
+    
+            const data = await response.json();
+            console.log('Success response:', data);
+    
+            // ボタンの状態を更新
+            button.classList.toggle('btn-primary', !data.is_joining);
+            button.classList.toggle('btn-danger', data.is_joining);
+            button.textContent = data.is_joining ? '参加済み' : '参加する';
+    
+            if (data.message) {
+                alert(data.message);
+            }
+    
+            // 参加者リストを更新
+            await refreshScheduleList();
+    
+        } catch (error) {
+            console.error('Fetch error:', error);
+            alert('通信エラーが発生しました');
+        }
+    }
+    
+    async function refreshScheduleList() {
+        try {
+            const response = await fetch('/schedules');
+            if (response.ok) {
+                const schedules = await response.json();
+                console.log('Updated schedules:', schedules);
+    
+                // 各スケジュールの参加者リストを更新
+                schedules.forEach(schedule => {
+                    // 参加者リストのコンテナを取得
+                    const participantsContainer = document.querySelector(`#collapse${schedule.schedule_id} .row`);
+                    if (!participantsContainer) return;
+    
+                    if (schedule.participants_info && schedule.participants_info.length > 0) {
+                        // 参加者がいる場合、リストを生成
+                        const participantsList = schedule.participants_info.map(participant => `
+                            <div class="col-md-4 col-sm-6 mb-2">
+                                <div class="card">
+                                    <div class="card-body py-2">
+                                        <span class="participant-name">${participant.display_name}</span>
+                                        ${participant.experience ? 
+                                            `<span class="badge bg-primary ms-2">${participant.experience}</span>` 
+                                            : ''}
+                                        ${participant.badminton_experience ? 
+                                            `<span class="badge bg-success ms-2">${participant.badminton_experience}</span>` 
+                                            : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                        
+                        participantsContainer.innerHTML = participantsList;
+                    } else {
+                        // 参加者がいない場合のメッセージ
+                        participantsContainer.innerHTML = '<p class="text-muted">まだ参加者がいません</p>';
+                    }
                 });
-        
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    console.error('Error response:', errorData);
-                    alert(errorData.message || 'エラーが発生しました');
-                    return;
-                }
-        
-                const data = await response.json();
-                console.log('Success response:', data);
-        
-                // ボタンの状態を更新
-                button.classList.toggle('btn-primary', !data.is_joining);
-                button.classList.toggle('btn-danger', data.is_joining);
-                button.textContent = data.is_joining ? '参加済み' : '参加する';
-        
-                if (data.message) {
-                    alert(data.message);
-                }
-        
-                // リストをリロード
-                refreshScheduleList();
-        
-            } catch (error) {
-                console.error('Fetch error:', error);
-                alert('通信エラーが発生しました');
             }
+        } catch (error) {
+            console.error('Error refreshing schedule list:', error);
         }
-        
-        async function refreshScheduleList() {
-            try {
-                const response = await fetch('/schedules'); // スケジュールリストを取得するエンドポイント
-                if (response.ok) {
-                    const schedules = await response.json();
-                    console.log('Updated schedules:', schedules);
-        
-                    // 必要に応じて DOM を更新
-                    // 例: リストを動的に再描画
-                }
-            } catch (error) {
-                console.error('Error refreshing schedule list:', error);
+    }
+
+    async function refreshScheduleList() {
+        try {
+            const response = await fetch('/schedules');
+            if (response.ok) {
+                const schedules = await response.json();
+                console.log('Fetched schedules:', schedules); // デバッグログ追加
+    
+                // 各スケジュールの参加者リストを更新
+                schedules.forEach(schedule => {
+                    console.log('Processing schedule:', schedule); // デバッグログ追加
+                    
+                    // 参加者リストのコンテナを取得
+                    const participantsContainer = document.querySelector(`#collapse${schedule.schedule_id} .row`);
+                    console.log('Container found:', participantsContainer); // デバッグログ追加
+                    
+                    if (!participantsContainer) {
+                        console.log(`Container not found for schedule ${schedule.schedule_id}`); // デバッグログ追加
+                        return;
+                    }
+    
+                    if (schedule.participants_info && schedule.participants_info.length > 0) {
+                        console.log('Participants info:', schedule.participants_info); // デバッグログ追加
+                        
+                        // 参加者がいる場合、リストを生成
+                        const participantsList = schedule.participants_info.map(participant => {
+                            console.log('Processing participant:', participant); // デバッグログ追加
+                            return `
+                                <div class="col-md-4 col-sm-6 mb-2">
+                                    <div class="card">
+                                        <div class="card-body py-2">
+                                            <span class="participant-name">${participant.display_name}</span>
+                                            ${participant.experience ? 
+                                                `<span class="badge bg-primary ms-2">${participant.experience}</span>` 
+                                                : ''}
+                                            ${participant.badminton_experience ? 
+                                                `<span class="badge bg-success ms-2">${participant.badminton_experience}</span>` 
+                                                : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                        
+                        console.log('Generated HTML:', participantsList); // デバッグログ追加
+                        participantsContainer.innerHTML = participantsList;
+                    } else {
+                        console.log('No participants for schedule:', schedule.schedule_id); // デバッグログ追加
+                        participantsContainer.innerHTML = '<p class="text-muted">まだ参加者がいません</p>';
+                    }
+                });
+            } else {
+                console.error('Failed to fetch schedules:', response.status); // デバッグログ追加
             }
+        } catch (error) {
+            console.error('Error refreshing schedule list:', error);
         }
-    </script>
+    }
+    
+    // 追加: ページ読み込み時に初期データを表示
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshScheduleList();
+    });
+</script>
         
 {% endblock %}
