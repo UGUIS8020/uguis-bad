@@ -6,7 +6,7 @@
     <h2 class="mb-3">バドミントンメンバー募集</h2>
     <p>初級者～上級者どなたでも参加できます<br>
         レベルが違っても楽しくゲームできる方<br>
-    小中学生、未経験者はご相談ください。<br>
+    小中学生、未経験者はご相談ください<br>
                 </p>
     
                 <div class="row justify-content-center">  
@@ -125,12 +125,8 @@
                                                 <div class="card">
                                                     <div class="card-body py-2">
                                                         <span class="participant-name">{{ participant.display_name }}</span>
-                                                        {% if participant.experience %}
-                                                            <span class="badge bg-primary ms-2">{{ participant.experience }}</span>
-                                                        {% endif %}
-                                                        {% if participant.badminton_experience %}
-                                                            <span class="badge bg-success ms-2">{{ participant.badminton_experience }}</span>
-                                                        {% endif %}
+                                                        <span class="badge ms-2">{{ participant.badminton_experience }}</span>
+                                                        
                                                     </div>
                                                 </div>
                                             </div>
@@ -394,49 +390,7 @@
         }
     }
     
-    async function refreshScheduleList() {
-        try {
-            const response = await fetch('/schedules');
-            if (response.ok) {
-                const schedules = await response.json();
-                console.log('Updated schedules:', schedules);
     
-                // 各スケジュールの参加者リストを更新
-                schedules.forEach(schedule => {
-                    // 参加者リストのコンテナを取得
-                    const participantsContainer = document.querySelector(`#collapse${schedule.schedule_id} .row`);
-                    if (!participantsContainer) return;
-    
-                    if (schedule.participants_info && schedule.participants_info.length > 0) {
-                        // 参加者がいる場合、リストを生成
-                        const participantsList = schedule.participants_info.map(participant => `
-                            <div class="col-md-4 col-sm-6 mb-2">
-                                <div class="card">
-                                    <div class="card-body py-2">
-                                        <span class="participant-name">${participant.display_name}</span>
-                                        ${participant.experience ? 
-                                            `<span class="badge bg-primary ms-2">${participant.experience}</span>` 
-                                            : ''}
-                                        ${participant.badminton_experience ? 
-                                            `<span class="badge bg-success ms-2">${participant.badminton_experience}</span>` 
-                                            : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('');
-                        
-                        participantsContainer.innerHTML = participantsList;
-                    } else {
-                        // 参加者がいない場合のメッセージ
-                        participantsContainer.innerHTML = '<p class="text-muted">まだ参加者がいません</p>';
-                    }
-                });
-            }
-        } catch (error) {
-            console.error('Error refreshing schedule list:', error);
-        }
-    }
-
     async function refreshScheduleList() {
         try {
             const response = await fetch('/schedules');
