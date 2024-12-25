@@ -48,8 +48,8 @@ def create_app():
         
         # キャッシュの設定と初期化
         app.config['CACHE_TYPE'] = 'SimpleCache'
-        app.config['CACHE_DEFAULT_TIMEOUT'] = 900
-        app.config['CACHE_THRESHOLD'] = 1000
+        app.config['CACHE_DEFAULT_TIMEOUT'] = 000
+        app.config['CACHE_THRESHOLD'] = 0000
         app.config['CACHE_KEY_PREFIX'] = 'uguis_'
 
         # 既存のcacheオブジェクトを初期化
@@ -241,7 +241,7 @@ class UpdateUserForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験者', '未経験者'),
             ('1年未満', '1年未満'),
-            ('年以上～3年未満', '1年以上～3年未満'),
+            ('1年以上～3年未満', '1年以上～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -342,7 +342,7 @@ class TempRegistrationForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験者', '未経験者'),
             ('1年未満', '1年未満'),
-            ('年以上～3年未満', '1年以上～3年未満'),
+            ('1年以上～3年未満', '1年以上～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -657,7 +657,7 @@ def get_board_table():
     # テーブルを返す
     return dynamodb.Table(table_name)
 
-@cache.memoize(timeout=900)
+@cache.memoize(timeout=000)
 def get_participants_info(schedule): 
     logger.info("Executing get_schedules_with_formatting")
     participants_info = []
@@ -861,6 +861,11 @@ def format_date(value):
 #         logger.error(f"Error in get_schedules_with_formatting: {str(e)}")
 #         return []  # エラー時は空リストを返す
 
+@app.route('/schedules')
+def get_schedules():
+    schedules = get_schedules_with_formatting()
+    return jsonify(schedules)
+    
 def get_schedule_table():
     """スケジュールテーブルを取得する関数"""
     region = os.getenv('AWS_REGION', 'ap-northeast-1')
@@ -899,6 +904,9 @@ def get_users_batch(user_ids):
         if 'Responses' in response:
             for user in response['Responses'][os.getenv('TABLE_NAME_USER', 'bad-users')]:
                 user_id = user['user#user_id']
+
+                # デバッグ用：各ユーザーの情報を確認
+                logger.info(f"User data: {user}")
                 users[user_id] = user
                 
         return users
@@ -907,7 +915,7 @@ def get_users_batch(user_ids):
         logger.error(f"Error batch getting users: {e}")
         return {}
     
-@cache.memoize(timeout=900)
+@cache.memoize(timeout=000)
 def get_schedules_with_formatting():
     """スケジュール一覧を取得してフォーマットする"""
     logger.info("Cache: Attempting to get formatted schedules")
@@ -950,7 +958,8 @@ def get_schedules_with_formatting():
                         user = users.get(participant_id, {})
                         participants_info.append({
                             'user_id': participant_id,
-                            'display_name': user.get('display_name', '未登録')
+                            'display_name': user.get('display_name', '未登録'),
+                            'badminton_experience': user.get('badminton_experience', '')
                         })
                 
                 schedule['participants_info'] = participants_info
@@ -968,6 +977,7 @@ def get_schedules_with_formatting():
         return []
 
 @app.route("/", methods=['GET', 'POST'])
+@app.route("/index", methods=['GET', 'POST'])
 def index():
     form = ScheduleForm()
     
