@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid px-2">
+    <div class="row mb-3">
+        <div class="col-12">
+            <h2 class="text-center">スケジュール管理</h2>            
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-10">
+            <!-- 入力フォームを追加 -->
+            <div class="card mb-4">
+                <div class="card-header py-2">
+                    <h3 class="card-title mb-0">スケジュール登録</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('index') }}">
+                        {{ form.csrf_token }}
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    {{ form.date.label(class="form-label") }}
+                                    {{ form.date(class="form-control", required=true) }}
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="mb-3">
+                                    {{ form.day_of_week.label(class="form-label") }}
+                                    {{ form.day_of_week(class="form-control", readonly=true) }}
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    {{ form.venue.label(class="form-label") }}
+                                    {{ form.venue(class="form-control", required=true) }}
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="mb-3">
+                                    {{ form.start_time.label(class="form-label") }}
+                                    {{ form.start_time(class="form-control", required=true) }}
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="mb-3">
+                                    {{ form.end_time.label(class="form-label") }}
+                                    {{ form.end_time(class="form-control", required=true) }}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary">登録</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+<div class="container-fluid px-2">
+    
+    <div class="row justify-content-center"> <!-- 中央寄せを追加 -->
+        <div class="col-10"> <!-- col-10から col-11 に変更してサイズを少し大きく -->
+            <div class="card">
+                <div class="card-header py-2"> <!-- ヘッダーの余白を縮小 -->
+                    <h3 class="card-title mb-0">全スケジュール一覧</h3>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0"> <!-- テーブルの下margin削除 -->
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="px-2">日付</th> <!-- セル内の余白を調整 -->
+                                <th class="px-2">曜日</th>
+                                <th class="px-2">会場</th>
+                                <th class="px-2">開始</th> <!-- "時間"を省略 -->
+                                <th class="px-2">終了</th> <!-- "時間"を省略 -->
+                                <th class="px-2">状態</th> <!-- "ステータス"を"状態"に省略 -->
+                                <th class="px-2">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for schedule in schedules %}
+                                <tr>
+                                    <td class="px-2">{{ schedule.date }}</td>
+                                    <td class="px-2">{{ schedule.day_of_week }}</td>
+                                    <td class="px-2">{{ schedule.venue }}</td>
+                                    <td class="px-2">{{ schedule.start_time }}</td>
+                                    <td class="px-2">{{ schedule.end_time }}</td>
+                                    <td class="px-2">
+                                        {% if schedule.status == 'active' %}
+                                            <span class="badge bg-success">有効</span>
+                                        {% elif schedule.status == 'deleted' %}
+                                            <span class="badge bg-danger">削除済</span>
+                                        {% elif schedule.status == 'cancelled' %}
+                                            <span class="badge bg-warning">中止</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-2">
+                                        <a href="{{ url_for('edit_schedule', schedule_id=schedule.schedule_id) }}" 
+                                        class="btn btn-sm btn-primary py-0">編集</a> <!-- ボタンの縦余白を縮小 -->
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dateInput = document.getElementById('date');
+    const dayOfWeekInput = document.getElementById('day_of_week');
+    const startTimeSelect = document.getElementById('start_time');
+    const endTimeSelect = document.getElementById('end_time');
+
+    function updateDayOfWeek() {
+        if (dateInput.value) {
+            const date = new Date(dateInput.value);
+            const days = ['日', '月', '火', '水', '木', '金', '土'];
+            const dayOfWeek = days[date.getDay()];
+            dayOfWeekInput.value = dayOfWeek;
+        }
+    }
+
+    if (dateInput && dayOfWeekInput) {
+        dateInput.addEventListener('change', updateDayOfWeek);
+        updateDayOfWeek();
+    }
+
+    if (startTimeSelect) {
+        startTimeSelect.addEventListener('change', function() {
+            if (this.value) {
+                const selectedHour = parseInt(this.value.split(':')[0]);
+                endTimeSelect.innerHTML = '<option value="">選択してください</option>';
+                for (let i = selectedHour + 1; i <= 23; i++) {
+                    const timeStr = `${i.toString().padStart(2, '0')}:00`;
+                    endTimeSelect.add(new Option(timeStr, timeStr));
+                }
+            }
+        });
+    }
+});
+</script>
+
+              
+
+
+     
+                    
+                </div>
+            </div>
+            <div class="d-flex justify-content-end align-items-center mt-3">
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> 戻る
+                </a>
+            </div>
+            
+        </div>       
+        
+    </div> </div> </div> 
+
+
+{% endblock %}

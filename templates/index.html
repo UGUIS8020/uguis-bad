@@ -96,14 +96,7 @@
                                     {% else %}
                                         参加する
                                     {% endif %}
-                                </button>
-                                 <!-- スケジュール編集ボタン (管理者のみ表示) -->
-                                 {% if current_user.is_authenticated and current_user.administrator %}
-                                 <a href="{{ url_for('edit_schedule', schedule_id=schedule.schedule_id) }}" 
-                                    class="btn btn-sm btn-warning m-1 w-100 text-nowrap">
-                                     編集
-                                 </a>
-                             {% endif %}
+                                </button>                                
                             </div>
                         </div>
                     </h2>
@@ -182,140 +175,7 @@
 }
 </style>
 
-<section id="contact" class="mb-5 text-center">
 
-             
-                {% if current_user.is_authenticated and current_user.is_admin %}
-
-                <div class="bg-white rounded-lg shadow p-6">
-                  <h1 class="text-2xl font-bold mb-6">練習スケジュール編集</h1>
-              </div>
-              
-              <form method="post" class="p-4">
-                  {{ form.hidden_tag() }}
-                  
-                  <!-- 日付 -->
-                  <div class="mb-4">
-                      {{ form.date.label(class="block mb-2 font-medium") }}
-                      {{ form.date(class="w-full p-2 border rounded", required=true) }}
-                      {% if form.date.errors %}
-                          {% for error in form.date.errors %}
-                              <p class="mt-1 text-sm text-red-500">{{ error }}</p>
-                          {% endfor %}
-                      {% endif %}
-                  </div>
-              
-                  <!-- 曜日（自動入力） -->
-                  <div class="mb-4">
-                      {{ form.day_of_week.label(class="block mb-2 font-medium") }}
-                      {{ form.day_of_week(class="w-full p-2 border rounded bg-gray-100", readonly=true) }}
-                  </div>
-              
-                  <!-- 会場 -->
-                  <div class="mb-4">
-                      {{ form.venue.label(class="block mb-2 font-medium") }}
-                      {{ form.venue(class="w-full p-2 border rounded", required=true) }}
-                      {% if form.venue.errors %}
-                          {% for error in form.venue.errors %}
-                              <p class="mt-1 text-sm text-red-500">{{ error }}</p>
-                          {% endfor %}
-                      {% endif %}
-                  </div>
-              
-                  <!-- 開始時間 -->
-                  <div class="mb-4">
-                      {{ form.start_time.label(class="block mb-2 font-medium") }}
-                      {{ form.start_time(class="w-full p-2 border rounded", required=true) }}
-                      {% if form.start_time.errors %}
-                          {% for error in form.start_time.errors %}
-                              <p class="mt-1 text-sm text-red-500">{{ error }}</p>
-                          {% endfor %}
-                      {% endif %}
-                  </div>
-              
-                  <!-- 終了時間 -->
-                  <div class="mb-4">
-                      {{ form.end_time.label(class="block mb-2 font-medium") }}
-                      {{ form.end_time(class="w-full p-2 border rounded", required=true) }}
-                      {% if form.end_time.errors %}
-                          {% for error in form.end_time.errors %}
-                              <p class="mt-1 text-sm text-red-500">{{ error }}</p>
-                          {% endfor %}
-                      {% endif %}
-                  </div>
-              
-                  <!-- 送信ボタン -->
-                  <div class="flex justify-center pt-4">
-                      <!-- {{ form.submit(class="px-8 py-3 text-xl font-extrabold tracking-wider text-white bg-blue-600 rounded-lg shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform transition-all duration-200 hover:scale-105") }} -->
-                      {{ form.submit }}
-                    </div>
-              </form>
-              
-              <!-- 日付処理のJavaScript -->
-              <script>
-              document.addEventListener('DOMContentLoaded', function() {
-                  const dateInput = document.getElementById('date');
-                  const dayOfWeekInput = document.getElementById('day_of_week');
-                  const startTimeSelect = document.getElementById('start_time');
-                  const endTimeSelect = document.getElementById('end_time');
-              
-                  // 曜日の自動入力
-                  function updateDayOfWeek() {
-                      if (dateInput.value) {
-                          const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
-                          const date = new Date(dateInput.value);
-                          const dayOfWeek = weekDays[date.getDay()];
-                          dayOfWeekInput.value = dayOfWeek;
-              
-                          // 曜日に応じて背景色を変更（土日の場合）
-                          if (date.getDay() === 0) { // 日曜日
-                              dayOfWeekInput.classList.add('bg-red-50');
-                              dayOfWeekInput.classList.remove('bg-blue-50', 'bg-gray-100');
-                              dayOfWeekInput.style.color = '#E53E3E';  // 赤色テキスト
-                          } else if (date.getDay() === 6) { // 土曜日
-                              dayOfWeekInput.classList.add('bg-blue-50');
-                              dayOfWeekInput.classList.remove('bg-red-50', 'bg-gray-100');
-                              dayOfWeekInput.style.color = '#3182CE';  // 青色テキスト
-                          } else { // 平日
-                              dayOfWeekInput.classList.add('bg-gray-100');
-                              dayOfWeekInput.classList.remove('bg-red-50', 'bg-blue-50');
-                              dayOfWeekInput.style.color = '#2D3748';  // デフォルトの文字色
-                          }
-                      } else {
-                          dayOfWeekInput.value = '';
-                          dayOfWeekInput.classList.remove('bg-red-50', 'bg-blue-50');
-                          dayOfWeekInput.classList.add('bg-gray-100');
-                      }
-                  }
-              
-                  // 日付入力時に曜日を自動更新
-                  dateInput.addEventListener('change', updateDayOfWeek);
-                  // ページ読み込み時に曜日を設定（既存の日付がある場合）
-                  updateDayOfWeek();
-              
-                  // 開始時間が変更されたときの終了時間の更新
-                  startTimeSelect.addEventListener('change', function() {
-                      if (this.value) {
-                          const selectedHour = parseInt(this.value.split(':')[0]);
-                          
-                          // 終了時間の選択肢を更新
-                          endTimeSelect.innerHTML = '<option value="">選択してください</option>';
-                          for (let i = selectedHour + 1; i <= 23; i++) {
-                              const timeStr = `${i.toString().padStart(2, '0')}:00`;
-                              const option = new Option(timeStr, timeStr);
-                              endTimeSelect.add(option);
-                          }
-                      } else {
-                          endTimeSelect.innerHTML = '<option value="">選択してください</option>';
-                      }
-                  });
-              });
-              </script>
-
-              {% endif %}
-
-
-      </section>
 
       <section id="contact" class="mb-5 text-center">
 

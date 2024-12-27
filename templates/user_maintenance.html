@@ -28,25 +28,24 @@
     <section id="list">
         <div class="container my-3">
             <div class="row">
-                <div class="col-md-10">
+                <div class="col-md-12">
                     <div class="card">
                         <div class="card-header">
                             <h4>最新のユーザー</h4>
                         </div>
-                        <div class="table-responsive">
-                            <table class="table table-striped text-nowrap">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>ユーザー名</th>
-                                        <th>名前</th>
-                                        <th>メールアドレス</th>
-                                        <th>電話番号</th>      
-                                        <th>緊急連絡先</th>                                  
-                                        <th>変更</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
+                        <table class="table table-sm table-striped text-nowrap">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>ユーザー名</th>
+                                    <th>名前</th>
+                                    <th>メールアドレス</th>
+                                    <th>電話番号</th>      
+                                    <th>緊急連絡先</th>                                  
+                                    <th>変更</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                                     {% for user in users %}
                                     <tr>
                                         <td>{{ '%06d' % loop.index }}</td>  <!-- インデックスを6桁の番号で表示 -->
