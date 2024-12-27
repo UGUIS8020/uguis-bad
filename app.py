@@ -176,7 +176,7 @@ class RegistrationForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験者', '未経験者'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -241,7 +241,7 @@ class UpdateUserForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験者', '未経験者'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -342,7 +342,7 @@ class TempRegistrationForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験者', '未経験者'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -486,33 +486,6 @@ class LoginForm(FlaskForm):
             app.logger.debug("Password validation failed")
             raise ValidationError('パスワードが正しくありません')
 
-
-# class ScheduleForm(FlaskForm):
-#     date = DateField('日付', validators=[DataRequired()])
-#     day_of_week = StringField('曜日', render_kw={'readonly': True})  # 自動入力用
-    
-#     venue = SelectField('会場', validators=[DataRequired()], choices=[
-#         ('', '選択してください'),
-#         ('北越谷 A面', '北越谷 A面'),
-#         ('北越谷 B面', '北越谷 B面'),
-#         ('北越谷 AB面', '北越谷 AB面'),
-#         ('総合体育館 第一 2面', '総合体育館 第一 2面'),
-#         ('総合体育館 第一 6面', '総合体育館 第一 6面'),
-#         ('総合体育館 第二 3面', '総合体育館 第二 3面'),
-#         ('ウィングハット', 'ウィングハット')
-#     ])
-    
-#     start_time = SelectField('開始時間', validators=[DataRequired()], choices=[
-#         ('', '選択してください')] + 
-#         [(f"{h:02d}:00", f"{h:02d}:00") for h in range(9, 23)]
-#     )
-    
-#     end_time = SelectField('終了時間', validators=[DataRequired()], choices=[
-#         ('', '選択してください')] + 
-#         [(f"{h:02d}:00", f"{h:02d}:00") for h in range(10, 24)]
-#     )
-    
-#     submit = SubmitField('登録') 
 
 
 class ScheduleForm(FlaskForm):
@@ -844,62 +817,6 @@ def get_schedules_with_formatting():
         return []
 
 
-# @app.route("/", methods=['GET', 'POST'])
-# @app.route("/index", methods=['GET', 'POST'])
-# def index():
-#     form = ScheduleForm()
-    
-#     if form.validate_on_submit():
-#         try:
-#             schedule_table = get_schedule_table()
-#             if not schedule_table:
-#                 raise ValueError("Schedule table is not initialized")
-
-#             schedule_data = {
-#                 'schedule_id': str(uuid.uuid4()),
-#                 'date': form.date.data.isoformat(),
-#                 'day_of_week': form.day_of_week.data,
-#                 'venue': form.venue.data,
-#                 'start_time': form.start_time.data,
-#                 'end_time': form.end_time.data,
-#                 'created_at': datetime.now().isoformat(),
-#                 'status': 'active'
-#             }
-
-#             schedule_table.put_item(Item=schedule_data)
-            
-#             # キャッシュ削除
-#             cache.delete_memoized(get_schedules_with_formatting)
-#             logger.info(f"Cache cleared after new schedule creation: {schedule_data['schedule_id']}")
-            
-#             flash('スケジュールが登録されました', 'success')
-#             return redirect(url_for('index'))
-
-#         except Exception as e:
-#             flash('スケジュールの登録中にエラーが発生しました', 'error')
-#             logger.error(f"Error registering schedule: {e}")
-#             return render_template(
-#                 "index.html",
-#                 form=form,
-#                 schedules=[],
-#                 title="鶯 | 越谷市バドミントンサークル",
-#                 description="越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。",
-#                 canonical=url_for('index', _external=True)
-#             )
-
-#     # キャッシュされたフォーマット済みスケジュールを取得
-#     schedules = get_schedules_with_formatting()
-
-#     return render_template(
-#         "index.html",
-#         form=form,
-#         schedules=schedules,
-#         title="鶯 | 越谷市バドミントンサークル",
-#         description="越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。",
-#         canonical=url_for('index', _external=True)
-#     )
-
-
 @app.route("/", methods=['GET'])
 @app.route("/index", methods=['GET'])
 def index():
@@ -959,87 +876,6 @@ def temp_register():
 
     return render_template('temp_register.html', form=form) 
 
-
-# @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
-# @login_required
-# def join_schedule(schedule_id):
-#     try:
-#         # リクエストデータを取得
-#         data = request.get_json()
-#         date = data.get('date')  # 必要であれば保持、不要なら削除
-
-#         if not date:
-#             app.logger.error(f"Missing 'date' for schedule_id={schedule_id}")
-#             return jsonify({'status': 'error', 'message': '日付が不足しています。'}), 400
-
-#         # DynamoDB でスケジュールを取得
-#         schedule_table = app.dynamodb.Table(app.table_name_schedule)
-#         response = schedule_table.get_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             }
-#         )
-
-#         schedule = response.get('Item')
-#         if not schedule:
-#             app.logger.error(f"Schedule not found: schedule_id={schedule_id}, date={date}")
-#             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません。'}), 404
-
-#         # 参加状態の更新
-#         participants = schedule.get('participants', [])
-#         is_joining = False
-
-#         if current_user.id in participants:
-#             participants.remove(current_user.id)
-#             message = "参加をキャンセルしました"
-#         else:
-#             participants.append(current_user.id)
-#             message = "参加登録が完了しました！"
-#             is_joining = True
-
-#         app.logger.debug(f"Updating participants: {participants}")
-
-#         # スケジュールを更新
-#         schedule_table.update_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             },
-#             UpdateExpression="SET participants = :participants",
-#             ExpressionAttributeValues={':participants': participants}
-#         )
-
-#         # 更新後のデータを確認
-#         updated_response = schedule_table.get_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             }
-#         )
-#         updated_schedule = updated_response.get('Item')
-#         app.logger.debug(f"Updated schedule data: {updated_schedule}")
-
-#         # キャッシュをリセット
-#         cache.delete_memoized(get_schedules_with_formatting)
-
-#         # 成功レスポンスに最新のリストを含める
-#         return jsonify({
-#             'status': 'success',
-#             'message': message,
-#             'is_joining': is_joining,
-#             'participants': participants,
-#             'participants_count': len(participants)
-#         })
-
-#     except KeyError as e:
-#         app.logger.error(f"KeyError in join_schedule: {e}", exc_info=True)
-#         return jsonify({'status': 'error', 'message': '無効なデータが送信されました。'}), 400
-
-#     except Exception as e:
-#         app.logger.error(f"Unexpected error in join_schedule: {e}", exc_info=True)
-#         return jsonify({'status': 'error', 'message': 'エラーが発生しました。'}), 500    
-    
 
 @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
 @login_required
