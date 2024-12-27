@@ -7,112 +7,160 @@
         {{ form.csrf_token }}
         <div class="mb-3">
             <label for="date">日付</label>
-            {{ form.date(class="form-control", id="date") }}
+            {{ form.date(class="form-control", id="date", required=true, value=schedule.date) }}
         </div>
         <div class="mb-3">
             <label for="day_of_week">曜日</label>
-            {{ form.day_of_week(class="form-control", id="day_of_week") }}
+            {{ form.day_of_week(class="form-control", id="day_of_week", value=schedule.day_of_week) }}
+        </div>
         
         <div class="mb-3">
             <label for="venue">会場</label>
-            {{ form.venue(class="form-control") }}
+            {{ form.venue(class="form-control", required=true) }}
         </div>
+
         <div class="mb-3">
             <label for="start_time">開始時間</label>
-            {{ form.start_time(class="form-control") }}
+            {{ form.start_time(class="form-control", required=true) }}
         </div>
+
         <div class="mb-3">
             <label for="end_time">終了時間</label>
-            <select name="end_time" class="form-control" id="end_time" data-current-value="{{ schedule.end_time }}">
-                <!-- JavaScriptで動的にオプションを生成 -->
-            </select>
+            {{ form.end_time(class="form-control", required=true) }}
         </div>
+
+        <!-- ステータス選択を追加 -->
+        <div class="mb-3">
+            <label for="status">ステータス</label>
+            {{ form.status(class="form-control") }}
+        </div>
+
+        <!-- 現在のステータス表示 -->
+        <div class="mb-3">
+            現在のステータス: 
+            {% if schedule.status == 'active' %}
+                <span class="badge bg-success">有効</span>
+            {% elif schedule.status == 'deleted' %}
+                <span class="badge bg-danger">削除済</span>
+            {% elif schedule.status == 'cancelled' %}
+                <span class="badge bg-warning">中止</span>
+            {% endif %}
+        </div>
+
         <div class="btn-group">
             <button type="submit" class="btn btn-primary">更新</button>        
             <a href="{{ url_for('index') }}" class="btn btn-secondary">戻る</a>
         </div>
     </form>
-
-    <!-- 削除用フォーム -->
-    <form method="POST" action="{{ url_for('delete_schedule', schedule_id=schedule.schedule_id) }}" id="deleteForm" class="mt-3">
-        {{ form.csrf_token }}
-        <!-- schedule_id と date を送信 -->
-        <input type="hidden" name="date" value="{{ schedule.date }}">
-        <button type="submit" class="btn btn-danger" onclick="return confirm('本当に削除しますか？');">
-            削除
-        </button>
-    </form>
 </div>
+
+
+<script>
+function deleteSchedule(event) {
+    event.preventDefault();
+    
+    if (!confirm('本当に削除しますか？')) {
+        return false;
+    }
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    
+    fetch(form.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const scheduleCard = form.closest('.schedule-card');
+            if (scheduleCard) {
+                scheduleCard.remove();
+            } else {
+                location.reload();
+            }
+        } else {
+            alert(data.message || 'エラーが発生しました');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('削除中にエラーが発生しました');
+    });
+    
+    return false;
+}
+</script>
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // 日付関連の要素
-        const dateField = document.querySelector('input[name="date"]');
-        const dayOfWeekField = document.querySelector('input[name="day_of_week"]');
-        
-        // 時間関連の要素
-        const startTimeSelect = document.getElementById('start_time');
-        const endTimeSelect = document.getElementById('end_time');
-        
-        console.log('Fields found:', {
-            dateField,
-            dayOfWeekField,
-            startTimeSelect,
-            endTimeSelect
-        });
+    // 日付関連の要素
+    const dateField = document.querySelector('input[name="date"]');
+    const dayOfWeekField = document.querySelector('input[name="day_of_week"]');
     
-        // 曜日の更新関数
-        function updateDayOfWeek() {
-            try {
-                if (dateField.value) {
-                    const date = new Date(dateField.value);
-                    const days = ['日', '月', '火', '水', '木', '金', '土'];
-                    const dayOfWeek = days[date.getDay()];
-                    dayOfWeekField.value = dayOfWeek;
-                }
-            } catch (error) {
-                console.error('Error updating day of week:', error);
-            }
-        }
-
-         // 現在の終了時間の値を保持
-        const currentEndTime = endTimeSelect.getAttribute('data-current-value');
+    // 時間関連の要素
+    const startTimeSelect = document.getElementById('start_time');
+    const endTimeSelect = document.getElementById('end_time');
     
-        // 終了時間の更新関数
-        function updateEndTimeOptions() {
-            if (startTimeSelect && startTimeSelect.value) {
-                const selectedHour = parseInt(startTimeSelect.value.split(':')[0]);
-                
-                endTimeSelect.innerHTML = '<option value="">選択してください</option>';
-                for (let i = selectedHour + 1; i <= 23; i++) {
-                    const timeStr = `${i.toString().padStart(2, '0')}:00`;
-                    const option = new Option(timeStr, timeStr);
-                    if (timeStr === currentEndTime) {  // ここが重要: 現在の値と一致するかチェック
-                        option.selected = true;         // 一致する場合は選択状態にする
-                    }
-                    endTimeSelect.add(option);
-                }
-            }
-        }
+    // 現在の終了時間を取得して設定
+    const currentEndTime = '{{ schedule.end_time }}';  // サーバーから渡された値を使用
+    endTimeSelect.setAttribute('data-current-value', currentEndTime);
     
-        // 初期値の設定
-        if (dateField && dayOfWeekField) {
-            updateDayOfWeek();
-        }
-        
-        if (startTimeSelect && endTimeSelect) {
-            updateEndTimeOptions();
-        }
-    
-        // イベントリスナーの設定
-        if (dateField) {
-            dateField.addEventListener('change', updateDayOfWeek);
-        }
-        
-        if (startTimeSelect) {
-            startTimeSelect.addEventListener('change', updateEndTimeOptions);
-        }
+    console.log('Fields found:', {
+        dateField,
+        dayOfWeekField,
+        startTimeSelect,
+        endTimeSelect,
+        currentEndTime
     });
+
+    // 終了時間の更新関数を修正
+    function updateEndTimeOptions() {
+        if (startTimeSelect && startTimeSelect.value) {
+            const selectedHour = parseInt(startTimeSelect.value.split(':')[0]);
+            const currentHour = parseInt(currentEndTime.split(':')[0]);
+            
+            endTimeSelect.innerHTML = '<option value="">選択してください</option>';
+            for (let i = selectedHour + 1; i <= 23; i++) {
+                const timeStr = `${i.toString().padStart(2, '0')}:00`;
+                const option = new Option(timeStr, timeStr);
+                if (timeStr === currentEndTime) {
+                    option.selected = true;
+                }
+                endTimeSelect.add(option);
+            }
+            
+            // 現在の終了時間が選択肢にない場合は追加
+            if (currentHour > selectedHour && !endTimeSelect.value) {
+                const option = new Option(currentEndTime, currentEndTime);
+                option.selected = true;
+                endTimeSelect.add(option);
+            }
+        }
+    }
+
+    // 初期値の設定
+    if (dateField && dayOfWeekField) {
+        updateDayOfWeek();
+    }
+    
+    // 開始時間が選択されている場合のみ終了時間を更新
+    if (startTimeSelect && startTimeSelect.value) {
+        updateEndTimeOptions();
+    }
+
+    // イベントリスナーの設定
+    if (dateField) {
+        dateField.addEventListener('change', updateDayOfWeek);
+    }
+    
+    if (startTimeSelect) {
+        startTimeSelect.addEventListener('change', updateEndTimeOptions);
+    }
+});
     
     </script>
 
