@@ -68,8 +68,8 @@
                                     <div class="">
                                         <span>{{ schedule.date | format_date }}({{ schedule.day_of_week }})</span>
                                         <span>{{ schedule.start_time }} 〜 {{ schedule.end_time }}</span>
-                                        <span>{{ schedule.venue }}</span>
-                                        <span class="ms-2"> 参加者{{ schedule.participants|length }}</span>
+                                        <span>{{ schedule.venue }}</span>                                        
+                                        <span class="ms-2"> 参加者{{ schedule.participants_count }}</span>
                                     </div>
                                 </button>
                             </div>
@@ -200,6 +200,37 @@
 </div>
 
 <script>
+    async function joinSchedule(button) {
+    const scheduleId = button.getAttribute('data-schedule-id');
+    const scheduleDate = button.getAttribute('data-schedule-date');
+
+    try {
+        const response = await fetch(`/schedule/${scheduleId}/join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: scheduleDate })
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            button.classList.toggle('btn-primary', !data.is_joining);
+            button.classList.toggle('btn-danger', data.is_joining);
+            button.textContent = data.is_joining ? '参加済み' : '参加する';
+
+            // 参加者数の表示更新
+            const participantElement = document.querySelector(`#participants-count-${scheduleId}`);
+            if (participantElement) {
+                participantElement.textContent = `参加者 ${data.participants_count}`;
+            }
+        } else {
+            alert(data.message);
+        }
+    } catch (error) {
+        console.error('エラー:', error);
+        alert('通信エラーが発生しました。');
+    }
+}
+
     async function joinSchedule(button) {
         const scheduleId = button.getAttribute('data-schedule-id');
         const date = button.getAttribute('data-schedule-date');
