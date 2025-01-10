@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}gallery{% endblock %}
-{% block content %} 
+{% block description %}越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。{% endblock %}
+{% block content %}    
 
 {% if current_user.is_authenticated %}
 <div class="container mt-4">

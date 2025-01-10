@@ -1,6 +1,55 @@
 {% extends "base.html" %}
+
+{# SEO最適化 #}
 {% block title %}鶯 | 越谷市バドミントンサークル{% endblock %}
-{% block content %}      
+{% block description %}越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。{% endblock %}
+{% block keywords %}越谷市, バドミントン, サークル, 練習, 見学, 体験{% endblock %}
+
+{% block content %}   
+
+<style>   
+.accordion-button::after {
+    display: none !important;  /* アコーディオンの矢印を非表示 */
+}
+.accordion-header{
+    background-color: #ffffff;
+    padding: 100;
+    margin: 5;   
+}
+
+.accordion-button {  
+    background-color: #ffffff;;  
+    padding: 0;
+    margin: 0;
+    font-size: 1.2rem; /* フォントサイズを調整 */
+}
+
+.accordion-item {
+    background-color: #ffffff;;
+    padding: 5px;
+    margin: 5px;
+    border: 1px solid rgba(0,0,0,.125);
+    border-radius: 0.25rem !important;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 768px) {
+    .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }        
+    
+}
+
+.participant-name {
+    z-index: 1000;
+    position: relative;
+    pointer-events: auto;
+}
+
+</style>
+
 <section id="about" class="mt-3 mb-3 text-center">
     <h1>鶯badminton バドミントン</h1> 
     <h2 class="mb-3">バドミントンメンバー募集</h2>
@@ -69,7 +118,20 @@
                                         <span>{{ schedule.date | format_date }}({{ schedule.day_of_week }})</span>
                                         <span>{{ schedule.start_time }} 〜 {{ schedule.end_time }}</span>
                                         <span>{{ schedule.venue }}</span>                                        
-                                        <span class="ms-2"> 参加者{{ schedule.participants_count }}</span>
+                                        
+                                    
+                                        <!-- 参加者数 -->
+                               
+                                        参加者{{ schedule.participants_count }}/{{ schedule.max_participants }}
+                                    
+                                    <!-- 募集状態 -->
+                                    {% if schedule.participants_count >= schedule.max_participants %}
+                                        <div class="badge bg-warning text-danger">満員御礼</div>
+                                    {% else %}
+                                        <div class="badge bg-success">募集中</div>
+                                    {% endif %}
+                                   
+                                     
                                     </div>
                                 </button>
                             </div>
@@ -77,26 +139,33 @@
                             <!-- 時間と参加ボタン -->
                             <div class="d-flex align-items-center">
                                 <button
-                                    class="btn btn-sm join-button m-1 w-100 text-nowrap 
-                                    {% if not current_user.is_authenticated %}
-                                        btn-secondary disabled
-                                    {% elif current_user.id in schedule.participants %}
-                                        btn-danger
-                                    {% else %}
-                                        btn-primary
-                                    {% endif %}"
-                                    data-schedule-id="{{ schedule.schedule_id }}" 
-                                    data-schedule-date="{{ schedule.date }}" 
-                                    onclick="joinSchedule(this)"
-                                    {% if not current_user.is_authenticated %}disabled{% endif %}>
-                                    {% if not current_user.is_authenticated %}
-                                        参加する
-                                    {% elif current_user.id in schedule.participants %}
-                                        参加済み
-                                    {% else %}
-                                        参加する
-                                    {% endif %}
-                                </button>                                
+                                class="btn btn-sm join-button m-1 w-100 text-nowrap 
+                                {% if not current_user.is_authenticated %}
+                                    btn-secondary disabled
+                                {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                    btn-secondary disabled
+                                {% elif current_user.id in schedule.participants %}
+                                    btn-danger
+                                {% else %}
+                                    btn-primary
+                                {% endif %}"
+                                data-schedule-id="{{ schedule.schedule_id }}" 
+                                data-schedule-date="{{ schedule.date }}" 
+                                onclick="joinSchedule(this)"
+                                {% if not current_user.is_authenticated or 
+                                    (schedule.participants_count >= schedule.max_participants and 
+                                    current_user.id not in schedule.participants) %}disabled{% endif %}>
+                                
+                                {% if not current_user.is_authenticated %}
+                                    参加する
+                                {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                    満員御礼
+                                {% elif current_user.id in schedule.participants %}
+                                    参加済み
+                                {% else %}
+                                    参加する
+                                {% endif %}
+                            </button>                                
                             </div>
                         </div>
                     </h2>
@@ -118,7 +187,11 @@
                                             <div class="col-md-4 col-sm-6 mb-2">
                                                 <div class="card">
                                                     <div class="card-body py-2">
-                                                        <span class="participant-name">{{ participant.display_name }}</span>
+                                                         <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" 
+                                                        class="participant-name"
+                                                        onclick="event.stopPropagation();">  <!-- イベントの伝播を停止 -->
+                                                            {{ participant.display_name }}
+                                                        </a>
                                                         <span class="badge ms-2">{{ participant.badminton_experience }}</span>
                                                         
                                                     </div>
@@ -139,41 +212,7 @@
     </section>
 </div>
 
-<style>   
-.accordion-button::after {
-    display: none !important;  /* アコーディオンの矢印を非表示 */
-}
-.accordion-header{
-    background-color: #ffffff;
-    padding: 100;
-    margin: 5;   
-}
 
-.accordion-button {  
-    background-color: #ffffff;;  
-    padding: 0;
-    margin: 0;
-    font-size: 1.2rem; /* フォントサイズを調整 */
-}
-
-.accordion-item {
-    background-color: #ffffff;;
-    padding: 5px;
-    margin: 5px;
-    border: 1px solid rgba(0,0,0,.125);
-    border-radius: 0.25rem !important;
-}
-
-/* レスポンシブ調整 */
-@media (max-width: 768px) {
-    .d-flex {
-        flex-direction: column;
-        align-items: flex-start !important;
-        gap: 0.5rem;
-    }        
-    
-}
-</style>
 
 
 
