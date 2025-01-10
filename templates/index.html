@@ -101,40 +101,40 @@
 
             <!-- アコーディオン -->
             <div class="accordion" id="scheduleAccordion">
-                {% for schedule in schedules %}
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
-                        <div class="d-flex align-items-center justify-content-between">
-                            <!-- 日付と会場情報 -->
-                            <div class="d-flex align-items-center m-0 w-100">
-                                <button class="accordion-button collapsed p-2 w-100" 
-                                        type="button" 
-                                        style="width: auto; box-shadow: none;"
-                                        data-bs-toggle="collapse" 
-                                        data-bs-target="#collapse{{ schedule.schedule_id }}"
-                                        aria-expanded="false"
-                                        aria-controls="collapse{{ schedule.schedule_id }}">
-                                    <div class="">
-                                        <span>{{ schedule.date | format_date }}({{ schedule.day_of_week }})</span>
-                                        <span>{{ schedule.start_time }} 〜 {{ schedule.end_time }}</span>
-                                        <span>{{ schedule.venue }}</span>                                        
-                                        
-                                    
-                                        <!-- 参加者数 -->
-                               
-                                        参加者{{ schedule.participants_count }}/{{ schedule.max_participants }}
-                                    
-                                    <!-- 募集状態 -->
-                                    {% if schedule.participants_count >= schedule.max_participants %}
-                                        <div class="badge bg-warning text-danger">満員御礼</div>
-                                    {% else %}
-                                        <div class="badge bg-success">募集中</div>
-                                    {% endif %}
-                                   
-                                     
-                                    </div>
-                                </button>
-                            </div>
+    {% for schedule in schedules %}
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
+            <div class="d-flex align-items-center justify-content-between">
+                <!-- 日付と会場情報 -->
+                <div class="d-flex align-items-center m-0 w-100">
+                    <button class="accordion-button collapsed p-2 w-100" 
+                            type="button" 
+                            style="width: auto; box-shadow: none;"
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#collapse{{ schedule.schedule_id }}"
+                            aria-expanded="false"
+                            aria-controls="collapse{{ schedule.schedule_id }}">
+                        <div class="d-flex align-items-center">
+                            <span>{{ schedule.date | format_date }}({{ schedule.day_of_week }})</span>
+                            <span class="ms-2">{{ schedule.start_time }} 〜 {{ schedule.end_time }}</span>
+                            <span class="ms-2">{{ schedule.venue }}</span>                                        
+                            
+                            <!-- 参加者数 -->
+                            <span class="ms-2">
+                                参加者{{ schedule.participants_count }}/{{ schedule.max_participants }}
+                            </span>
+                        
+                            <!-- 募集状態 -->
+                            <span class="ms-2">
+                                {% if schedule.participants_count >= schedule.max_participants %}
+                                    <div class="badge bg-warning text-danger">満員御礼</div>
+                                {% else %}
+                                    <div class="badge bg-success">募集中</div>
+                                {% endif %}
+                            </span>
+                        </div>
+                    </button>
+                </div>
                             
                             <!-- 時間と参加ボタン -->
                             <div class="d-flex align-items-center">
