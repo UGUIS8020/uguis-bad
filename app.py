@@ -715,7 +715,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:10]  # 最新10件を取得
+        )[:12]  # 最新10件を取得
         
         # 以下は既存の処理をそのまま維持
         unique_user_ids = set()
@@ -747,7 +747,7 @@ def get_schedules_with_formatting():
                         })
 
                  # max_participantsとparticipants_countの処理を追加
-                schedule['max_participants'] = int(schedule.get('max_participants', 10))  # デフォルト値15
+                schedule['max_participants'] = int(schedule.get('max_participants', 10))  
                 schedule['participants_count'] = len(schedule.get('participants', []))
                 
                 schedule['participants_info'] = participants_info
@@ -769,17 +769,14 @@ def get_schedules_with_formatting():
 @app.route("/index", methods=['GET'])
 def index():
     try:
-        schedules = get_schedules_with_formatting()
-         # より詳細なデバッグ情報をログに記録
-        logger.debug(f"Total schedules retrieved: {len(schedules)}")
+        schedules = get_schedules_with_formatting()        
         for schedule in schedules:
             print(f"Schedule data: {schedule}")
         return render_template("index.html", 
                              schedules=schedules,                             
                              canonical=url_for('index', _external=True))
         
-    except Exception as e:
-        logger.error(f"Error in index route: {str(e)}")
+    except Exception as e:        
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return render_template("index.html", schedules=[])
 

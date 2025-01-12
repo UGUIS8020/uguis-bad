@@ -100,7 +100,7 @@
             </div>
 
             <!-- アコーディオン -->
-            <div class="accordion" id="scheduleAccordion">
+<div class="accordion" id="scheduleAccordion">
     {% for schedule in schedules %}
     <div class="accordion-item">
         <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
@@ -114,32 +114,28 @@
                             data-bs-target="#collapse{{ schedule.schedule_id }}"
                             aria-expanded="false"
                             aria-controls="collapse{{ schedule.schedule_id }}">
-                        <div class="d-flex align-items-center">
-                            <span>{{ schedule.date | format_date }}({{ schedule.day_of_week }})</span>
-                            <span class="ms-2">{{ schedule.start_time }} 〜 {{ schedule.end_time }}</span>
-                            <span class="ms-2">{{ schedule.venue }}</span>                                        
                             
-                            <!-- 参加者数 -->
-                            <span class="ms-2">
+                        <div class="d-flex align-items-center flex-nowrap w-100">
+                            <div class="d-flex align-items-center flex-grow-1">
+                                <span class="me-2">{{ schedule.date | format_date }}({{ schedule.day_of_week }})
+                                {{ schedule.start_time }} ~ {{ schedule.end_time }} {{ schedule.venue }}</span>
+                            </div>
+                            
+                            <div>
                                 参加者{{ schedule.participants_count }}/{{ schedule.max_participants }}
-                            </span>
-                        
-                            <!-- 募集状態 -->
-                            <span class="ms-2">
+                                <!-- 募集状態 -->
                                 {% if schedule.participants_count >= schedule.max_participants %}
-                                    <div class="badge bg-warning text-danger">満員御礼</div>
+                                    <div class="badge bg-warning text-dark">満員御礼</div>
                                 {% else %}
                                     <div class="badge bg-success">募集中</div>
                                 {% endif %}
-                            </span>
-                        </div>
-                    </button>
-                </div>
+                            </div>
+                       
                             
                             <!-- 時間と参加ボタン -->
-                            <div class="d-flex align-items-center">
+                            
                                 <button
-                                class="btn btn-sm join-button m-1 w-100 text-nowrap 
+                                class="btn btn-sm join-button m-1 text-nowrap                                          
                                 {% if not current_user.is_authenticated %}
                                     btn-secondary disabled
                                 {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
@@ -157,17 +153,15 @@
                                     current_user.id not in schedule.participants) %}disabled{% endif %}>
                                 
                                 {% if not current_user.is_authenticated %}
-                                    参加する
+                                    参加
                                 {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
                                     満員御礼
                                 {% elif current_user.id in schedule.participants %}
-                                    参加済み
+                                    参加済
                                 {% else %}
-                                    参加する
+                                    参加
                                 {% endif %}
-                            </button>                                
-                            </div>
-                        </div>
+                            </button>                         
                     </h2>
                     
                     <div id="collapse{{ schedule.schedule_id }}" 
@@ -216,6 +210,7 @@
 
 
 
+
       <section id="contact" class="mb-5 text-center">
 
         <h2 class="mb-3">連絡先</h2>
@@ -254,7 +249,7 @@
         if (data.status === 'success') {
             button.classList.toggle('btn-primary', !data.is_joining);
             button.classList.toggle('btn-danger', data.is_joining);
-            button.textContent = data.is_joining ? '参加済み' : '参加する';
+            button.textContent = data.is_joining ? '参加済' : '参加';
 
             // 参加者数の表示更新
             const participantElement = document.querySelector(`#participants-count-${scheduleId}`);
@@ -306,7 +301,7 @@
             // ボタンの状態を更新
             button.classList.toggle('btn-primary', !data.is_joining);
             button.classList.toggle('btn-danger', data.is_joining);
-            button.textContent = data.is_joining ? '参加済み' : '参加する';
+            button.textContent = data.is_joining ? '参加済' : '参加';
     
             if (data.message) {
                 alert(data.message);

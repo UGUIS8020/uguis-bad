@@ -53,18 +53,43 @@ class DynamoDB:
                     if user_id:
                         print(f"Processing post for user: {user_id}")
                         
-                        enriched_post = {
-                            'post_id': post.get('post_id'),
-                            'content': post.get('content'),
-                            'image_url': post.get('image_url'),
-                            'created_at': post.get('created_at'),
-                            'updated_at': post.get('updated_at', post.get('created_at')),
-                            'user_id': user_id,
-                            'display_name': 'UGUIS.渋谷',  # 一時的に固定値を使用
-                            'user_name': '渋谷\u3000正彦'  # 一時的に固定値を使用
-                        }
-                        enriched_posts.append(enriched_post)
-                        print(f"Successfully processed post: {post.get('post_id')}")
+                        try:
+                            # user#user_id 形式で検索
+                            user_response = self.users_table.get_item(
+                                Key={
+                                    'user#user_id': user_id  # このキーで直接検索
+                                }
+                            )
+                            user = user_response.get('Item', {})
+                            
+                            print(f"Found user data: {user}")  # デバッグ用
+                            
+                            enriched_post = {
+                                'post_id': post.get('post_id'),
+                                'content': post.get('content'),
+                                'image_url': post.get('image_url'),
+                                'created_at': post.get('created_at'),
+                                'updated_at': post.get('updated_at', post.get('created_at')),
+                                'user_id': user_id,
+                                'display_name': user.get('display_name', 'Unknown User'),
+                                'user_name': user.get('user_name', 'Unknown')
+                            }
+                            enriched_posts.append(enriched_post)
+                            print(f"Successfully processed post: {post.get('post_id')}")
+                        except Exception as e:
+                            print(f"Error fetching user: {str(e)}")
+                            # エラー時にもポストは表示する
+                            enriched_post = {
+                                'post_id': post.get('post_id'),
+                                'content': post.get('content'),
+                                'image_url': post.get('image_url'),
+                                'created_at': post.get('created_at'),
+                                'updated_at': post.get('updated_at', post.get('created_at')),
+                                'user_id': user_id,
+                                'display_name': '不明なユーザー',
+                                'user_name': 'Unknown'
+                            }
+                            enriched_posts.append(enriched_post)
                 except Exception as e:
                     print(f"Error processing post: {str(e)}")
                     continue
