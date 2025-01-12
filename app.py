@@ -3,25 +3,27 @@ from flask_wtf import FlaskForm
 from flask import Flask, render_template, request, redirect, url_for, flash, abort, session, jsonify, current_app
 from flask_login import UserMixin, LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from wtforms import ValidationError, StringField,  TextAreaField, PasswordField, SubmitField, SelectField, DateField, BooleanField
-from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional
-from flask_wtf.file import FileField, FileAllowed, FileSize
+from wtforms import ValidationError, StringField, PasswordField, SubmitField, SelectField, DateField, BooleanField, IntegerField
+from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional, NumberRange
 import pytz
 import os
 import boto3
 from boto3.dynamodb.conditions import Key
 from werkzeug.utils import secure_filename
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import io
 from PIL import Image, ExifTags
-from dateutil import parser, relativedelta
+from dateutil import parser
 from botocore.exceptions import ClientError
 import logging
 import time
 import random
-from functools import wraps
 from urllib.parse import urlparse, urljoin
+from uguu.timeline import uguu
+from uguu.post import post
+from uguu.users import users
+from utils.count_experience import can_join_schedule
 
 from dotenv import load_dotenv
 
@@ -44,12 +46,21 @@ def create_app():
         
         # Secret Keyの設定
         app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", os.urandom(24))
-        print(f"Secret key: {app.config['SECRET_KEY']}")
+        
+          # セッションの永続化設定を追加
+        app.config.update(
+            PERMANENT_SESSION_LIFETIME = timedelta(days=30),  # セッション有効期限
+            SESSION_PERMANENT = True,  # セッションを永続化
+            SESSION_TYPE = 'filesystem',  # セッションの保存方式
+            SESSION_COOKIE_SECURE = True,  # HTTPS接続のみ
+            SESSION_COOKIE_HTTPONLY = True,  # JavaScriptからのアクセスを防止
+            SESSION_COOKIE_SAMESITE = 'Lax'  # クロスサイトリクエスト制限
+        )
         
         # キャッシュの設定と初期化
         app.config['CACHE_TYPE'] = 'SimpleCache'
-        app.config['CACHE_DEFAULT_TIMEOUT'] = 000
-        app.config['CACHE_THRESHOLD'] = 0000
+        app.config['CACHE_DEFAULT_TIMEOUT'] = 600
+        app.config['CACHE_THRESHOLD'] = 900
         app.config['CACHE_KEY_PREFIX'] = 'uguis_'
 
         # 既存のcacheオブジェクトを初期化
@@ -113,14 +124,6 @@ app = create_app()
 def tokyo_time():
     return datetime.now(pytz.timezone('Asia/Tokyo'))
 
-@app.context_processor
-def inject_canonical_url():
-    """
-    テンプレートにカノニカルURLを提供する
-    """
-    canonical_url = request.base_url  # クエリパラメータを除外したURLを取得
-    return dict(canonical_url=canonical_url)
-
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -142,7 +145,7 @@ def load_user(user_id):
         if 'Item' in response:
             user_data = response['Item']
             user = User.from_dynamodb_item(user_data)
-            app.logger.info(f"User loaded successfully: {user.__dict__}")
+            app.logger.info(f"DynamoDB user data: {user_data}")
             return user
         else:
             app.logger.info(f"No user found for ID: {user_id}")
@@ -174,9 +177,9 @@ class RegistrationForm(FlaskForm):
         'バドミントン歴', 
         choices=[
             ('', 'バドミントン歴を選択してください'),
-            ('未経験者', '未経験者'),
+            ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -239,9 +242,9 @@ class UpdateUserForm(FlaskForm):
         'バドミントン歴', 
         choices=[
             ('', 'バドミントン歴を選択してください'),
-            ('未経験者', '未経験者'),
+            ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -340,9 +343,9 @@ class TempRegistrationForm(FlaskForm):
         'バドミントン歴', 
         choices=[
             ('', 'バドミントン歴を選択してください'),
-            ('未経験者', '未経験者'),
+            ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1年以上～3年未満', '1年以上～3年未満'),
+            ('1～3年未満', '1～3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -398,45 +401,10 @@ class TempRegistrationForm(FlaskForm):
             raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
 
 
-class Board_Form(FlaskForm):
-    title = StringField('タイトル', 
-        validators=[
-            DataRequired(message='タイトルを入力してください'),
-            Length(max=100, message='タイトルは100文字以内で入力してください')
-        ])
-    
-    content = TextAreaField('内容', 
-        validators=[
-            DataRequired(message='内容を入力してください'),
-            Length(max=2000, message='内容は2000文字以内で入力してください')
-        ])
-    
-    admin_memo = TextAreaField('管理者用メモ', validators=[Optional()])  # 追加
-    
-    image = FileField('ファイル', 
-        validators=[
-            FileAllowed(
-                ['jpg', 'jpeg', 'png', 'gif', 'pdf'],
-                'jpg, jpeg, png, gif, pdfファイルのみアップロード可能です'
-            ),
-            FileSize(max_size=5 * 1024 * 1024, message='ファイルサイズは5MB以内にしてください')  # 5MB制限
-        ])
-    
-    remove_image = BooleanField('画像を削除する')
-    
-    submit = SubmitField('投稿する')
-
-    def validate_image(self, field):
-        if field.data:
-            filename = field.data.filename.lower()
-            if not any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.pdf']):
-                raise ValidationError('許可されていないファイル形式です') 
-
-
 class LoginForm(FlaskForm):
     email = StringField('メールアドレス', validators=[DataRequired(message='メールアドレスを入力してください'), Email(message='正しいメールアドレスの形式で入力してください')])
     password = PasswordField('パスワード', validators=[DataRequired(message='パスワードを入力してください')])
-    remember = BooleanField('ログイン状態を保持する')
+    remember = BooleanField('ログイン状態を保持する')    
     submit = SubmitField('ログイン')
 
     def __init__(self, *args, **kwargs):
@@ -487,33 +455,6 @@ class LoginForm(FlaskForm):
             raise ValidationError('パスワードが正しくありません')
 
 
-# class ScheduleForm(FlaskForm):
-#     date = DateField('日付', validators=[DataRequired()])
-#     day_of_week = StringField('曜日', render_kw={'readonly': True})  # 自動入力用
-    
-#     venue = SelectField('会場', validators=[DataRequired()], choices=[
-#         ('', '選択してください'),
-#         ('北越谷 A面', '北越谷 A面'),
-#         ('北越谷 B面', '北越谷 B面'),
-#         ('北越谷 AB面', '北越谷 AB面'),
-#         ('総合体育館 第一 2面', '総合体育館 第一 2面'),
-#         ('総合体育館 第一 6面', '総合体育館 第一 6面'),
-#         ('総合体育館 第二 3面', '総合体育館 第二 3面'),
-#         ('ウィングハット', 'ウィングハット')
-#     ])
-    
-#     start_time = SelectField('開始時間', validators=[DataRequired()], choices=[
-#         ('', '選択してください')] + 
-#         [(f"{h:02d}:00", f"{h:02d}:00") for h in range(9, 23)]
-#     )
-    
-#     end_time = SelectField('終了時間', validators=[DataRequired()], choices=[
-#         ('', '選択してください')] + 
-#         [(f"{h:02d}:00", f"{h:02d}:00") for h in range(10, 24)]
-#     )
-    
-#     submit = SubmitField('登録') 
-
 
 class ScheduleForm(FlaskForm):
     date = DateField('日付', validators=[DataRequired()])
@@ -529,6 +470,19 @@ class ScheduleForm(FlaskForm):
         ('総合体育館 第二 3面', '総合体育館 第二 3面'),
         ('ウィングハット', 'ウィングハット')
     ])
+
+    max_participants = IntegerField('参加人数制限', 
+        validators=[
+            DataRequired(),
+            NumberRange(min=1, max=50, message='1人から50人までの間で設定してください')
+        ],
+        default=10,
+        render_kw={
+            "min": "1",
+            "max": "50",
+            "type": "number"
+        }
+    )
     
     start_time = SelectField('開始時間', validators=[DataRequired()], choices=[
         ('', '選択してください')] + 
@@ -547,6 +501,25 @@ class ScheduleForm(FlaskForm):
     ], default='active')
     
     submit = SubmitField('登録')
+
+    def validate_max_participants(self, field):
+        """
+        会場に応じた参加人数の上限をチェック
+        """
+        venue = self.venue.data
+        if venue:
+            max_allowed = {
+                '北越谷 A面': 20,
+                '北越谷 B面': 20,
+                '北越谷 AB面': 40,
+                '総合体育館 第一 2面': 16,
+                '総合体育館 第一 6面': 48,
+                '総合体育館 第二 3面': 24,
+                'ウィングハット': 32
+            }.get(venue)
+            
+            if max_allowed and field.data > max_allowed:
+                raise ValidationError(f'この会場の最大参加可能人数は{max_allowed}人です')
 
 
 class User(UserMixin):
@@ -618,62 +591,6 @@ class User(UserMixin):
             item['date_of_birth'] = {"S": str(self.date_of_birth)}
             return item
         
-
-def log_cache_access(func):
-    """キャッシュアクセスをログに記録するデコレータ"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        func_name = func.__name__
-        
-        # シンプルなログメッセージ
-        logger.info(f"Cache check: {func_name}")
-        
-        result = func(*args, **kwargs)
-        return result
-    return wrapper        
-
-
-def get_user_from_dynamodb(user_id):
-    try:
-        # DynamoDBからユーザーデータを取得
-        response = app.dynamodb.get_item(
-            TableName=app.table_name,
-            Key={"user#user_id": {"S": user_id}}
-            
-        )
-        
-        # データが存在しない場合
-        if 'Item' not in response:
-            app.logger.info(f"User not found in DynamoDB for user_id: {user_id}")
-            return None
-
-        item = response['Item']
-
-        # DynamoDBのデータをUserクラスのインスタンスに変換
-        user = User.from_dynamodb_item(item)
-        app.logger.debug(f"User successfully loaded for user_id: {user_id}")
-        return user
-
-    except Exception as e:
-        app.logger.error(f"Error fetching user from DynamoDB for user_id: {user_id}: {str(e)}", exc_info=True)
-        return None
-    
-
-
-def get_board_table():
-    """
-    DynamoDB テーブルを取得する関数。
-    テーブル名とリージョンは環境変数を使用して設定。
-    """
-    # 環境変数からリージョンとテーブル名を取得
-    region = os.getenv('AWS_REGION', 'ap-northeast-1')  # リージョンが未設定の場合、デフォルト値を使用
-    table_name = os.getenv('TABLE_NAME_BOARD')  # テーブル名が未設定の場合、デフォルト値を使用
-
-    # DynamoDBリソースを初期化
-    dynamodb = boto3.resource('dynamodb', region_name=region)
-
-    # テーブルを返す
-    return dynamodb.Table(table_name)
 
 @cache.memoize(timeout=900)
 def get_participants_info(schedule): 
@@ -798,7 +715,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:10]  # 最新10件を取得
+        )[:12]  # 最新10件を取得
         
         # 以下は既存の処理をそのまま維持
         unique_user_ids = set()
@@ -828,6 +745,10 @@ def get_schedules_with_formatting():
                             'display_name': user.get('display_name', '未登録'),
                             'badminton_experience': user.get('badminton_experience', '')
                         })
+
+                 # max_participantsとparticipants_countの処理を追加
+                schedule['max_participants'] = int(schedule.get('max_participants', 10))  
+                schedule['participants_count'] = len(schedule.get('participants', []))
                 
                 schedule['participants_info'] = participants_info
                 formatted_schedules.append(schedule)
@@ -844,80 +765,18 @@ def get_schedules_with_formatting():
         return []
 
 
-# @app.route("/", methods=['GET', 'POST'])
-# @app.route("/index", methods=['GET', 'POST'])
-# def index():
-#     form = ScheduleForm()
-    
-#     if form.validate_on_submit():
-#         try:
-#             schedule_table = get_schedule_table()
-#             if not schedule_table:
-#                 raise ValueError("Schedule table is not initialized")
-
-#             schedule_data = {
-#                 'schedule_id': str(uuid.uuid4()),
-#                 'date': form.date.data.isoformat(),
-#                 'day_of_week': form.day_of_week.data,
-#                 'venue': form.venue.data,
-#                 'start_time': form.start_time.data,
-#                 'end_time': form.end_time.data,
-#                 'created_at': datetime.now().isoformat(),
-#                 'status': 'active'
-#             }
-
-#             schedule_table.put_item(Item=schedule_data)
-            
-#             # キャッシュ削除
-#             cache.delete_memoized(get_schedules_with_formatting)
-#             logger.info(f"Cache cleared after new schedule creation: {schedule_data['schedule_id']}")
-            
-#             flash('スケジュールが登録されました', 'success')
-#             return redirect(url_for('index'))
-
-#         except Exception as e:
-#             flash('スケジュールの登録中にエラーが発生しました', 'error')
-#             logger.error(f"Error registering schedule: {e}")
-#             return render_template(
-#                 "index.html",
-#                 form=form,
-#                 schedules=[],
-#                 title="鶯 | 越谷市バドミントンサークル",
-#                 description="越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。",
-#                 canonical=url_for('index', _external=True)
-#             )
-
-#     # キャッシュされたフォーマット済みスケジュールを取得
-#     schedules = get_schedules_with_formatting()
-
-#     return render_template(
-#         "index.html",
-#         form=form,
-#         schedules=schedules,
-#         title="鶯 | 越谷市バドミントンサークル",
-#         description="越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。",
-#         canonical=url_for('index', _external=True)
-#     )
-
-
 @app.route("/", methods=['GET'])
 @app.route("/index", methods=['GET'])
 def index():
     try:
-        # キャッシュされたフォーマット済みスケジュールを取得
-        schedules = get_schedules_with_formatting()
+        schedules = get_schedules_with_formatting()        
+        for schedule in schedules:
+            print(f"Schedule data: {schedule}")
+        return render_template("index.html", 
+                             schedules=schedules,                             
+                             canonical=url_for('index', _external=True))
         
-        template_params = {
-            'title': "鶯 | 越谷市バドミントンサークル",
-            'description': "越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。",
-            'canonical': url_for('index', _external=True),
-            'schedules': schedules
-        }
-        
-        return render_template("index.html", **template_params)
-        
-    except Exception as e:
-        logger.error(f"Error in index route: {str(e)}")
+    except Exception as e:        
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return render_template("index.html", schedules=[])
 
@@ -959,87 +818,6 @@ def temp_register():
 
     return render_template('temp_register.html', form=form) 
 
-
-# @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
-# @login_required
-# def join_schedule(schedule_id):
-#     try:
-#         # リクエストデータを取得
-#         data = request.get_json()
-#         date = data.get('date')  # 必要であれば保持、不要なら削除
-
-#         if not date:
-#             app.logger.error(f"Missing 'date' for schedule_id={schedule_id}")
-#             return jsonify({'status': 'error', 'message': '日付が不足しています。'}), 400
-
-#         # DynamoDB でスケジュールを取得
-#         schedule_table = app.dynamodb.Table(app.table_name_schedule)
-#         response = schedule_table.get_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             }
-#         )
-
-#         schedule = response.get('Item')
-#         if not schedule:
-#             app.logger.error(f"Schedule not found: schedule_id={schedule_id}, date={date}")
-#             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません。'}), 404
-
-#         # 参加状態の更新
-#         participants = schedule.get('participants', [])
-#         is_joining = False
-
-#         if current_user.id in participants:
-#             participants.remove(current_user.id)
-#             message = "参加をキャンセルしました"
-#         else:
-#             participants.append(current_user.id)
-#             message = "参加登録が完了しました！"
-#             is_joining = True
-
-#         app.logger.debug(f"Updating participants: {participants}")
-
-#         # スケジュールを更新
-#         schedule_table.update_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             },
-#             UpdateExpression="SET participants = :participants",
-#             ExpressionAttributeValues={':participants': participants}
-#         )
-
-#         # 更新後のデータを確認
-#         updated_response = schedule_table.get_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             }
-#         )
-#         updated_schedule = updated_response.get('Item')
-#         app.logger.debug(f"Updated schedule data: {updated_schedule}")
-
-#         # キャッシュをリセット
-#         cache.delete_memoized(get_schedules_with_formatting)
-
-#         # 成功レスポンスに最新のリストを含める
-#         return jsonify({
-#             'status': 'success',
-#             'message': message,
-#             'is_joining': is_joining,
-#             'participants': participants,
-#             'participants_count': len(participants)
-#         })
-
-#     except KeyError as e:
-#         app.logger.error(f"KeyError in join_schedule: {e}", exc_info=True)
-#         return jsonify({'status': 'error', 'message': '無効なデータが送信されました。'}), 400
-
-#     except Exception as e:
-#         app.logger.error(f"Unexpected error in join_schedule: {e}", exc_info=True)
-#         return jsonify({'status': 'error', 'message': 'エラーが発生しました。'}), 500    
-    
 
 @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
 @login_required
@@ -1119,6 +897,7 @@ def signup():
             user_id = str(uuid.uuid4())          
 
             table = app.dynamodb.Table(app.table_name) 
+            posts_table = app.dynamodb.Table('posts')  # 投稿用テーブル
 
             # メールアドレスの重複チェック用のクエリ
             email_check = table.query(
@@ -1154,11 +933,28 @@ def signup():
                     "emergency_phone": form.emergency_phone.data,
                     "badminton_experience": form.badminton_experience.data,
                     "organization": form.organization.data,
+                    # プロフィール用の追加フィールド
+                    "bio": "",  # 自己紹介
+                    "profile_image_url": "",  # プロフィール画像URL
+                    "followers_count": 0,  # フォロワー数
+                    "following_count": 0,  # フォロー数
+                    "posts_count": 0  # 投稿数
                 },
                 ConditionExpression='attribute_not_exists(#user_id)',
                 ExpressionAttributeNames={ "#user_id": "user#user_id"
                 }
             )
+
+            posts_table.put_item(
+                Item={
+                    'PK': f"USER#{user_id}",
+                    'SK': 'TIMELINE#DATA',
+                    'user_id': user_id,
+                    'created_at': current_time,
+                    'updated_at': current_time,
+                    'last_post_time': None
+                }
+            )           
             
 
             # ログ出力を詳細に
@@ -1261,11 +1057,9 @@ def login():
                 return render_template('login.html', form=form)
 
             if user.check_password(form.password.data):
-                login_user(user, remember=form.remember.data)  
-                app.logger.debug(f"Session after login: {session}")  # セッション情報を確認
-                app.logger.info(f"User logged in: {user.get_id()}")
-                app.logger.debug(f"Session data: {session}")                                           
-                app.logger.info(f"User logged in successfully - ID: {user.id}, is_authenticated: {current_user.is_authenticated}")
+                session.permanent = True  # セッションを永続化
+                login_user(user, remember=True)  # 常にremember=Trueに設定
+                
                 flash('ログインに成功しました。', 'success')
                 
                 next_page = request.args.get('next')
@@ -1320,6 +1114,7 @@ def admin_schedules():
                 'venue': form.venue.data,
                 'start_time': form.start_time.data,
                 'end_time': form.end_time.data,
+                'max_participants': form.max_participants.data,
                 'created_at': datetime.now().isoformat(),
                 'participants_count': 0,
                 'status': 'active'
@@ -1367,21 +1162,20 @@ def edit_schedule(schedule_id):
     table = get_schedule_table()
 
     try:
-        scan_response = table.scan(
-            FilterExpression='schedule_id = :sid',
+        # スケジュールの取得（スキャンではなくGetItemを使用）
+        schedule = None
+        schedules = table.query(
+            KeyConditionExpression='schedule_id = :sid',
             ExpressionAttributeValues={
                 ':sid': schedule_id
             }
-        )
+        ).get('Items', [])
         
-        logging.debug(f"Scan response: {scan_response}")
-        
-        items = scan_response.get('Items', [])
-        if not items:
+        if schedules:
+            schedule = schedules[0]
+        else:
             flash('スケジュールが見つかりません', 'error')
             return redirect(url_for('index'))
-            
-        schedule = items[0]
         
         if request.method == 'GET':
             form.date.data = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
@@ -1389,38 +1183,51 @@ def edit_schedule(schedule_id):
             form.venue.data = schedule['venue']
             form.start_time.data = schedule['start_time']
             form.end_time.data = schedule['end_time']
-            # ステータスの初期値を設定
             form.status.data = schedule.get('status', 'active')
-            logging.debug(f"Loaded form data: {form.data}")
-        
+            form.max_participants.data = schedule.get('max_participants', 10)
+            
         elif request.method == 'POST':
-            logging.debug(f"Received POST data: {request.form}")
             if form.validate_on_submit():
                 try:
-                    new_item = schedule.copy()
-                    new_item.update({
-                        'schedule_id': schedule_id,
-                        'date': form.date.data.isoformat(),
-                        'day_of_week': form.day_of_week.data,
-                        'venue': form.venue.data,
-                        'start_time': form.start_time.data,
-                        'end_time': form.end_time.data,
-                        'updated_at': datetime.now().isoformat(),
-                        'status': form.status.data
-                    })
+                    # 参加者数のチェック
+                    current_participants = schedule.get('participants', [])
+                    if len(current_participants) > form.max_participants.data:
+                        flash('参加人数制限は現在の参加者数より少なく設定できません。', 'error')
+                        return render_template(
+                            'edit_schedule.html',
+                            form=form,
+                            schedule=schedule,
+                            schedule_id=schedule_id
+                        )
+
+                    # UpdateItemを使用して特定のフィールドを更新
+                    table.update_item(
+                        Key={
+                            'schedule_id': schedule_id,
+                            'date': schedule['date']  # DynamoDBのプライマリーキー
+                        },
+                        UpdateExpression="SET day_of_week = :dow, venue = :v, start_time = :st, "
+                                       "end_time = :et, max_participants = :mp, "
+                                       "updated_at = :ua, #status = :s",
+                        ExpressionAttributeValues={
+                            ':dow': form.day_of_week.data,
+                            ':v': form.venue.data,
+                            ':st': form.start_time.data,
+                            ':et': form.end_time.data,
+                            ':mp': form.max_participants.data,
+                            ':ua': datetime.now().isoformat(),
+                            ':s': form.status.data
+                        },
+                        ExpressionAttributeNames={
+                            '#status': 'status'  # statusは予約語なので別名を使用
+                        }
+                    )
                     
-                    if 'participants' in schedule:
-                        new_item['participants'] = schedule['participants']
-                    
-                    logging.debug(f"Updating item with structure: {new_item}")
-                    
-                    table.put_item(Item=new_item)
                     cache.delete_memoized(get_schedules_with_formatting)
-                    
                     flash('スケジュールを更新しました', 'success')
                     return redirect(url_for('index'))
                     
-                except Exception as e:
+                except ClientError as e:
                     app.logger.error(f"スケジュール更新エラー: {str(e)}")
                     flash('スケジュールの更新中にエラーが発生しました', 'error')
             else:
@@ -1498,16 +1305,24 @@ def user_maintenance():
         response = app.table.scan()
         
         # デバッグ用に取得したユーザーデータを表示
-        users = response.get('Items', [])
-        app.logger.info(f"Users data: {users}")
-        app.logger.info(f"Retrieved {len(users)} users for maintenance page")
+        users = response.get('Items', [])        
         for user in users:
             if 'user#user_id' in user:
                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
 
         
 
-        return render_template("user_maintenance.html", users=users, page=1, has_next=False)
+         # created_at の降順でソート（新しい順）
+        sorted_users = sorted(users, 
+                            key=lambda x: x.get('created_at'),
+                            reverse=True)
+
+        app.logger.info(f"Sorted users by created_at: {sorted_users}")
+
+        return render_template("user_maintenance.html", 
+                             users=sorted_users, 
+                             page=1, 
+                             has_next=False)
 
     except ClientError as e:
         app.logger.error(f"DynamoDB error: {str(e)}")
@@ -1765,376 +1580,37 @@ def delete_image(filename):
     except Exception as e:
         print(f"Error deleting {filename}: {e}")
         return "Error deleting the image", 500
-
-
-@app.route('/board', methods=['GET', 'POST'])
-def board():
-    form = Board_Form()
-    board_table = get_board_table()      
-    
-    try:
-        response = board_table.scan()
-        posts = response.get('Items', [])
-        
-        # 更新日時でソート（降順）
-        posts.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
-
-        formatted_posts = []
-        for post in posts:
-            print(f"Raw post data: {post}")
-
-            try:
-                # image_urlのキーの存在確認と、空文字列やNoneの場合の処理
-                image_url = post.get('image_url', '') or ''
-
-                formatted_post = {
-                    'post_user_id': post.get('post_user_id', ''),
-                    'user#user_id': post.get('user#user_id', ''),
-                    'post#post_id': post.get('post#post_id', ''),
-                    'title': post.get('title', ''),
-                    'content': post.get('content', ''),                   
-                    'created_at': post.get('created_at'),
-                    'updated_at': post.get('updated_at'),
-                    'image_url': image_url,
-                    'author_name': post.get('author_name', '名前未設定'),
-                    'admin_memo': post.get('admin_memo', '')
-                }
-                print(f"Formatted post: {formatted_post}")
-                formatted_posts.append(formatted_post)
-
-            except Exception as e:
-                logger.error(f"Error formatting post {post.get('post#post_id')}: {str(e)}")
-                try:
-                    post['created_at_display'] = post.get('created_at', '')
-                    post['updated_at_display'] = post.get('updated_at', '')
-                except:
-                    pass
-                formatted_posts.append(post)
-
-        # ソート用の関数（ループの外で定義）
-        def get_sort_datetime(post):
-            try:
-                sort_date = post.get('updated_at') or post.get('created_at')
-                return datetime.fromisoformat(sort_date)
-            except:
-                return datetime.min
-        
-
-    except Exception as e:
-        formatted_posts = []
-        logger.error(f"Error retrieving posts: {str(e)}")
-        flash(f"データの取得に失敗しました: {str(e)}", "danger")
     
 
-    if form.validate_on_submit():
-        print("Form validated successfully")
-        try:
-            image_url = ''  # デフォルト値を空文字列に設定
-            if form.image.data:
-                print(f"Image data detected: {form.image.data}")
-                image_file = form.image.data
-
-                if not image_file.filename:
-                    print("No filename provided")
-                    flash("ファイル名が無効です", "danger")
-                    return redirect(url_for('board'))
-
-                try:
-                    # 画像を開いて処理
-                    img = Image.open(image_file)
-
-                    # EXIF情報に基づいて画像を回転
-                    try:
-                        exif = img._getexif()
-                        if exif is not None:
-                            for orientation in ExifTags.TAGS.keys():
-                                if ExifTags.TAGS[orientation] == "Orientation":
-                                    break
-                            orientation_value = exif.get(orientation)
-                            if orientation_value == 3:
-                                img = img.rotate(180, expand=True)
-                            elif orientation_value == 6:
-                                img = img.rotate(270, expand=True)
-                            elif orientation_value == 8:
-                                img = img.rotate(90, expand=True)
-                    except (AttributeError, KeyError, IndexError):
-                        pass
-
-                    # リサイズ処理
-                    max_width = 800
-                    if img.width > max_width:
-                        new_height = int((max_width / img.width) * img.height)
-                        img = img.resize((max_width, new_height), Image.LANCZOS)
-
-                    # 処理した画像をバイトストリームに保存
-                    img_byte_arr = io.BytesIO()
-                    img.save(img_byte_arr, format='JPEG', quality=85)
-                    img_byte_arr.seek(0)
-
-                    # S3にアップロード
-                    filename = secure_filename(f"{uuid.uuid4()}_{image_file.filename}")
-                    s3_path = f"board/{filename}"
-                    
-                    app.s3.upload_fileobj(
-                        img_byte_arr,
-                        app.config['S3_BUCKET'],
-                        s3_path,
-                        ExtraArgs={'ContentType': 'image/jpeg'}
-                    )
-                    
-                    image_url = f"https://{app.config['S3_BUCKET']}.s3.amazonaws.com/{s3_path}"
-                    print(f"Generated image URL: {image_url}")
-
-                except Exception as e:
-                    print(f"S3 upload failed: {str(e)}")
-                    flash(f"画像のアップロードに失敗しました: {str(e)}", "danger")
-                    return redirect(url_for('board'))
-
-            print("Preparing data for DynamoDB")
-            post_id = str(uuid.uuid4())  # 一意の投稿IDを生成
-            updated_at = datetime.now().isoformat()  # 現在時刻を取得
-
-            # ソートキーとして使用する post_updated_key を生成
-            post_updated_key = f"{post_id}#{updated_at}"
-            # post_user_id を生成
-            post_user_id = f"{current_user.id}_{post_id}"
-
-            new_post = {
-                'post_user_id': post_user_id,  # パーティションキー
-                'updated_at': updated_at,  # ソートキーとして更新日時を使用
-                'post#post_id': post_id,  # 一意の投稿ID
-                'user#user_id': current_user.id,  # ユーザーID（補助的な情報）
-                'title': form.title.data,  # 投稿タイトル
-                'content': form.content.data,  # 投稿内容
-                'created_at': updated_at,  # 作成日時
-                'author_name': current_user.display_name,  # 投稿者名
-                'image_url': image_url  # 画像URL
-            }
-            # 管理者の場合、admin_memo を追加
-            if current_user.is_admin:
-                new_post['admin_memo'] = form.admin_memo.data or ''  # フォームに入力がない場合は空文字列を設定
-            print(f"New post data to save: {new_post}")           
-                
-            try:
-                # DynamoDBにデータを保存
-                board_table.put_item(Item=new_post)  # 必要なキー構造に合わせたデータを保存
-                print(f"Post saved to DynamoDB with image_url: {image_url}")
-                flash('投稿が成功しました！', 'success')
-                return redirect(url_for('board'))
-
-            except Exception as e:
-                # DynamoDBの保存中にエラーが発生した場合
-                print(f"Error saving post to DynamoDB: {str(e)}")
-                flash(f"データの保存に失敗しました: {str(e)}", "danger")
-                return redirect(url_for('board'))
-
-        except Exception as e:
-            print(f"Unexpected error: {str(e)}")
-            flash(f"予期しないエラーが発生しました: {str(e)}", "danger")
-            return redirect(url_for('board'))
-        
-    return render_template('board.html', form=form, posts=formatted_posts)
-
-
-
-@app.route('/post/<string:post_user_id>/update-memo', methods=['POST'])
-@login_required
-def update_admin_memo(post_user_id):
+# プロフィール表示用
+@app.route('/user/<string:user_id>')
+def user_profile(user_id):
     try:
-        print("か")
-        updated_at = request.form.get('updated_at', None)
-        admin_memo = request.form.get('admin_memo', '').strip()
+        table = app.dynamodb.Table(app.table_name)
+        response = table.get_item(Key={'user#user_id': user_id})
+        user = response.get('Item')
 
-        # ログでデバッグ
-        app.logger.debug(f"Received post_user_id: {post_user_id}")
-        app.logger.debug(f"Received updated_at: {updated_at}")
-        app.logger.debug(f"Received admin_memo: {admin_memo}")
+        if not user:
+            abort(404)
 
-        if not updated_at:
-            flash('更新日時が指定されていません', 'danger')
-            return redirect(url_for('board'))
-
-        board_table = get_board_table()  # DynamoDBテーブル取得関数
-
-        # DynamoDBから投稿を取得
-        response = board_table.get_item(
-            Key={
-                'post_user_id': post_user_id,
-                'updated_at': updated_at
-            }
-        )
-        item = response.get('Item')
-
-        if not item:
-            flash('投稿が見つかりません', 'danger')
-            return redirect(url_for('board'))
-
-        # DynamoDBで投稿を更新
-        board_table.update_item(
-            Key={
-                'post_user_id': post_user_id,
-                'updated_at': updated_at
-            },
-            UpdateExpression="SET admin_memo = :memo",
+        # 投稿データの取得を追加
+        posts_table = app.dynamodb.Table('posts')
+        posts_response = posts_table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
             ExpressionAttributeValues={
-                ':memo': admin_memo
+                ':pk': f"USER#{user_id}",
+                ':sk_prefix': 'METADATA#'
             }
         )
+        posts = posts_response.get('Items', [])
 
-        flash('管理者メモを更新しました', 'success')
-        return redirect(url_for('board'))
+        return render_template('user_profile.html', user=user, posts=posts)
 
     except Exception as e:
-        app.logger.error(f"Error updating admin memo: {e}")
-        flash('管理者メモの更新中にエラーが発生しました', 'danger')
-        return redirect(url_for('board'))
+        app.logger.error(f"Error loading profile: {str(e)}")
+        flash('プロフィールの読み込み中にエラーが発生しました', 'error')
+        return redirect(url_for('index'))
 
-
-@app.route('/board/delete/<string:post_user_id>', methods=['POST'])
-@login_required
-def delete_post(post_user_id):
-    board_table = get_board_table()
-    updated_at = request.form.get('updated_at')  # 更新日時をフォームから取得
-
-    if not updated_at:
-        flash("更新日時が指定されていません", "danger")
-        return redirect(url_for('board'))
-
-    logger.info(f"Deleting post: {post_user_id}, updated_at: {updated_at}")
-
-    try:
-        # 投稿を取得
-        response = board_table.get_item(
-            Key={
-                'post_user_id': post_user_id,
-                'updated_at': updated_at
-            }
-        )
-
-        if 'Item' not in response:
-            logger.error(f"Post not found: post_user_id={post_user_id}, updated_at={updated_at}")
-            flash("投稿が見つかりませんでした", "danger")
-            return redirect(url_for('board'))
-
-        post = response['Item']
-
-        # ユーザーの権限を確認
-        if post['user#user_id'] != current_user.id:
-            logger.error(f"Permission denied. User: {current_user.id}, Post owner: {post['user#user_id']}")
-            flash("この投稿を削除する権限がありません", "danger")
-            return redirect(url_for('board'))
-
-        # 画像の削除
-        image_url = post.get('image_url')
-        if image_url:
-            try:
-                s3_path = image_url.split('.com/')[-1]
-                app.s3.delete_object(Bucket=app.config['S3_BUCKET'], Key=s3_path)
-                logger.info(f"Image deleted successfully: {s3_path}")
-            except Exception as e:
-                logger.error(f"Failed to delete image: {e}")
-
-        # 投稿の削除
-        board_table.delete_item(
-            Key={
-                'post_user_id': post_user_id,
-                'updated_at': updated_at
-            }
-        )
-        logger.info(f"Post deleted successfully: {post_user_id}, updated_at: {updated_at}")
-        flash("投稿を削除しました", "success")
-
-    except Exception as e:
-        logger.error(f"Delete failed: {e}")
-        flash("削除中にエラーが発生しました", "danger")
-
-    return redirect(url_for('board'))
-
-
-@app.route('/board/edit/<string:post_user_id>', methods=['GET', 'POST'])
-@login_required
-def edit_post(post_user_id):
-    # リクエストパラメータからupdated_atを取得
-    updated_at = request.args.get('updated_at')
-    if not updated_at:
-        print("Error: updated_at is missing from the request.")
-        flash('更新日時が指定されていません', 'danger')
-        return redirect(url_for('board'))
-
-    try:
-        print(f"Editing post with post_user_id: {post_user_id}, updated_at: {updated_at}")
-        board_table = get_board_table()
-        form = Board_Form()
-
-        # DynamoDB から投稿を取得
-        response = board_table.get_item(
-            Key={
-                'post_user_id': post_user_id,
-                'updated_at': updated_at
-            }
-        )
-        if 'Item' not in response:
-            print("Post not found.")
-            flash('投稿が見つかりませんでした', 'danger')
-            return redirect(url_for('board'))
-
-        post = response['Item']
-        print(f"Fetched post: {post}")
-
-        # 投稿者本人かチェック
-        if post['user#user_id'] != current_user.id:
-            print(f"Permission denied. Post user: {post['user#user_id']}, Current user: {current_user.id}")
-            flash('この投稿を編集する権限がありません', 'danger')
-            return redirect(url_for('board'))
-
-        # 編集ロジック
-        if form.validate_on_submit():
-            new_updated_at = datetime.now(pytz.timezone('Asia/Tokyo')).isoformat()
-
-            # 新しい項目を作成
-            new_post = post.copy()
-            new_post['title'] = form.title.data
-            new_post['content'] = form.content.data
-            new_post['updated_at'] = new_updated_at
-
-            if current_user.is_admin:
-                new_post['admin_memo'] = form.admin_memo.data or ''  # None の場合は空文字列を設定
-
-            try:
-                # トランザクションで更新処理を実行
-                with board_table.batch_writer() as batch:
-                    # 古い項目を削除
-                    batch.delete_item(
-                        Key={
-                            'post_user_id': post_user_id,
-                            'updated_at': updated_at
-                        }
-                    )
-                    # 新しい項目を追加
-                    batch.put_item(Item=new_post)
-
-                print(f"Post updated successfully. New updated_at: {new_updated_at}")
-                flash('投稿を更新しました', 'success')
-                return redirect(url_for('board'))
-
-            except Exception as e:
-                print(f"Failed to update post: {e}")
-                flash('投稿の更新に失敗しました', 'danger')
-                return redirect(url_for('board'))
-
-        # GETリクエスト時、フォームにデータを設定
-        form.title.data = post.get('title', '')
-        form.content.data = post.get('content', '')
-        if current_user.is_admin:
-            form.admin_memo.data = post.get('admin_memo', '')
-
-        return render_template('edit_post.html', form=form, post=post)
-
-    except Exception as e:
-        print(f"Exception in edit_post: {e}")
-        flash(f"エラーが発生しました: {e}", 'danger')
-        return redirect(url_for('board'))
-    
     
 @app.route("/uguis2024_tournament")
 def uguis2024_tournament():
@@ -2143,6 +1619,11 @@ def uguis2024_tournament():
 @app.route("/videos")
 def video_link():
     return render_template("video_link.html")  
+
+# 新しい機能を追加
+app.register_blueprint(uguu, url_prefix='/uguu')
+app.register_blueprint(post, url_prefix='/uguu')
+app.register_blueprint(users, url_prefix='/uguu')
 
 
 if __name__ == "__main__":

@@ -1,7 +1,14 @@
-.body{
-      
-  padding: 0;
-  margin: 0;
+
+body {              
+    padding-top: 56px;               
+    margin: 0;           
+        }
+
+.navbar-brand h1 {
+    /* スタイルをここに */
+    font-size: 1.5rem;
+    margin: 0;
+    /* 他のスタイル */
 }
 
 #about h3 {
@@ -21,7 +28,7 @@
 
 .schedule {
   font-family: sans-serif;
-  max-width: 700px;
+  max-width: 750px;
   margin: 0 auto;
 }
 
@@ -64,4 +71,25 @@
 
 .btn-danger:disabled {
   opacity: 1; /* デフォルトで0.65程度になっているので1に戻す */
+}
+
+
+.card {
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.btn-group .btn {
+    transition: all 0.2s;
+}
+
+.fa-heart {
+    transition: transform 0.2s;
+}
+
+.btn:hover .fa-heart {
+    transform: scale(1.1);
 }
