@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="card-title mb-0">新規投稿</h4>
+                </div>
+                
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('post.create_post') }}" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label for="content" class="form-label">投稿内容</label>
+                            <textarea 
+                                id="content" 
+                                name="content" 
+                                class="form-control" 
+                                rows="5" 
+                                placeholder="ここに投稿内容を入力してください..."
+                                required></textarea>
+                        </div>
+                         <div class="form-group mt-2 mb-2">
+                            <label for="image" class="form-label">画像を選択</label>
+                            <input type="file" name="image" class="form-control" accept="image/*">
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" class="btn btn-primary px-4">
+                                投稿する
+                            </button>
+                            <a href="{{ url_for('uguu.show_timeline') }}" 
+                               class="btn btn-outline-secondary">
+                                キャンセル
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

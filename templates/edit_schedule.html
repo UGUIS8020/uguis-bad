@@ -20,6 +20,26 @@
         </div>
 
         <div class="mb-3">
+            <label for="max_participants">参加人数制限</label>
+            <label for="max_participants">参加人数制限</label>
+            {{ form.max_participants(
+                class="form-control", 
+                required=true, 
+                value=schedule.get('max_participants', 10)
+            ) }}
+            <div class="form-text">会場に応じた制限があります</div>
+            <!-- 現在の参加者数を表示 -->
+            <div class="form-text">
+                現在の参加者数: {{ schedule.participants|length }}人
+                {% if schedule.participants|length > 0 %}
+                <span class="text-warning">
+                    (注: 参加人数制限を下げる場合は、現在の参加者数以下にはできません)
+                </span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="mb-3">
             <label for="start_time">開始時間</label>
             {{ form.start_time(class="form-control", required=true) }}
         </div>

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- プロフィールヘッダー -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex align-items-center">
+                <!-- ユーザー情報 -->
+                <div class="ms-3">
+                    <h3 class="mb-1">{{ user.display_name }}</h3>
+                    <p class="text-muted mb-2">@{{ user.user_name }}</p>
+                    <div class="mb-2">
+                        <span class="badge bg-primary">{{ user.badminton_experience }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 投稿一覧 -->
+    <div class="mb-4">
+        <h4 class="mb-3">投稿一覧</h4>
+        {% for post in posts %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <strong>{{ post.display_name }}</strong>
+                    </div>
+                    <small class="text-muted">
+                        {{ post.created_at.split('T')[0] }}
+                    </small>
+                </div>
+                <p class="card-text">{{ post.content }}</p>
+                {% if post.image_url %}
+                <div class="mt-2">
+                    <img src="{{ post.image_url }}" 
+                         class="img-fluid rounded" 
+                         alt="投稿画像"
+                         style="max-height: 400px; object-fit: contain;">
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-5">
+            <p>投稿はありません</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

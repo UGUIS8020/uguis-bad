@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- 左サイドバー (2) -->
+        <div class="col-3 border-end">
+            <nav class="position-sticky" style="top: 20px;">
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-3">
+                        <a href="#" class="nav-link text-dark">
+                            <i class="fas fa-home"></i> ホーム
+                        </a>
+                    </li>
+                    <li class="nav-item mb-3">
+                        <a href="{{ url_for('post.create_post') }}" class="nav-link text-dark">
+                            <i class="fas fa-pencil-alt"></i> 新規投稿
+                        </a>
+                    </li>
+                    <!-- 他のナビゲーションアイテム -->
+                </ul>
+            </nav>
+        </div>
+
+        <!-- メインコンテンツエリア (8) -->
+        <div class="col-9">
+            <!-- 投稿一覧 -->
+            <div class="posts">
+                {% for post in posts %}
+                <div class="card mb-4 mt-2 shadow-sm">
+                    <div class="card-header bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="mb-0">
+                                    <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}" 
+                                    class="text-dark text-decoration-none hover-underline">
+                                        <strong>{{ post.display_name }}</strong>
+                                     </a>                                    
+                                                        
+                                </h5>
+                            </div>
+                            <small class="text-muted">
+                                {{ post.created_at.split('T')[0] }}
+                                {{ post.created_at.split('T')[1].split('.')[0] }}
+                            </small>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">{{ post.content }}</p>
+                         {% if post.image_url %}
+                        <div class="mt-2">
+                            <img src="{{ post.image_url }}" 
+                                class="img-fluid rounded" 
+                                alt="投稿画像"
+                                style="max-height: 400px; object-fit: contain;">
+                        </div>
+                        {% endif %}
+
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <div class="btn-group">
+                                <form action="{{ url_for('post.like_post', post_id=post.post_id) }}" method="POST" class="d-inline">
+                                    <div class="btn-group">
+                                        <button type="button" onclick="handleLike('{{ post.post_id }}')" 
+                                                class="btn btn-link p-0 border-0 text-decoration-none" 
+                                                style="box-shadow: none;">
+                                            <i class="far fa-heart" id="heart-{{ post.post_id }}"></i>
+                                            <span class="ms-1" id="likes-count-{{ post.post_id }}">{{ post.likes_count|default(0) }}</span>
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                
+                {% if not posts %}
+                <div class="alert alert-info" role="alert">
+                    まだ投稿がありません。最初の投稿を作成してみましょう！
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 右側の余白 (2) -->
+        <div class="col-0">
+        </div>
+    </div>
+</div>
+
+<script>
+async function handleLike(postId) {
+    try {
+        const response = await fetch(`/uguu/like/${postId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'  // Ajaxリクエストであることを示す
+            },
+            credentials: 'same-origin'  // CSRFトークンのため
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+            const heartIcon = document.getElementById(`heart-${postId}`);
+            const likesCount = document.getElementById(`likes-count-${postId}`);
+            
+            // いいねの状態に応じてアイコンを更新
+            heartIcon.classList.toggle('fas', data.is_liked);
+            heartIcon.classList.toggle('far', !data.is_liked);
+            
+            // いいね数を更新
+            likesCount.textContent = data.likes_count;
+        } else {
+            console.error('Error:', data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+</script>
+
+{% endblock %}
