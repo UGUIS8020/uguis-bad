@@ -1148,6 +1148,23 @@ def admin_schedules():
         logger.error(f"Error getting admin schedules: {str(e)}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
+
+@app.route('/admin/schedules/deleted')
+@login_required
+def deleted_schedules():
+    # 削除済みのスケジュールのみを取得
+    deleted_schedules = Schedule.query.filter_by(status='deleted').order_by(Schedule.date).all()
+    return render_template('deleted_schedules.html', deleted_schedules=deleted_schedules)
+
+@app.route('/admin/schedules/<int:schedule_id>/restore')
+@login_required
+def restore_schedule(schedule_id):
+    schedule = Schedule.query.get_or_404(schedule_id)
+    if schedule.status == 'deleted':
+        schedule.status = 'active'
+        db.session.commit()
+        flash('スケジュールを復元しました。', 'success')
+    return redirect(url_for('deleted_schedules'))
     
 
 @app.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
