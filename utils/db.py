@@ -113,9 +113,7 @@ def get_users_batch(user_ids):
         if 'Responses' in response:
             for user in response['Responses'][os.getenv('TABLE_NAME_USER', 'bad-users')]:
                 user_id = user['user#user_id']
-
-                # デバッグ用：各ユーザーの情報を確認
-                logger.info(f"User data: {user}")
+                
                 users[user_id] = user
                 
         return users
