@@ -2,6 +2,9 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import current_user, login_required
 from .dynamo import db
 from utils.s3 import upload_image_to_s3
+import uuid
+from datetime import datetime
+from boto3.dynamodb.conditions import Key
 
 
 post = Blueprint('post', __name__)
@@ -85,3 +88,33 @@ def like_post(post_id):
             print(f"Error in like_post route: {e}")
             flash('いいねの処理に失敗しました', 'error')
             return redirect(url_for('uguu.show_timeline'))
+        
+@post.route('/reply/<post_id>', methods=['POST'])  # intの型指定を削除
+@login_required
+def create_reply(post_id):
+    """返信を作成する"""
+    if request.method == 'POST':
+        content = request.form['content']
+        error = None
+
+        if not content:
+            error = '内容を入力してください。'
+
+        if error is not None:
+            flash(error)
+        else:
+            db = get_db()
+            # DynamoDBのテーブルに返信を保存
+            response = db.Table('replies').put_item(
+                Item={
+                    'reply_id': str(uuid.uuid4()),  # 新しいUUIDを生成
+                    'post_id': post_id,
+                    'user_id': g.user['user_id'],
+                    'content': content,
+                    'created_at': datetime.now().isoformat(),
+                    'display_name': g.user['display_name']
+                }
+            )
+            return redirect(url_for('uguu.timeline'))
+
+    return redirect(url_for('uguu.timeline'))
