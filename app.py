@@ -20,10 +20,6 @@ import logging
 import time
 import random
 from urllib.parse import urlparse, urljoin
-from uguu.timeline import uguu
-from uguu.post import post
-from uguu.users import users
-from admin.schedule import schedule
 from utils.db import get_schedule_table, get_schedules_with_formatting 
 
 from dotenv import load_dotenv
@@ -1237,14 +1233,17 @@ def uguis2024_tournament():
 def video_link():
     return render_template("video_link.html")  
 
-# 新しい機能を追加
-app.register_blueprint(uguu, url_prefix='/uguu')
-app.register_blueprint(post, url_prefix='/uguu')
-app.register_blueprint(users, url_prefix='/uguu')
-app.register_blueprint(schedule, url_prefix='/schedule')
 
+from uguu.timeline import uguu
+from uguu.post import post
+from uguu.users import users
+from schedule.views import bp as bp_schedule
 
-if __name__ == "__main__":
-    with app.app_context():    
-        pass    
+for blueprint in [uguu, post, users]:
+    app.register_blueprint(blueprint, url_prefix='/uguu')
+
+# 2. scheduleのBlueprint登録（forループの外）
+app.register_blueprint(bp_schedule, url_prefix='/schedule')
+
+if __name__ == "__main__":       
     app.run(debug=True)

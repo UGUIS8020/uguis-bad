@@ -9,14 +9,15 @@ import uuid
 
 logger = logging.getLogger(__name__)
 # Blueprintの作成
-schedule = Blueprint('schedule', __name__)
+bp = Blueprint('schedule', __name__)
+
 
 def init_app(app, db, cache):
     # ここでapp, db, cacheに依存する初期化を行う
     pass
 
 
-@schedule.route("/admin/schedules", methods=['GET', 'POST'])
+@bp.route("/admin/schedules", methods=['GET', 'POST'])
 @login_required
 def admin_schedules():
     if not current_user.administrator:
@@ -76,25 +77,25 @@ def admin_schedules():
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
 
-@schedule.route('/admin/schedules/deleted')
-@login_required
-def deleted_schedules():
-    # 削除済みのスケジュールのみを取得
-    deleted_schedules = Schedule.query.filter_by(status='deleted').order_by(Schedule.date).all()
-    return render_template('deleted_schedules.html', deleted_schedules=deleted_schedules)
+# @bp.route('/admin/schedules/deleted')
+# @login_required
+# def deleted_schedules():
+#     # 削除済みのスケジュールのみを取得
+#     deleted_schedules = Schedule.query.filter_by(status='deleted').order_by(Schedule.date).all()
+#     return render_template('deleted_schedules.html', deleted_schedules=deleted_schedules)
 
-@schedule.route('/admin/schedules/<int:schedule_id>/restore')
-@login_required
-def restore_schedule(schedule_id):
-    schedule = Schedule.query.get_or_404(schedule_id)
-    if schedule.status == 'deleted':
-        schedule.status = 'active'
-        db.session.commit()
-        flash('スケジュールを復元しました。', 'success')
-    return redirect(url_for('deleted_schedules'))
+# @bp.route('/admin/schedules/<int:schedule_id>/restore')
+# @login_required
+# def restore_schedule(schedule_id):
+#     schedule = Schedule.query.get_or_404(schedule_id)
+#     if schedule.status == 'deleted':
+#         schedule.status = 'active'
+#         db.session.commit()
+#         flash('スケジュールを復元しました。', 'success')
+#     return redirect(url_for('deleted_schedules'))
     
 
-@schedule.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
+@bp.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
 @login_required
 def edit_schedule(schedule_id):
     if not current_user.administrator:
@@ -192,7 +193,7 @@ def edit_schedule(schedule_id):
 
 
 
-@schedule.route("/delete_schedule/<schedule_id>", methods=['POST'])
+@bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
 def delete_schedule(schedule_id):
     try:
         # フォームから date を取得

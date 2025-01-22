@@ -15,7 +15,7 @@
                     <h3 class="card-title mb-0">スケジュール登録</h3>
                 </div>
                 <div class="card-body">
-                    <form method="POST" action="{{ url_for('admin_schedules') }}">
+                    <form method="POST" action="{{ url_for('schedule.admin_schedules') }}">
                         {{ form.csrf_token }}
                         <div class="row">
                             <div class="col-md-3">
