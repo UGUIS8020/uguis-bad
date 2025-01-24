@@ -7,6 +7,7 @@ from utils.db import get_schedule_table, get_schedules_with_formatting
 import logging
 import uuid
 
+
 logger = logging.getLogger(__name__)
 # Blueprintの作成
 bp = Blueprint('schedule', __name__)
@@ -77,23 +78,6 @@ def admin_schedules():
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
 
-# @bp.route('/admin/schedules/deleted')
-# @login_required
-# def deleted_schedules():
-#     # 削除済みのスケジュールのみを取得
-#     deleted_schedules = Schedule.query.filter_by(status='deleted').order_by(Schedule.date).all()
-#     return render_template('deleted_schedules.html', deleted_schedules=deleted_schedules)
-
-# @bp.route('/admin/schedules/<int:schedule_id>/restore')
-# @login_required
-# def restore_schedule(schedule_id):
-#     schedule = Schedule.query.get_or_404(schedule_id)
-#     if schedule.status == 'deleted':
-#         schedule.status = 'active'
-#         db.session.commit()
-#         flash('スケジュールを復元しました。', 'success')
-#     return redirect(url_for('deleted_schedules'))
-    
 
 @bp.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
 @login_required
@@ -166,26 +150,23 @@ def edit_schedule(schedule_id):
                         ExpressionAttributeNames={
                             '#status': 'status'  # statusは予約語なので別名を使用
                         }
-                    )
+                    )                    
                     
-                    cache.delete_memoized(get_schedules_with_formatting)
                     flash('スケジュールを更新しました', 'success')
                     return redirect(url_for('index'))
                     
-                except ClientError as e:
-                    app.logger.error(f"スケジュール更新エラー: {str(e)}")
+                except ClientError as e:                    
                     flash('スケジュールの更新中にエラーが発生しました', 'error')
             else:
                 logging.error(f"Form validation errors: {form.errors}")
                 flash('入力内容に問題があります', 'error')
             
-    except ClientError as e:
-        app.logger.error(f"スケジュール取得エラー: {str(e)}")
+    except ClientError as e:        
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
     
     return render_template(
-        'edit_schedule.html', 
+        'schedule/edit_schedule.html', 
         form=form, 
         schedule=schedule, 
         schedule_id=schedule_id
@@ -199,14 +180,12 @@ def delete_schedule(schedule_id):
         # フォームから date を取得
         date = request.form.get('date')
 
-        if not date:
-            app.logger.error(f"Missing 'date' for schedule_id={schedule_id}")
+        if not date:            
             flash('日付が不足しています。', 'error')
             return redirect(url_for('index'))
 
         # DynamoDB テーブルを取得
-        table = get_schedule_table()
-        app.logger.debug(f"Updating status for schedule_id: {schedule_id}, date: {date}")
+        table = get_schedule_table()        
         
         # schedule_id と date を使ってステータスを更新
         update_response = table.update_item(
@@ -223,20 +202,17 @@ def delete_schedule(schedule_id):
                 ':updated_at': datetime.now().isoformat()
             },
             ReturnValues="ALL_NEW"  # 更新後の項目を返す
-        )
+        )        
         
-        app.logger.debug(f"Update response: {update_response}")
         flash('スケジュールを削除しました', 'success')
 
         # キャッシュをリセット
         cache.delete_memoized(get_schedules_with_formatting)
 
-    except ClientError as e:
-        app.logger.error(f"ClientError: {e.response['Error']['Message']}")
+    except ClientError as e:        
         flash('スケジュールの更新中にエラーが発生しました', 'error')
 
-    except Exception as e:
-        app.logger.error(f"スケジュール更新エラー: {str(e)}")
+    except Exception as e:        
         flash('スケジュールの更新中にエラーが発生しました', 'error')
 
     return redirect(url_for('index'))
