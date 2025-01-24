@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 def get_schedule_table():
     """スケジュールテーブルを取得する関数"""
+    """最新12件を取得"""
     region = os.getenv('AWS_REGION', 'ap-northeast-1')
     table_name = os.getenv('DYNAMODB_TABLE_NAME', 'bad_schedules')
 
@@ -42,7 +43,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:12]  # 最新10件を取得
+        )[:12]  # 最新12件を取得
         
         # 以下は既存の処理をそのまま維持
         unique_user_ids = set()
