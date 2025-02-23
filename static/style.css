@@ -19,6 +19,7 @@ body {
 #about h2 {
   color: #333333;
   font-weight: bold;
+  margin: 5px;
 }
 
 #about p {
