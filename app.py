@@ -587,16 +587,32 @@ def get_schedules():
 @app.route("/index", methods=['GET'])
 def index():
     try:
-        schedules = get_schedules_with_formatting()        
+        schedules = get_schedules_with_formatting()
+        
+        # 画像ファイルのリスト
+        image_files = [
+            'images/top001.jpg',
+            'images/top002.jpg',
+            'images/top003.jpg',
+            'images/top004.jpg',
+            'images/top005.jpg'           
+            
+        ]
+        
+        # ランダムに画像を選択
+        selected_image = random.choice(image_files)
+        
         for schedule in schedules:
             print(f"Schedule data: {schedule}")
+        
         return render_template("index.html", 
-                             schedules=schedules,                             
+                             schedules=schedules,
+                             selected_image=selected_image,  # 選択された画像をテンプレートに渡す
                              canonical=url_for('index', _external=True))
         
     except Exception as e:        
         flash('スケジュールの取得中にエラーが発生しました', 'error')
-        return render_template("index.html", schedules=[])
+        return render_template("index.html", schedules=[], selected_image='images/default.jpg')
 
 
 @app.route('/temp_register', methods=['GET', 'POST'])
