@@ -3,6 +3,7 @@ import logging
 import os
 from dateutil import parser
 from flask import current_app
+from boto3.dynamodb.types import TypeDeserializer
 logger = logging.getLogger(__name__)
 
 
@@ -92,33 +93,64 @@ def get_schedules_with_formatting():
         logger.error(f"Error in get_schedules_with_formatting: {str(e)}")
         return []
     
+# def get_users_batch(user_ids):
+#     """ユーザー情報を一括取得する関数"""
+#     try:
+#         user_table = current_app.dynamodb.Table(os.getenv('TABLE_NAME_USER', 'bad-users'))
+        
+#         # ユーザーIDのリストをバッチ処理用に変換
+#         keys = [{'user#user_id': user_id} for user_id in user_ids]
+        
+#         # バッチでユーザー情報を取得
+#         response = current_app.dynamodb.batch_get_item(
+#             RequestItems={
+#                 os.getenv('TABLE_NAME_USER', 'bad-users'): {
+#                     'Keys': keys
+#                 }
+#             }
+#         )
+        
+#         # 結果を辞書形式に整理
+#         users = {}
+#         if 'Responses' in response:
+#             for user in response['Responses'][os.getenv('TABLE_NAME_USER', 'bad-users')]:
+#                 user_id = user['user#user_id']
+                
+#                 users[user_id] = user
+                
+#         return users
+        
+#     except Exception as e:
+#         logger.error(f"Error batch getting users: {e}")
+#         return {}
+    
+
 def get_users_batch(user_ids):
-    """ユーザー情報を一括取得する関数"""
+    """ユーザー情報を一括取得する関数（正しくデシリアライズ）"""
     try:
-        user_table = current_app.dynamodb.Table(os.getenv('TABLE_NAME_USER', 'bad-users'))
-        
-        # ユーザーIDのリストをバッチ処理用に変換
-        keys = [{'user#user_id': user_id} for user_id in user_ids]
-        
-        # バッチでユーザー情報を取得
-        response = current_app.dynamodb.batch_get_item(
+        dynamodb = boto3.client('dynamodb', region_name=os.getenv('AWS_REGION', 'ap-northeast-1'))
+        keys = [{'user#user_id': {'S': user_id}} for user_id in user_ids]
+
+        response = dynamodb.batch_get_item(
             RequestItems={
-                os.getenv('TABLE_NAME_USER', 'bad-users'): {
+                'bad-users': {
                     'Keys': keys
                 }
             }
         )
-        
-        # 結果を辞書形式に整理
+
+        deserializer = TypeDeserializer()
         users = {}
+
         if 'Responses' in response:
-            for user in response['Responses'][os.getenv('TABLE_NAME_USER', 'bad-users')]:
-                user_id = user['user#user_id']
-                
-                users[user_id] = user
-                
+            for user in response['Responses']['bad-users']:
+                # 🔽 ここでネストされた DynamoDB形式 → 通常の dict に変換
+                deserialized_user = {k: deserializer.deserialize(v) for k, v in user.items()}
+                user_id = deserialized_user['user#user_id']
+                users[user_id] = deserialized_user
+
         return users
-        
+
     except Exception as e:
         logger.error(f"Error batch getting users: {e}")
         return {}
