@@ -6,12 +6,13 @@ from .forms import ScheduleForm
 from utils.db import get_schedule_table, get_schedules_with_formatting
 import logging
 import uuid
+from flask import jsonify
+
 
 
 logger = logging.getLogger(__name__)
 # Blueprintの作成
 bp = Blueprint('schedule', __name__)
-
 
 def init_app(app, db, cache):
     # ここでapp, db, cacheに依存する初期化を行う
@@ -174,45 +175,113 @@ def edit_schedule(schedule_id):
 
 
 
-@bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
-def delete_schedule(schedule_id):
-    try:
-        # フォームから date を取得
-        date = request.form.get('date')
+# @bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
+# def delete_schedule(schedule_id):
+#     try:
+#         # フォームから date を取得
+#         date = request.form.get('date')
 
-        if not date:            
+#         if not date:            
+#             flash('日付が不足しています。', 'error')
+#             return redirect(url_for('index'))
+
+#         # DynamoDB テーブルを取得
+#         table = get_schedule_table()        
+        
+#         # schedule_id と date を使ってステータスを更新
+#         update_response = table.update_item(
+#             Key={
+#                 'schedule_id': schedule_id,
+#                 'date': date
+#             },
+#             UpdateExpression="SET #status = :status, updated_at = :updated_at",
+#             ExpressionAttributeNames={
+#                 '#status': 'status'  # statusは予約語なので#を使用
+#             },
+#             ExpressionAttributeValues={
+#                 ':status': 'deleted',
+#                 ':updated_at': datetime.now().isoformat()
+#             },
+#             ReturnValues="ALL_NEW"  # 更新後の項目を返す
+#         )        
+        
+#         flash('スケジュールを削除しました', 'success')
+
+#         # キャッシュをリセット
+#         cache.delete_memoized(get_schedules_with_formatting)
+
+#     except ClientError as e:        
+#         flash('スケジュールの更新中にエラーが発生しました', 'error')
+
+#     except Exception as e:        
+#         flash('スケジュールの更新中にエラーが発生しました', 'error')
+
+#     return redirect(url_for('index'))
+
+@bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
+@login_required
+def delete_schedule(schedule_id):
+    # from app import cache の代わりに
+    from flask import current_app
+    
+    if not current_user.administrator:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': '管理者権限が必要です'})
+        flash('管理者権限が必要です', 'warning')
+        return redirect(url_for('index'))
+        
+    try:
+        date = request.form.get('date')
+        if not date:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({'success': False, 'message': '日付が不足しています'})
             flash('日付が不足しています。', 'error')
             return redirect(url_for('index'))
 
-        # DynamoDB テーブルを取得
-        table = get_schedule_table()        
+        table = get_schedule_table()
+        delete_type = request.form.get('delete_type', 'soft')
         
-        # schedule_id と date を使ってステータスを更新
-        update_response = table.update_item(
-            Key={
-                'schedule_id': schedule_id,
-                'date': date
-            },
-            UpdateExpression="SET #status = :status, updated_at = :updated_at",
-            ExpressionAttributeNames={
-                '#status': 'status'  # statusは予約語なので#を使用
-            },
-            ExpressionAttributeValues={
-                ':status': 'deleted',
-                ':updated_at': datetime.now().isoformat()
-            },
-            ReturnValues="ALL_NEW"  # 更新後の項目を返す
-        )        
+        if delete_type == 'permanent':
+            # 完全削除
+            delete_response = table.delete_item(
+                Key={
+                    'schedule_id': schedule_id,
+                    'date': date
+                }
+            )
+            message = 'スケジュールを完全に削除しました'
+        else:
+            # 論理削除
+            update_response = table.update_item(
+                Key={
+                    'schedule_id': schedule_id,
+                    'date': date
+                },
+                UpdateExpression="SET #status = :status, updated_at = :updated_at",
+                ExpressionAttributeNames={
+                    '#status': 'status'
+                },
+                ExpressionAttributeValues={
+                    ':status': 'deleted',
+                    ':updated_at': datetime.now().isoformat()
+                }
+            )
+            message = 'スケジュールを削除しました'
+
+        # キャッシュをリセット - current_appを使用
+        if hasattr(current_app, 'cache'):
+            current_app.cache.delete_memoized(get_schedules_with_formatting)
         
-        flash('スケジュールを削除しました', 'success')
+        # AJAX リクエストとHTMLリクエストで異なるレスポンスを返す
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': True, 'message': message})
+        else:
+            flash(message, 'success')
+            return redirect(url_for('schedule.admin_schedules'))
 
-        # キャッシュをリセット
-        cache.delete_memoized(get_schedules_with_formatting)
-
-    except ClientError as e:        
-        flash('スケジュールの更新中にエラーが発生しました', 'error')
-
-    except Exception as e:        
-        flash('スケジュールの更新中にエラーが発生しました', 'error')
-
-    return redirect(url_for('index'))
+    except Exception as e:
+        logger.error(f"Error deleting schedule: {str(e)}")  # str(e)を使用して確実に文字列化
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': 'スケジュールの削除中にエラーが発生しました'})
+        flash('スケジュールの削除中にエラーが発生しました', 'error')
+        return redirect(url_for('schedule.admin_schedules'))
