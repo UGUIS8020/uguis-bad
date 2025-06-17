@@ -22,60 +22,114 @@ def init_app(app, db, cache):
 @bp.route("/admin/schedules", methods=['GET', 'POST'])
 @login_required
 def admin_schedules():
+    logger.info("🔐 スケジュール管理ページにアクセス")
+    
     if not current_user.administrator:
         flash('管理者権限が必要です', 'warning')
         return redirect(url_for('index'))
 
-    form = ScheduleForm()  # フォームを追加
-    
+    form = ScheduleForm()
+    logger.debug(f"📝 フォーム初期化: {form}")
+
+    # ★★★ 緊急追加: POSTリクエストの場合のログ出力 ★★★
+    if request.method == 'POST':
+        print("=" * 60)  # print を使って確実に出力
+        print("🚨 緊急デバッグ: POSTリクエスト受信")
+        print(f"📋 フォームデータ: {dict(request.form)}")
+        print(f"🔍 court フィールド: '{request.form.get('court')}'")
+        print(f"🔍 venue フィールド: '{request.form.get('venue')}'")
+        print(f"🔍 date フィールド: '{request.form.get('date')}'")
+        
+        # フォームエラーを事前チェック
+        form_valid = form.validate()
+        print(f"🔍 form.validate(): {form_valid}")
+        
+        if not form_valid:
+            print("❌ フォームエラー:")
+            for field, errors in form.errors.items():
+                print(f"   {field}: {errors}")
+        
+        # courtフィールドが存在するかチェック
+        if hasattr(form, 'court'):
+            print(f"✅ courtフィールド存在: {form.court}")
+            print(f"✅ courtフィールド値: '{form.court.data}'")
+            print(f"✅ courtフィールド選択肢: {form.court.choices}")
+        else:
+            print("❌ courtフィールドが存在しません！")
+        
+        print("=" * 60)
+
     if form.validate_on_submit():
+        logger.info("✅ フォームバリデーション成功")
         try:
             schedule_table = get_schedule_table()
             if not schedule_table:
                 raise ValueError("Schedule table is not initialized")
 
+            schedule_id = str(uuid.uuid4())
+
+            # ★ court フィールドの安全な取得
+            court_value = ''
+            if hasattr(form, 'court') and form.court.data:
+                court_value = form.court.data
+            else:
+                # court フィールドがない場合のフォールバック
+                court_value = request.form.get('court', 'unknown')
+
             schedule_data = {
-                'schedule_id': str(uuid.uuid4()),
+                'schedule_id': schedule_id,
                 'date': form.date.data.isoformat(),
                 'day_of_week': form.day_of_week.data,
                 'venue': form.venue.data,
+                'court': form.court.data,   # ★ 安全に取得
                 'start_time': form.start_time.data,
                 'end_time': form.end_time.data,
                 'max_participants': form.max_participants.data,
                 'created_at': datetime.now().isoformat(),
                 'participants_count': 0,
-                'status': 'active'
+                'status': form.status.data
             }
 
-            schedule_table.put_item(Item=schedule_data)            
+            logger.info(f"🗂️ 登録データ: {schedule_data}")
+            print(f"🗂️ 登録データ: {schedule_data}")  # print でも出力
+
+            schedule_table.put_item(Item=schedule_data)
+            logger.info(f"✅ スケジュール登録成功（ID: {schedule_id}）")
+            print(f"✅ スケジュール登録成功（ID: {schedule_id}）")
             flash('スケジュールが登録されました', 'success')
-            return redirect(url_for('schedules'))
+            return redirect(url_for('schedule.admin_schedules'))
 
         except Exception as e:
-            logger.error(f"Error registering schedule: {e}")
+            logger.exception("❌ スケジュール登録時にエラー発生")
+            print(f"❌ スケジュール登録時にエラー発生: {e}")
             flash('スケジュールの登録中にエラーが発生しました', 'error')
+    else:
+        if request.method == 'POST':
+            logger.debug("⚠️ フォームバリデーション失敗")
+            print("⚠️ フォームバリデーション失敗")
+            for field, errors in form.errors.items():
+                logger.debug(f"❌ {field}: {errors}")
+                print(f"❌ {field}: {errors}")
 
     try:
         schedule_table = get_schedule_table()
-        logger.info(f"Schedule table retrieved: {schedule_table}")
-
         response = schedule_table.scan()
-        logger.info(f"Scan response: {response}")
-
         all_schedules = response.get('Items', [])
+
+        logger.info(f"📊 スケジュール取得件数: {len(all_schedules)} 件")
+
         schedules = sorted(
             all_schedules,
             key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d').date()
         )
-        
+
         return render_template(
-            "schedule/schedules.html", 
+            "schedule/schedules.html",
             schedules=schedules,
-            form=form  # フォームをテンプレートに渡す
+            form=form
         )
-        
     except Exception as e:
-        logger.error(f"Error getting admin schedules: {str(e)}")
+        logger.exception("❌ スケジュールの取得中にエラー発生")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
 
@@ -172,51 +226,6 @@ def edit_schedule(schedule_id):
         schedule=schedule, 
         schedule_id=schedule_id
     )
-
-
-
-# @bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
-# def delete_schedule(schedule_id):
-#     try:
-#         # フォームから date を取得
-#         date = request.form.get('date')
-
-#         if not date:            
-#             flash('日付が不足しています。', 'error')
-#             return redirect(url_for('index'))
-
-#         # DynamoDB テーブルを取得
-#         table = get_schedule_table()        
-        
-#         # schedule_id と date を使ってステータスを更新
-#         update_response = table.update_item(
-#             Key={
-#                 'schedule_id': schedule_id,
-#                 'date': date
-#             },
-#             UpdateExpression="SET #status = :status, updated_at = :updated_at",
-#             ExpressionAttributeNames={
-#                 '#status': 'status'  # statusは予約語なので#を使用
-#             },
-#             ExpressionAttributeValues={
-#                 ':status': 'deleted',
-#                 ':updated_at': datetime.now().isoformat()
-#             },
-#             ReturnValues="ALL_NEW"  # 更新後の項目を返す
-#         )        
-        
-#         flash('スケジュールを削除しました', 'success')
-
-#         # キャッシュをリセット
-#         cache.delete_memoized(get_schedules_with_formatting)
-
-#     except ClientError as e:        
-#         flash('スケジュールの更新中にエラーが発生しました', 'error')
-
-#     except Exception as e:        
-#         flash('スケジュールの更新中にエラーが発生しました', 'error')
-
-#     return redirect(url_for('index'))
 
 @bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
 @login_required
