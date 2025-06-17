@@ -21,6 +21,7 @@ import time
 import random
 from urllib.parse import urlparse, urljoin
 from utils.db import get_schedule_table, get_schedules_with_formatting 
+from uguu.post import post
 
 from dotenv import load_dotenv
 
@@ -603,8 +604,8 @@ def index():
         # ランダムに画像を選択
         selected_image = random.choice(image_files)
         
-        for schedule in schedules:
-            print(f"Schedule data: {schedule}")
+        # for schedule in schedules:
+        #     print(f"Schedule data: {schedule}")
         
         return render_template("index.html", 
                              schedules=schedules,
@@ -1252,7 +1253,6 @@ def video_link():
 
 
 from uguu.timeline import uguu
-from uguu.post import post
 from uguu.users import users
 from schedule.views import bp as bp_schedule
 
@@ -1262,5 +1262,16 @@ for blueprint in [uguu, post, users]:
 # 2. scheduleのBlueprint登録（forループの外）
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
 
-if __name__ == "__main__":       
-    app.run(debug=True)
+# if __name__ == "__main__":       
+#     app.run(debug=True)
+
+if __name__ == "__main__":
+    # 登録されているすべてのエンドポイントを表示
+    print("=== 登録されているエンドポイント ===")
+    for rule in app.url_map.iter_rules():
+        print(f"Endpoint: {rule.endpoint}, URL: {rule.rule}, Methods: {rule.methods}")
+    print("================================")
+    
+    app.config['SESSION_COOKIE_SECURE'] = False
+    app.config['SESSION_COOKIE_SAMESITE'] = None
+    app.run(debug=True, host='127.0.0.1', port=5000)
