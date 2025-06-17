@@ -24,8 +24,9 @@ from utils.db import get_schedule_table, get_schedules_with_formatting
 
 from dotenv import load_dotenv
 
-
-logging.basicConfig(level=logging.INFO)
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.WARNING)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Flask-Login用

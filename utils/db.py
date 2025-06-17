@@ -13,8 +13,8 @@ def get_schedule_table():
     region = os.getenv('AWS_REGION', 'ap-northeast-1')
     table_name = os.getenv('DYNAMODB_TABLE_NAME', 'bad_schedules')
 
-    logger.debug(f"Region: {region}")
-    logger.debug(f"Table name: {table_name}")
+    # logger.debug(f"Region: {region}")
+    # logger.debug(f"Table name: {table_name}")
 
     try:
         dynamodb = boto3.resource('dynamodb', region_name=region)
@@ -44,7 +44,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:12]  # 最新12件を取得
+        )[:8]  # 最新12件を取得
         
         # 以下は既存の処理をそのまま維持
         unique_user_ids = set()

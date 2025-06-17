@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ロガー設定
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 def init_table():

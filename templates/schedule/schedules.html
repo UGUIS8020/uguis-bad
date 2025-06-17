@@ -21,31 +21,38 @@
                             <div class="col-md-3">
                                 <div class="mb-3">
                                     {{ form.date.label(class="form-label") }}
-                                    {{ form.date(class="form-control", required=true) }}
+                                    {{ form.date(class="form-control", required=true, id="date") }}                                    
                                 </div>
                             </div>
                             <div class="col-md-2">
                                 <div class="mb-3">
-                                    {{ form.day_of_week.label(class="form-label") }}
-                                    {{ form.day_of_week(class="form-control", readonly=true) }}
+                                    {{ form.day_of_week.label(class="form-label") }}                                    
+                                    {{ form.day_of_week(class="form-control", readonly=true, id="day_of_week") }}
                                 </div>
                             </div>
                             <div class="col-md-3">
                                 <div class="mb-3">
                                     {{ form.venue.label(class="form-label") }}
-                                    {{ form.venue(class="form-control", required=true) }}
+                                    {{ form.venue(class="form-control", required=true, id="venue") }}
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    {{ form.court.label(class="form-label text-white") }}
+                                    {{ form.court(class="form-control", id="court", disabled=true) }}
+                                    <small class="form-text text-white-50" id="court-help">まず体育館を選択してください</small>
                                 </div>
                             </div>
                             <div class="col-md-2">
                                 <div class="mb-3">
-                                    {{ form.start_time.label(class="form-label") }}
-                                    {{ form.start_time(class="form-control", required=true) }}
+                                    {{ form.start_time.label(class="form-label") }}                                    
+                                    {{ form.start_time(class="form-control", required=true, id="start_time") }}
                                 </div>
                             </div>
                             <div class="col-md-2">
                                 <div class="mb-3">
                                     {{ form.end_time.label(class="form-label") }}
-                                    {{ form.end_time(class="form-control", required=true) }}
+                                    {{ form.end_time(class="form-control", required=true, id="end_time") }}
                                 </div>
                             </div>
                         </div>
@@ -79,7 +86,8 @@
                             <tr>
                                 <th class="px-2">日付</th> <!-- セル内の余白を調整 -->
                                 <th class="px-2">曜日</th>
-                                <th class="px-2">会場</th>
+                                <th class="px-2">体育館</th>
+                                <th class="px-2">コート</th>
                                 <th class="px-2">開始</th> <!-- "時間"を省略 -->
                                 <th class="px-2">終了</th> <!-- "時間"を省略 -->
                                 <th class="px-2">状態</th> <!-- "ステータス"を"状態"に省略 -->
@@ -90,8 +98,9 @@
                             {% for schedule in schedules %}
                                 <tr>
                                     <td class="px-2">{{ schedule.date }}</td>
-                                    <td class="px-2">{{ schedule.day_of_week }}</td>
+                                    <td class="px-2">{{ schedule.day_of_week }}</td>                                   
                                     <td class="px-2">{{ schedule.venue }}</td>
+                                    <td class="px-2">{{ schedule.court }}</td>
                                     <td class="px-2">{{ schedule.start_time }}</td>
                                     <td class="px-2">{{ schedule.end_time }}</td>
                                     <td class="px-2">
@@ -147,12 +156,46 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
-</script>
 
-              
+// 体育館選択時にコート選択肢を動的更新
+const venueSelect = document.getElementById('venue');
+if (venueSelect) {
+    venueSelect.addEventListener('change', function() {
+        updateCourtChoices(this.value);
+        updateVenueInfo(this.value);
+    });
+}
 
+</script>   
 
-     
+<script>
+    function updateCourtChoices(venue) {
+        const courtSelect = document.getElementById('court');
+        courtSelect.innerHTML = '';  // 一旦リセット
+        courtSelect.disabled = false;  // 選択可能にする
+    
+        let courtOptions = [];
+    
+        if (venue === '越谷市立地域スポーツセンター') {
+            courtOptions = ['A面(3面)', 'B面(3面)', 'AB両面(6面)'];
+        } else if (venue === '越谷市立総合体育館') {
+            courtOptions = ['第一体育室(2面)', '第一体育室(6面)', '第二体育室(3面)', '第二体育室(6面)'];
+        } else if (venue === 'ウィングハット') {
+            courtOptions = ['メインコート', 'サブコート'];
+        } else {
+            courtOptions = ['該当なし'];
+            courtSelect.disabled = true;
+        }
+    
+        courtOptions.forEach(function(court) {
+            const option = document.createElement('option');
+            option.value = court;
+            option.text = court;
+            courtSelect.appendChild(option);
+        });
+    }
+    </script>
+
                     
                 </div>
             </div>

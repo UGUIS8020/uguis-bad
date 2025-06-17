@@ -15,8 +15,12 @@
         </div>
         
         <div class="mb-3">
-            <label for="venue">会場</label>
-            {{ form.venue(class="form-control", required=true) }}
+            <label for="venue">会場</label>            
+            {{ form.venue(class="form-control", id="venue", required=true) }}
+        </div>
+        <div class="mb-3">
+            <label for="court">コート</label>            
+            {{ form.court(class="form-control", id="court", required=true) }}
         </div>
 
         <div class="mb-3">
@@ -107,126 +111,6 @@
     </div>
 </div>
 
-
-<!-- <script>
-function deleteSchedule(event) {
-    event.preventDefault();
-    
-    if (!confirm('本当に削除しますか？')) {
-        return false;
-    }
-    
-    const form = event.target;
-    const formData = new FormData(form);
-    
-    fetch(form.action, {
-        method: 'POST',
-        body: formData,
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const scheduleCard = form.closest('.schedule-card');
-            if (scheduleCard) {
-                scheduleCard.remove();
-            } else {
-                location.reload();
-            }
-        } else {
-            alert(data.message || 'エラーが発生しました');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('削除中にエラーが発生しました');
-    });
-    
-    return false;
-}
-</script>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-    // 日付関連の要素
-    const dateField = document.querySelector('input[name="date"]');
-    const dayOfWeekField = document.querySelector('input[name="day_of_week"]');
-    
-    // 時間関連の要素
-    const startTimeSelect = document.getElementById('start_time');
-    const endTimeSelect = document.getElementById('end_time');
-    
-    // 現在の終了時間を取得して設定
-    const currentEndTime = '{{ schedule.end_time }}';  // サーバーから渡された値を使用
-    endTimeSelect.setAttribute('data-current-value', currentEndTime);
-    
-    console.log('Fields found:', {
-        dateField,
-        dayOfWeekField,
-        startTimeSelect,
-        endTimeSelect,
-        currentEndTime
-    });
-
-    // 終了時間の更新関数を修正
-    function updateEndTimeOptions() {
-        if (startTimeSelect && startTimeSelect.value) {
-            const selectedHour = parseInt(startTimeSelect.value.split(':')[0]);
-            const currentHour = parseInt(currentEndTime.split(':')[0]);
-            
-            endTimeSelect.innerHTML = '<option value="">選択してください</option>';
-            for (let i = selectedHour + 1; i <= 23; i++) {
-                const timeStr = `${i.toString().padStart(2, '0')}:00`;
-                const option = new Option(timeStr, timeStr);
-                if (timeStr === currentEndTime) {
-                    option.selected = true;
-                }
-                endTimeSelect.add(option);
-            }
-            
-            // 現在の終了時間が選択肢にない場合は追加
-            if (currentHour > selectedHour && !endTimeSelect.value) {
-                const option = new Option(currentEndTime, currentEndTime);
-                option.selected = true;
-                endTimeSelect.add(option);
-            }
-        }
-    }
-
-    // 初期値の設定
-    if (dateField && dayOfWeekField) {
-        updateDayOfWeek();
-    }
-    
-    // 開始時間が選択されている場合のみ終了時間を更新
-    if (startTimeSelect && startTimeSelect.value) {
-        updateEndTimeOptions();
-    }
-
-    // イベントリスナーの設定
-    if (dateField) {
-        dateField.addEventListener('change', updateDayOfWeek);
-    }
-    
-    if (startTimeSelect) {
-        startTimeSelect.addEventListener('change', updateEndTimeOptions);
-    }
-});
-
-function confirmDelete() {
-    const isPermanent = document.getElementById('permanentDelete').checked;
-    let message = isPermanent 
-        ? '本当にこのスケジュールを完全に削除しますか？\nこの操作は元に戻せません。'
-        : 'スケジュールをソフトデリート（ステータスを「削除済」に変更）しますか？';
-        
-    if (confirm(message)) {
-        document.getElementById('deleteForm').submit();
-    }
-}
-    
-    </script> -->
 
     <script>
         function deleteSchedule(event) {
@@ -346,6 +230,50 @@ function confirmDelete() {
             }
         }
             
+            </script>
+
+            <script>
+                function updateCourtChoices(venue) {
+                    const courtSelect = document.getElementById('court');
+                    courtSelect.innerHTML = '';
+                    courtSelect.disabled = false;
+            
+                    let courtOptions = [];
+            
+                    if (venue === '越谷市立地域スポーツセンター') {
+                        courtOptions = ['A面(3面)', 'B面(3面)', 'AB両面(6面)'];
+                    } else if (venue === '越谷市立総合体育館') {
+                        courtOptions = ['第一体育室(2面)', '第一体育室(6面)', '第二体育室(3面)', '第二体育室(6面)'];
+                    } else if (venue === 'ウィングハット') {
+                        courtOptions = ['メインコート', 'サブコート'];
+                    } else {
+                        courtOptions = ['該当なし'];
+                        courtSelect.disabled = true;
+                    }
+            
+                    courtOptions.forEach(function(court) {
+                        const option = document.createElement('option');
+                        option.value = court;
+                        option.text = court;
+                        courtSelect.appendChild(option);
+                    });
+                }
+            
+                function updateVenueInfo(venue) {
+                    // 補足情報の表示などがあればここに実装
+                    console.log("選択された会場:", venue);
+                }
+            
+                document.addEventListener('DOMContentLoaded', function () {
+                    const venueSelect = document.getElementById('venue');
+                    if (venueSelect) {
+                        updateCourtChoices(venueSelect.value); // 初期化
+                        venueSelect.addEventListener('change', function () {
+                            updateCourtChoices(this.value);
+                            updateVenueInfo(this.value);
+                        });
+                    }
+                });
             </script>
 
 {% endblock %}

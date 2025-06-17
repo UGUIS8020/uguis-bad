@@ -2,6 +2,9 @@ from app import app
 import uuid
 from werkzeug.security import generate_password_hash
 from datetime import date
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ユーザーIDを生成
 user_id = str(uuid.uuid4())
@@ -32,10 +35,7 @@ user_item = {
 }
 
 try:
-    # ユーザー追加
     app.table.put_item(Item=user_item)
-    print("管理者ユーザーが正常に作成されました。")
-    print("Email: shibuyamasahiko@gmail.com")
-    print("Password: giko8020@Z")
 except Exception as e:
-    print(f"エラー: {str(e)}")
+    # エラー時のみログ（本番ではWARNING以上が推奨）
+    logger.warning(f"管理者ユーザー作成エラー: {str(e)}")
