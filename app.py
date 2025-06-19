@@ -14,7 +14,6 @@ import uuid
 from datetime import datetime, date, timedelta
 import io
 from PIL import Image, ExifTags
-from dateutil import parser
 from botocore.exceptions import ClientError
 import logging
 import time
@@ -88,17 +87,21 @@ def create_app():
         print(f"S3_BUCKET: {app.config['S3_BUCKET']}")  # デバッグ用
 
          # AWSクライアントの初期化
+        # app.s3 = boto3.client('s3', **aws_credentials)
+        # app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
+        # app.dynamodb_resource = boto3.resource('dynamodb', **aws_credentials)
+
+        # AWSクライアントの初期化
         app.s3 = boto3.client('s3', **aws_credentials)
         app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-        app.dynamodb_resource = boto3.resource('dynamodb', **aws_credentials)
 
         # DynamoDBテーブルの設定
         app.table_name = os.getenv("TABLE_NAME_USER")
         app.table_name_board = os.getenv("TABLE_NAME_BOARD")
         app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
-        app.table = app.dynamodb_resource.Table(app.table_name)
-        app.table_board = app.dynamodb_resource.Table(app.table_name_board)
-        app.table_schedule = app.dynamodb_resource.Table(app.table_name_schedule)
+        app.table = app.dynamodb.Table(app.table_name)           # dynamodb_resource → dynamodb
+        app.table_board = app.dynamodb.Table(app.table_name_board)     # dynamodb_resource → dynamodb
+        app.table_schedule = app.dynamodb.Table(app.table_name_schedule) # dynamodb_resource → dynamodb
 
         # Flask-Loginの設定
         login_manager.init_app(app)
@@ -196,28 +199,24 @@ class RegistrationForm(FlaskForm):
 
     def validate_email(self, field):
         try:
-            # DynamoDB テーブル取得
-            table = app.dynamodb.Table(app.table_name)
+            # Flaskアプリケーションコンテキスト内のDynamoDBテーブル取得
+            table = current_app.dynamodb.Table(current_app.table_name)
             current_app.logger.debug(f"Querying email-index for email: {field.data}")
 
-            # email-indexを使用してクエリ
             response = table.query(
                 IndexName='email-index',
-                KeyConditionExpression=Key('email').eq(field.data)  # 修正済み
+                KeyConditionExpression=Key('email').eq(field.data)
             )
             current_app.logger.debug(f"Query response: {response}")
 
-            # 登録済みのメールアドレスが見つかった場合
             if response.get('Items'):
                 raise ValidationError('入力されたメールアドレスは既に登録されています。')
 
-        except ValidationError as ve:
-            # ValidationErrorはそのままスロー
-            raise ve
+        except ValidationError:
+            raise  # 明示的に通す
 
         except Exception as e:
-            # その他の例外をキャッチしてログに出力
-            current_app.logger.error(f"Error validating email: {str(e)}")
+            current_app.logger.error(f"Error validating email: {str(e)}", exc_info=True)
             raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
                     
         
@@ -525,7 +524,8 @@ class User(UserMixin):
         item['administrator'] = {"BOOL": self.administrator}
         if self.date_of_birth:
             item['date_of_birth'] = {"S": str(self.date_of_birth)}
-            return item
+        
+        return item
         
 
 @cache.memoize(timeout=900)
@@ -1259,19 +1259,11 @@ from schedule.views import bp as bp_schedule
 for blueprint in [uguu, post, users]:
     app.register_blueprint(blueprint, url_prefix='/uguu')
 
-# 2. scheduleのBlueprint登録（forループの外）
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
 
 # if __name__ == "__main__":       
 #     app.run(debug=True)
 
 if __name__ == "__main__":
-    # 登録されているすべてのエンドポイントを表示
-    print("=== 登録されているエンドポイント ===")
-    for rule in app.url_map.iter_rules():
-        print(f"Endpoint: {rule.endpoint}, URL: {rule.rule}, Methods: {rule.methods}")
-    print("================================")
-    
-    app.config['SESSION_COOKIE_SECURE'] = False
-    app.config['SESSION_COOKIE_SAMESITE'] = None
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)
+
