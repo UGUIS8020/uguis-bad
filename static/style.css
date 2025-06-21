@@ -94,3 +94,27 @@ body {
 .btn:hover .fa-heart {
     transform: scale(1.1);
 }
+
+.question-link {
+  background: #ff5722;  
+  color: white;  
+  padding: 10px;
+  border-radius: 10px;
+  text-decoration: none;
+  display: block;
+  margin: 20px 0;
+  transition: background-color 0.3s ease;
+}
+
+.question-link:hover {
+  color: white;
+  background: #e64a19;
+}
+
+.question-link h2 {
+  color: white;
+  margin: 0;
+  font-weight: bold;
+}
+
+

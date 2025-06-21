@@ -73,62 +73,51 @@
         </button>
         
         <div class="collapse navbar-collapse" id="navbarNav">
-            <!-- 左側のメニュー -->            
             <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" aria-current="page" href="{{ url_for('bad_manager') }}">質問</a>
+                </li>
                 <li class="nav-item">
                     <a class="nav-link" aria-current="page" href="{{ url_for('uguu.show_timeline') }}">UGuU</a>
                 </li>
-            </ul>
-
-          <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto">
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('uguis2024_tournament') }}">鶯杯</a>
+                    <a class="nav-link" href="{{ url_for('gallery') }}">ギャラリー</a>
                 </li>
-
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('gallery') }}">ギャラリー</a>
+                    <a class="nav-link" href="{{ url_for('video_link') }}">動画集</a>
                 </li>
-
+                {% if current_user.is_authenticated and current_user.administrator %}
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('video_link') }}">動画集</a>
-                </li>
-
-                <li class="nav-item">                   
-                  {% if current_user.is_authenticated and current_user.administrator %}           
-                  <a class="nav-link" href="{{ url_for('user_maintenance') }}">登録者</a>
-                                
+                    <a class="nav-link" href="{{ url_for('user_maintenance') }}">登録者</a>
                 </li>    
-                <li class="nav-item">                   
-                            
-                  <a class="nav-link" href="{{ url_for('schedule.admin_schedules') }}">練習予定</a>
-                  {% endif %}                
-                </li>                      
-                                        
-                
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('schedule.admin_schedules') }}">練習予定</a>
+                </li>
+                {% endif %}
+            </ul>
+            
+            <ul class="navbar-nav">
                 {% if current_user.is_authenticated %}
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('logout') }}">ログアウト</a>
+                    <a class="nav-link" href="{{ url_for('logout') }}">ログアウト</a>
                 </li> 
                 {% else %}
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
+                    <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
                 </li>
                 {% endif %}   
 
                 <li class="nav-item">
-                  {% if current_user.is_authenticated %}
-                  <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.get_id()) }}">
-                      {{ current_user.display_name }}
-                  </a>
-                  {% endif %}
+                    {% if current_user.is_authenticated %}
+                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.get_id()) }}">
+                        {{ current_user.display_name }}
+                    </a>
+                    {% endif %}
                 </li>
-                         
             </ul>
-          </div>
         </div>
-      </nav>      
-      
+      </div>
+    </nav>      
   </header>
 
   {% from "_formhelpers.html" import render_field %}
@@ -136,10 +125,7 @@
   <div class="alert alert-info">{{ message }}</div>
   {% endfor %}
 
-
   {% block content %}
-
-  
   {% endblock %}
 
   <footer class="bg-dark text-white py-3 mt-5">

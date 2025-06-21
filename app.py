@@ -1247,6 +1247,10 @@ def user_profile(user_id):
 def uguis2024_tournament():
     return render_template("uguis2024_tournament.html")
 
+@app.route("/bad_manager")
+def bad_manager():
+    return render_template("bad_manager.html")
+
 @app.route("/videos")
 def video_link():
     return render_template("video_link.html")  
