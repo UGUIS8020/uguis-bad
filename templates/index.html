@@ -64,7 +64,7 @@
                         <div>
                             <h3>参加費</h3>
                             <p>初回1000円、2回目以降 男性700円 女性600円<br>
-                            未経験から15回は 鶯 Boot Camp15 1回1500円</p>
+                            未経験から15回は 鶯 Boot Camp15 1回1000円</p>
                         </div>
                         <h3>練習場所</h3>
                         <div class="mb-3">            
@@ -96,10 +96,16 @@
                 <p>募集中であれば参加できます。初参加の方はmailかLINEでご連絡いただけると助かります</p>
             </div>
             {% endif %} 
+           
+            
             
         <div class="d-flex flex-column align-items-center gap-3 mb-4" >
             <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
         </div>
+
+        <a class="question-link" href="{{ url_for('bad_manager') }}">
+            <h2>ご質問はこちら。</h2>
+        </a>
 
             <div class="schedule-title">
                 <h2>練習予定</h2>           
@@ -215,46 +221,6 @@
         </div>
     </section>
 </div>
-
-<style>
-.iframe-container {
-    background-color: #f4f4f4;
-    position: relative;
-    width: 80%;
-    height: 800px;  /* 固定の高さを設定 */          
-    margin:0 auto;
-    overflow: hidden;
-  }
-  .iframe-container iframe {
-    width: 100%;
-    height: 100%;   
-    margin: 0 auto;
-  }
-
-  .box1 {
-  border: solid 1px orange;
-  margin: 10px auto;   
-  padding: 10px;     
-  }
-  .box1 div {
-  text-align: center; /* 画像を囲むdiv内で中央揃え */
-  }
-</style>
-
-
-    <!-- 埋め込み用のセクション -->
-    <div class="iframe-container">
-        <iframe src="https://raiden-l534.onrender.com/" 
-                allowfullscreen 
-                loading="lazy"
-                title="自家歯牙移植・歯牙再植チャットボット">
-        </iframe>
-    </div>
-
-
-
-
-
 
       <section id="contact" class="mb-5 text-center">        
 
