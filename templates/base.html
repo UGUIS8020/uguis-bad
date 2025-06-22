@@ -109,7 +109,7 @@
                 </li>                   
             
                 <li class="nav-item">
-                    <a href="{{ url_for('account', user_id=current_user.id) }}" class="nav-link">
+                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.id) }}" class="nav-link">
                         {{ current_user.display_name | truncate(10) }}
                     </a> 
                 </li>
