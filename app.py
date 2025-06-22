@@ -1255,15 +1255,19 @@ def bad_manager():
 def video_link():
     return render_template("video_link.html")  
 
+dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+match_table = dynamodb.Table("match_entries")
 
 from uguu.timeline import uguu
 from uguu.users import users
 from schedule.views import bp as bp_schedule
+from game.views import bp_game
 
 for blueprint in [uguu, post, users]:
     app.register_blueprint(blueprint, url_prefix='/uguu')
 
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
+app.register_blueprint(bp_game, url_prefix='/game')
 
 if __name__ == "__main__":       
     app.run(debug=True)
