@@ -74,47 +74,124 @@
       <div class="list-group-item">休憩中のプレイヤーはいません</div>
     {% endfor %}
   </div>
+<!-- 試合が存在するかどうか -->
+{% if matches and matches|length > 0 %}
+  <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
 
-  <!-- 試合の組み合わせ表示 -->
-  {% if matches and matches|length > 0 %}
-    <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
-    
-    {% for court in matches %}
-    <div class="card mb-3">
+
+
+
+
+
+
+  {% for match in matches %}
+    <div class="card mb-3" id="court-{{ match.court }}">
       <div class="card-header bg-primary text-white">
-        コート {{ court.court }}
+        コート {{ match.court }}
       </div>
       <div class="card-body">
-        <div class="row">
-          {% for player in court.players %}
-            <div class="col-md-3 mb-2">
-              <div class="d-flex align-items-center">
-                <span class="badge {% if loop.index0 < 2 %}bg-danger{% else %}bg-info{% endif %} me-2">
-                  {{ 'A' if loop.index0 == 0 else 'B' if loop.index0 == 1 else 'C' if loop.index0 == 2 else 'D' }}
-                </span>
-                {{ player.display_name }}
-              </div>
+        <form class="score-form" data-court="{{ match.court }}">
+          <input type="hidden" name="match_id" value="{{ match_id }}">
+          <input type="hidden" name="court_number" value="{{ match.court }}">
+
+          <div class="row">
+            <!-- チームA -->
+            <div class="col-md-6">
+              <h5 class="text-danger">チームA</h5>
+              <ul>
+                {% for player in match.teamA %}
+                  <li>{{ player.display_name }}</li>
+                {% endfor %}
+              </ul>
+              <input type="number" name="score_team_a" placeholder="チームAスコア" required>
             </div>
-          {% endfor %}
-        </div>
+
+            <!-- チームB -->
+            <div class="col-md-6">
+              <h5 class="text-info">チームB</h5>
+              <ul>
+                {% for player in match.teamB %}
+                  <li>{{ player.display_name }}</li>
+                {% endfor %}
+              </ul>
+              <input type="number" name="score_team_b" placeholder="チームBスコア" required>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <button type="submit" class="btn btn-success btn-sm">スコア送信</button>
+            <span class="status-msg text-success ms-2"></span>
+          </div>
+        </form>
       </div>
     </div>
   {% endfor %}
-    
-    {% if rest and rest|length > 0 %}
-      <h4>試合に参加できなかったプレイヤー</h4>
-      <div class="list-group mb-4">
-        {% for player in rest %}
-          <div class="list-group-item">
-            {{ player.display_name }}
+
+
+
+
+      <!-- ✅ コート単位で1つだけスコア入力フォーム -->
+      <form method="POST" action="{{ url_for('game.submit_score', match_id=match_id, court_number=match.court) }}" class="mt-3">
+        <div class="row">
+          <div class="col-md-3">
+            <input type="number" name="score_team_a" class="form-control" placeholder="チームAスコア" required>
           </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% else %}
-    <div class="alert alert-info">
-      まだ試合の組み合わせが作成されていません。
+          <div class="col-md-3">
+            <input type="number" name="score_team_b" class="form-control" placeholder="チームBスコア" required>
+          </div>
+          <div class="col-md-3">
+            <button type="submit" class="btn btn-sm btn-success">スコア送信</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endfor %}
+
+  {% if rest and rest|length > 0 %}
+    <h4>試合に参加できなかったプレイヤー</h4>
+    <div class="list-group mb-4">
+      {% for player in rest %}
+        <div class="list-group-item">
+          {{ player.display_name }}
+        </div>
+      {% endfor %}
     </div>
   {% endif %}
+{% else %}
+  <div class="alert alert-info">
+    まだ試合の組み合わせが作成されていません。
+  </div>
+{% endif %}
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  document.querySelectorAll(".score-form").forEach(form => {
+    form.addEventListener("submit", async function(event) {
+      event.preventDefault();
+
+      const formData = new FormData(form);
+      const courtNumber = form.dataset.court;
+      const response = await fetch("/submit_score", {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
+      const statusMsg = form.querySelector(".status-msg");
+      if (result.success) {
+        statusMsg.textContent = `✅ コート${courtNumber} スコア登録完了`;
+      } else {
+        statusMsg.textContent = `⚠️ 登録失敗: ${result.message}`;
+        statusMsg.classList.remove("text-success");
+        statusMsg.classList.add("text-danger");
+      }
+    });
+  });
+});
+</script>
+
+
 </div>
 {% endblock %}

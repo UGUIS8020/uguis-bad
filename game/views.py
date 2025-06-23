@@ -16,62 +16,107 @@ user_table = dynamodb.Table("bad-users")
 @bp_game.route('/create_pairings')
 @login_required
 def create_pairings():
+    # ✅ エントリー中のプレイヤーを取得（match_id = 'pending' & entry_status = 'active'）
     response = match_table.scan(
-        FilterExpression="match_id = :pending",
-        ExpressionAttributeValues={":pending": "pending"}
+        FilterExpression=Attr("match_id").eq("pending") & Attr("entry_status").eq("active")
     )
     entries = response.get("Items", [])
+
+    # 🔍 取得したデータのログ出力
+    current_app.logger.info(f"✅ 取得エントリー数: {len(entries)}")
+    for e in entries:
+        current_app.logger.info(f"🔎 entry_id: {e.get('entry_id')}, match_id: {e.get('match_id')}, entry_status: {e.get('entry_status')}")
+
+    # 🛡 念のため明示的にフィルタ（文字列比較の安全性向上）
+    entries = [
+        e for e in entries
+        if str(e.get("match_id", "")).strip() == "pending"
+        and str(e.get("entry_status", "")).strip() == "active"
+    ]
+    current_app.logger.info(f"✅ フィルタ後エントリー数: {len(entries)}")
+
     if len(entries) < 4:
         flash("4人以上のエントリーが必要です。", "danger")
-        return redirect(url_for("index"))
+        current_app.logger.warning("⛔ エントリー人数不足。ペアリング中断。")
+        return redirect(url_for("game.pairings"))
 
-    match_id = f"match_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # 2. 試合IDを生成（例: 20250624_001）
+    match_id = generate_match_id()
+    current_app.logger.info(f"🆕 生成された match_id: {match_id}")
+
+    # 3. プレイヤーをシャッフル
     random.shuffle(entries)
     players = entries[:]
+    rest = []
 
-    # 休憩人数を計算（4人ずつでマッチを作るため）
-    rest_count = len(players) % 4
-    if rest_count:
+    if len(players) % 4 != 0:
+        rest_count = len(players) % 4
         rest = players[-rest_count:]
         players = players[:-rest_count]
-    else:
-        rest = []
+
+    current_app.logger.info(f"🧩 組み合わせ対象: {len(players)}人, 休憩者: {len(rest)}人")
 
     matches = []
-    court_number = 1  # コート番号を初期化
+    court_number = 1
 
-    matches = []
-    court_number = 1  # コート番号を初期化
-
-    for i in range(0, len(players), 4):  # 4人ごとに2vs2
+    # 5. 4人ずつで試合を作成
+    for i in range(0, len(players), 4):
         group = players[i:i + 4]
         if len(group) == 4:
-            # 全員にmatch_idとcourt番号を割り当てて更新
-            for p in group:
+            teamA = group[:2]
+            teamB = group[2:]
+            team_a_id = f"{match_id}_{court_number}A"
+            team_b_id = f"{match_id}_{court_number}B"
+            current_app.logger.info(f"🎾 コート{court_number}: {team_a_id} vs {team_b_id}")
+
+            for p in teamA:
+                current_app.logger.info(f"↪️ Aチーム: {p.get('display_name')} (entry_id: {p['entry_id']})")
                 match_table.update_item(
                     Key={"entry_id": p["entry_id"]},
-                    UpdateExpression="SET match_id = :m, court = :c",
+                    UpdateExpression="SET match_id = :m, court = :c, team = :t, entry_status = :s",
                     ExpressionAttributeValues={
                         ":m": match_id,
-                        ":c": court_number
+                        ":c": court_number,
+                        ":t": team_a_id,
+                        ":s": "playing"
                     }
                 )
-            # matchesにcourt番号とプレイヤーのリストを格納
+
+            for p in teamB:
+                current_app.logger.info(f"↪️ Bチーム: {p.get('display_name')} (entry_id: {p['entry_id']})")
+                match_table.update_item(
+                    Key={"entry_id": p["entry_id"]},
+                    UpdateExpression="SET match_id = :m, court = :c, team = :t, entry_status = :s",
+                    ExpressionAttributeValues={
+                        ":m": match_id,
+                        ":c": court_number,
+                        ":t": team_b_id,
+                        ":s": "playing"
+                    }
+                )
+
             matches.append({
                 "court": court_number,
-                "players": group
+                "teamA": teamA,
+                "teamB": teamB
             })
             court_number += 1
 
-    # 休憩者はmatch_idをセットしcourtは空にする（または削除）
+    # 6. 休憩者の処理
     for p in rest:
+        current_app.logger.info(f"🪑 休憩: {p.get('display_name')} (entry_id: {p['entry_id']})")
         match_table.update_item(
             Key={"entry_id": p["entry_id"]},
-            UpdateExpression="SET match_id = :m REMOVE court",
-            ExpressionAttributeValues={":m": match_id}
+            UpdateExpression="SET match_id = :m, entry_status = :s REMOVE court, team",
+            ExpressionAttributeValues={
+                ":m": match_id,
+                ":s": "playing"
+            }
         )
 
+    flash("ペアリングが完了しました", "success")
     return render_template("game/pairings.html", matches=matches, rest=rest, match_id=match_id)
+
 
 @bp_game.route("/pairings")
 @login_required
@@ -179,58 +224,53 @@ def generate_match_id():
 def register():
     """参加登録または休憩から復帰"""
     try:
-        # 既に参加中かどうか確認
+        # すでに "pending" 状態か確認
         pending_response = match_table.scan(
             FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('pending')
         )
-        
         if pending_response.get('Items'):
             flash("すでに参加登録されています", "info")
             return redirect(url_for("game.pairings"))
         
-        # 休憩中かどうか確認
+        # "resting" 状態なら pending に戻す
         resting_response = match_table.scan(
             FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
         )
-        
         resting_items = resting_response.get('Items', [])
-        
         if resting_items:
-            # 休憩中のエントリーを参加中に戻す
             for item in resting_items:
                 match_table.update_item(
                     Key={'entry_id': item['entry_id']},
-                    UpdateExpression="SET match_id = :pending_status",
+                    UpdateExpression="SET match_id = :pending, entry_status = :status",
                     ExpressionAttributeValues={
-                        ':pending_status': 'pending'
+                        ':pending': 'pending',
+                        ':status': 'active'
                     }
                 )
-            
             flash("休憩から復帰しました。引き続き参加します", "success")
             return redirect(url_for("game.pairings"))
         
-        # 新規エントリー作成
+        # 新規エントリー
         entry_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         
-        # ユーザー情報からバドミントン経験を取得
-        badminton_experience = getattr(current_user, 'badminton_experience', '不明')
+        # skill_score の取得
         user_response = user_table.get_item(Key={"user#user_id": current_user.get_id()})
-        skill_score = user_response.get("Item", {}).get("skill_score", 50)  # 見つからない場合は 50
+        skill_score = user_response.get("Item", {}).get("skill_score", 50)
 
-        # エントリー登録に追加
+        # 登録（←ここで entry_status を追加）
         match_table.put_item(Item={
             'entry_id': entry_id,
             'user_id': current_user.get_id(),
             'match_id': "pending",
+            'entry_status': "active",  # ← 追加！
             'display_name': current_user.display_name,
-            'badminton_experience': badminton_experience,
-            'skill_score': skill_score,  # ← 追加
+            'skill_score': skill_score,
             'joined_at': now
         })
         
         flash("参加登録が完了しました", "success")
-        
+    
     except Exception as e:
         current_app.logger.error(f"参加登録エラー: {str(e)}")
         flash(f"参加登録中にエラーが発生しました: {str(e)}", "danger")
@@ -303,14 +343,7 @@ def rest():
 
 @bp_game.route("/join_match", methods=["POST"])
 @login_required
-def join_match():
-    """試合に参加登録する"""
-    badminton_experience = request.form.get("badminton_experience")
-    
-    # 入力検証
-    if not badminton_experience:
-        flash("バドミントン経験を選択してください", "danger")
-        return redirect(url_for("index"))
+def join_match():   
     
     # ユーザーがすでに参加しているか確認
     response = match_table.scan(
@@ -329,8 +362,7 @@ def join_match():
     item = {
         "entry_id": str(uuid.uuid4()),
         "user_id": current_user.id,
-        "display_name": current_user.name,
-        "badminton_experience": badminton_experience,
+        "display_name": current_user.name,        
         "joined_at": datetime.now().isoformat(),
         "match_id": "pending"  # 試合組み前はpendingステータス
     }
@@ -339,6 +371,74 @@ def join_match():
     flash("参加登録しました！", "success")
     
     return redirect(url_for("game.pairings"))  # 統合ページへリダイレクト
+
+# @bp_game.route('/submit_score/<match_id>/<int:court_number>', methods=["POST"])
+# @login_required
+# def submit_score(match_id, court_number):
+#     """スコア送信 → コートのプレイヤーを pending に戻す"""
+#     if not current_user.administrator:
+#         flash("スコア送信は管理者のみ可能です", "danger")
+#         return redirect(url_for("game.pairings"))
+
+#     try:
+#         # 入力されたスコア（保存しても、ログ出力だけでもOK）
+#         score_a = request.form.get("score_team_a")
+#         score_b = request.form.get("score_team_b")
+#         current_app.logger.info(f"✅ Court {court_number} のスコア: A={score_a}, B={score_b}")
+
+#         # 対象のコートのプレイヤー取得
+#         response = match_table.scan(
+#             FilterExpression=Attr('match_id').eq(match_id) & Attr('court').eq(court_number)
+#         )
+#         players = response.get("Items", [])
+
+#         for player in players:
+#             match_table.update_item(
+#                 Key={"entry_id": player["entry_id"]},
+#                 UpdateExpression="SET match_id = :pending, entry_status = :active REMOVE court, team",
+#                 ExpressionAttributeValues={
+#                     ":pending": "pending",
+#                     ":active": "active"
+#                 }
+#             )
+
+#         flash(f"コート{court_number}のスコアを登録し、プレイヤーを待機状態に戻しました", "success")
+#     except Exception as e:
+#         current_app.logger.error(f"[スコア送信エラー] court={court_number}: {e}")
+#         flash("スコア送信中にエラーが発生しました", "danger")
+
+#     return redirect(url_for("game.pairings"))
+
+
+@bp_game.route("/submit_score", methods=["POST"])
+@login_required
+def submit_score():
+    try:
+        match_id = request.form["match_id"]
+        court_number = int(request.form["court_number"])
+        score_a = int(request.form["score_team_a"])
+        score_b = int(request.form["score_team_b"])
+
+        # 該当するエントリを取得して status を更新
+        response = match_table.scan(
+            FilterExpression=Attr("match_id").eq(match_id) & Attr("court").eq(court_number)
+        )
+        entries = response.get("Items", [])
+
+        for entry in entries:
+            match_table.update_item(
+                Key={"entry_id": entry["entry_id"]},
+                UpdateExpression="SET match_id = :resting, entry_status = :status REMOVE court, team",
+                ExpressionAttributeValues={
+                    ":resting": "resting",
+                    ":status": "active"
+                }
+            )
+
+        return {"success": True}, 200
+    except Exception as e:
+        current_app.logger.error(f"スコア登録エラー: {str(e)}")
+        return {"success": False, "message": str(e)}, 500
 
 # @bp_game.route("/create_pairings")
 # @login_required
@@ -398,28 +498,27 @@ def create_test_data():
         flash('管理者のみ実行可能です', 'danger')
         return redirect(url_for('index'))
     
-    # テスト用の参加者データ
     test_players = [
-        {'display_name': '田中太郎', 'badminton_experience': '初心者'},
-        {'display_name': '佐藤花子', 'badminton_experience': '1年未満'},
-        {'display_name': '鈴木一郎', 'badminton_experience': '1-2年'},
-        {'display_name': '高橋美咲', 'badminton_experience': '3年以上'},
-        {'display_name': '山田健太', 'badminton_experience': '1年未満'},
-        {'display_name': '渡辺さくら', 'badminton_experience': '初心者'},
-        {'display_name': '松本大輔', 'badminton_experience': '3年以上'},
-        {'display_name': '中村実', 'badminton_experience': '1-2年'},
+        {'display_name': '田中太郎'},
+        {'display_name': '佐藤花子'},
+        {'display_name': '鈴木一郎'},
+        {'display_name': '高橋美咲'},
+        {'display_name': '山田健太'},
+        {'display_name': '渡辺さくら'},
+        {'display_name': '松本大輔'},
+        {'display_name': '中村実'},
     ]
     
     try:
-        # pendingステータスでテストデータを作成
         for i, player in enumerate(test_players):
             item = {
                 'entry_id': str(uuid.uuid4()),
                 'user_id': f'test_user_{i}',
                 'display_name': player['display_name'],
-                'badminton_experience': player['badminton_experience'],
                 'joined_at': datetime.now().isoformat(),
-                'match_id': "pending"  # pendingステータス
+                'match_id': "pending",
+                'entry_status': "active",  # ← 追加
+                'skill_score': 50  # ← 任意（必要なら）
             }
             match_table.put_item(Item=item)
         
@@ -428,7 +527,7 @@ def create_test_data():
     except Exception as e:
         flash(f'テストデータ作成に失敗: {e}', 'danger')
     
-    return redirect(url_for('game.pairings'))  # 統合ページへリダイレクト
+    return redirect(url_for('game.pairings'))
 
 @bp_game.route('/test_data_status')
 @login_required
