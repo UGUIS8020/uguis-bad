@@ -1256,7 +1256,7 @@ def video_link():
     return render_template("video_link.html")  
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
-match_table = dynamodb.Table("match_entries")
+match_table = dynamodb.Table("bad-game-match_entries")
 
 from uguu.timeline import uguu
 from uguu.users import users

@@ -1,40 +1,41 @@
 import boto3
+from boto3.dynamodb.conditions import Attr
 
-# DynamoDB リソース初期化（東京リージョン）
-dynamodb = boto3.client('dynamodb', region_name='ap-northeast-1')
+dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+match_entries_table = dynamodb.Table("bad-game-match_entries")
 
-# テーブル作成
-def create_match_entries_table():
-    try:
-        response = dynamodb.create_table(
-            TableName='match_entries',
-            KeySchema=[
-                {
-                    'AttributeName': 'match_id',
-                    'KeyType': 'HASH'  # パーティションキー
-                },
-                {
-                    'AttributeName': 'user_id',
-                    'KeyType': 'RANGE'  # ソートキー
-                }
-            ],
-            AttributeDefinitions=[
-                {
-                    'AttributeName': 'match_id',
-                    'AttributeType': 'S'
-                },
-                {
-                    'AttributeName': 'user_id',
-                    'AttributeType': 'S'
-                }
-            ],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        print("✅ match_entries テーブル作成開始:", response['TableDescription']['TableName'])
-    except dynamodb.exceptions.ResourceInUseException:
-        print("⚠️ テーブル 'match_entries' はすでに存在します。")
-    except Exception as e:
-        print("❌ エラー:", e)
+def update_entries():
+    last_evaluated_key = None
+    while True:
+        if last_evaluated_key:
+            response = match_entries_table.scan(ExclusiveStartKey=last_evaluated_key)
+        else:
+            response = match_entries_table.scan()
+        
+        items = response.get("Items", [])
+        
+        for item in items:
+            entry_id = item.get("entry_id")
+            if not entry_id:
+                print("entry_idがありません。スキップします。", item)
+                continue
 
-# 実行
-create_match_entries_table()
+            update_expr = "SET court = :court REMOVE badminton_experience"
+            expr_attr_values = {":court": ""}
+            
+            try:
+                match_entries_table.update_item(
+                    Key={"entry_id": entry_id},
+                    UpdateExpression=update_expr,
+                    ExpressionAttributeValues=expr_attr_values
+                )
+                print(f"✅ 更新成功: {entry_id}")
+            except Exception as e:
+                print(f"❌ 更新失敗: {entry_id}, エラー: {e}")
+        
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key:
+            break
+
+if __name__ == "__main__":
+    update_entries()

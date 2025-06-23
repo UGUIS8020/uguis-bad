@@ -1,35 +1,120 @@
 {% extends "base.html" %}
 
-{% block title %}試合の組み合わせ{% endblock %}
 {% block content %}
+<div class="container mt-5 pt-3">
+  <h1>本日の試合組み合わせ</h1>
+  
+  <!-- 管理者用ペアリング実行ボタン -->
+  {% if current_user.administrator %}
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <a href="{{ url_for('game.create_pairings') }}" class="btn btn-primary">
+      ペアリングを実行する
+    </a>
+  </div>
+  {% endif %}
 
-{% if current_user.is_authenticated %}
-  <a href="{{ url_for('game.join_match') }}" class="btn btn-primary">試合に参加</a>
-{% endif %}
+  <!-- ユーザーの状態に応じたアクションボタン -->
+  <div class="mb-4">
+    {% if is_registered %}
+      <div class="alert alert-success">
+        あなたは参加登録中です。試合開始までお待ちください。
+      </div>
+      <div class="btn-group">
+        <a href="{{ url_for('game.cancel') }}" class="btn btn-outline-danger">
+          <i class="fas fa-sign-out-alt"></i> コートから出る
+        </a>
+        <a href="{{ url_for('game.rest') }}" class="btn btn-outline-warning">
+          <i class="fas fa-coffee"></i> 休憩する
+        </a>
+      </div>
+    {% elif is_resting %}
+      <div class="alert alert-warning">
+        あなたは休憩中です。
+      </div>
+      <div class="btn-group">
+        <a href="{{ url_for('game.register') }}" class="btn btn-outline-success">
+          <i class="fas fa-play"></i> 再開する
+        </a>
+        <a href="{{ url_for('game.cancel') }}" class="btn btn-outline-danger">
+          <i class="fas fa-times"></i> 完全にキャンセル
+        </a>
+      </div>
+    {% else %}
+      <div class="alert alert-info">
+        参加するには「コートに入る」ボタンを押してください。
+      </div>
+      <a href="{{ url_for('game.register') }}" class="btn btn-success">
+        <i class="fas fa-sign-in-alt"></i> コートに入る
+      </a>
+    {% endif %}
+  </div>
 
-<div class="container mt-5">
-  <h2 class="mb-4">本日の試合組み合わせ</h2>
+  <!-- 参加待ちプレイヤー一覧 -->
+  <h3>参加待ちプレイヤー ({{ pending_players|length }}人)</h3>
+  <div class="list-group mb-4">
+    {% for player in pending_players %}
+      <div class="list-group-item d-flex justify-content-between align-items-center">
+        {{ player.display_name }}
+        <span class="badge bg-primary">{{ player.badminton_experience }}</span>
+      </div>
+    {% else %}
+      <div class="list-group-item">参加待ちプレイヤーはいません</div>
+    {% endfor %}
+  </div>
 
-  {% if matches %}
-    {% for match in matches %}
-      <div class="card my-3">
-        <div class="card-body">
-          <strong>{{ match.team1[0] }} ＆ {{ match.team1[1] }}</strong>
-          VS
-          <strong>{{ match.team2[0] }} ＆ {{ match.team2[1] }}</strong>
+  <!-- 休憩中プレイヤー一覧 -->
+  <h3>休憩中プレイヤー ({{ resting_players|length }}人)</h3>
+  <div class="list-group mb-4">
+    {% for player in resting_players %}
+      <div class="list-group-item d-flex justify-content-between align-items-center">
+        {{ player.display_name }}
+        <span class="badge bg-warning text-dark">{{ player.badminton_experience }}</span>
+      </div>
+    {% else %}
+      <div class="list-group-item">休憩中のプレイヤーはいません</div>
+    {% endfor %}
+  </div>
+
+  <!-- 試合の組み合わせ表示 -->
+  {% if matches and matches|length > 0 %}
+    <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
+    
+    {% for court in matches %}
+    <div class="card mb-3">
+      <div class="card-header bg-primary text-white">
+        コート {{ court.court }}
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for player in court.players %}
+            <div class="col-md-3 mb-2">
+              <div class="d-flex align-items-center">
+                <span class="badge {% if loop.index0 < 2 %}bg-danger{% else %}bg-info{% endif %} me-2">
+                  {{ 'A' if loop.index0 == 0 else 'B' if loop.index0 == 1 else 'C' if loop.index0 == 2 else 'D' }}
+                </span>
+                {{ player.display_name }}
+              </div>
+            </div>
+          {% endfor %}
         </div>
       </div>
-    {% endfor %}
+    </div>
+  {% endfor %}
+    
+    {% if rest and rest|length > 0 %}
+      <h4>試合に参加できなかったプレイヤー</h4>
+      <div class="list-group mb-4">
+        {% for player in rest %}
+          <div class="list-group-item">
+            {{ player.display_name }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
   {% else %}
-    <p>まだ十分な参加者がいません。</p>
-  {% endif %}
-
-  {% if rest %}
-    <div class="alert alert-warning mt-4">
-      休憩ペア: {{ rest[0] }}{% if rest|length > 1 %} ＆ {{ rest[1] }}{% endif %}
+    <div class="alert alert-info">
+      まだ試合の組み合わせが作成されていません。
     </div>
   {% endif %}
-
-
 </div>
 {% endblock %}
