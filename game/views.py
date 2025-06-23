@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 import random
 from boto3.dynamodb.conditions import Key, Attr
+from flask import jsonify
 
 bp_game = Blueprint('game', __name__)
 
@@ -435,10 +436,10 @@ def submit_score():
                 }
             )
 
-        return {"success": True}, 200
+        return jsonify({"success": True}), 200  # ✅ ここが重要！
     except Exception as e:
         current_app.logger.error(f"スコア登録エラー: {str(e)}")
-        return {"success": False, "message": str(e)}, 500
+        return jsonify({"success": False, "message": str(e)}), 500  # ✅ こちらも修正！
 
 # @bp_game.route("/create_pairings")
 # @login_required

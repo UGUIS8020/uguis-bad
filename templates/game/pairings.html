@@ -74,15 +74,11 @@
       <div class="list-group-item">休憩中のプレイヤーはいません</div>
     {% endfor %}
   </div>
+
+  
 <!-- 試合が存在するかどうか -->
 {% if matches and matches|length > 0 %}
   <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
-
-
-
-
-
-
 
   {% for match in matches %}
     <div class="card mb-3" id="court-{{ match.court }}">
@@ -125,7 +121,24 @@
         </form>
       </div>
     </div>
-  {% endfor %}
+  {% endfor %}  <!-- ✅ ここでループ終了 -->
+
+  {% if rest and rest|length > 0 %}
+    <h4>試合に参加できなかったプレイヤー</h4>
+    <div class="list-group mb-4">
+      {% for player in rest %}
+        <div class="list-group-item">
+          {{ player.display_name }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+{% else %}
+  <div class="alert alert-info">
+    まだ試合の組み合わせが作成されていません。
+  </div>
+{% endif %}
 
 
 
@@ -146,7 +159,7 @@
       </form>
     </div>
   </div>
-{% endfor %}
+{% endfor %} 
 
   {% if rest and rest|length > 0 %}
     <h4>試合に参加できなかったプレイヤー</h4>
@@ -173,7 +186,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
       const formData = new FormData(form);
       const courtNumber = form.dataset.court;
-      const response = await fetch("/submit_score", {
+      const response = await fetch("/game/submit_score", {
         method: "POST",
         body: formData
       });
