@@ -112,7 +112,12 @@
             <ul class="navbar-nav ms-auto">
                 {% if current_user.is_authenticated %}
                 <li class="nav-item">
-                    <a class="btn btn-outline-danger ms-2" href="{{ url_for('game.register') }}">                        
+                    <a class="btn btn-outline-danger ms-2" 
+                       href="{{ url_for('game.waiting') }}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       title="新しいタブで待機画面を開きます">                        
+                        <i class="fas fa-external-link-alt me-1"></i>
                         コートに入る                        
                     </a>
                 </li>

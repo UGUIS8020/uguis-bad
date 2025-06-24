@@ -4,7 +4,6 @@
 <div class="container mt-5 pt-3">
   <h1>本日の試合組み合わせ</h1>
   
-  <!-- 管理者用ペアリング実行ボタン -->
   {% if current_user.administrator %}
   <div class="d-flex justify-content-between align-items-center mb-4">
     <a href="{{ url_for('game.create_pairings') }}" class="btn btn-primary">
@@ -13,7 +12,6 @@
   </div>
   {% endif %}
 
-  <!-- ユーザーの状態に応じたアクションボタン -->
   <div class="mb-4">
     {% if is_registered %}
       <div class="alert alert-success">
@@ -32,7 +30,7 @@
         あなたは休憩中です。
       </div>
       <div class="btn-group">
-        <a href="{{ url_for('game.register') }}" class="btn btn-outline-success">
+        <a href="{{ url_for('game.waiting') }}" class="btn btn-outline-success">
           <i class="fas fa-play"></i> 再開する
         </a>
         <a href="{{ url_for('game.cancel') }}" class="btn btn-outline-danger">
@@ -43,13 +41,12 @@
       <div class="alert alert-info">
         参加するには「コートに入る」ボタンを押してください。
       </div>
-      <a href="{{ url_for('game.register') }}" class="btn btn-success">
+      <a href="{{ url_for('game.waiting') }}" class="btn btn-success">
         <i class="fas fa-sign-in-alt"></i> コートに入る
       </a>
     {% endif %}
   </div>
 
-  <!-- 参加待ちプレイヤー一覧 -->
   <h3>参加待ちプレイヤー ({{ pending_players|length }}人)</h3>
   <div class="list-group mb-4">
     {% for player in pending_players %}
@@ -62,7 +59,6 @@
     {% endfor %}
   </div>
 
-  <!-- 休憩中プレイヤー一覧 -->
   <h3>休憩中プレイヤー ({{ resting_players|length }}人)</h3>
   <div class="list-group mb-4">
     {% for player in resting_players %}
@@ -75,12 +71,9 @@
     {% endfor %}
   </div>
 
-  
-<!-- 試合が存在するかどうか -->
-{% if matches and matches|length > 0 %}
-  <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
-
-  {% for match in matches %}
+  {% if matches and matches|length > 0 %}
+    <h3>現在の試合 (マッチID: {{ match_id|default('なし') }})</h3>
+    {% for match in matches %}
     <div class="card mb-3" id="court-{{ match.court }}">
       <div class="card-header bg-primary text-white">
         コート {{ match.court }}
@@ -91,7 +84,6 @@
           <input type="hidden" name="court_number" value="{{ match.court }}">
 
           <div class="row">
-            <!-- チームA -->
             <div class="col-md-6">
               <h5 class="text-danger">チームA</h5>
               <ul>
@@ -102,7 +94,6 @@
               <input type="number" name="score_team_a" placeholder="チームAスコア" required>
             </div>
 
-            <!-- チームB -->
             <div class="col-md-6">
               <h5 class="text-info">チームB</h5>
               <ul>
@@ -121,84 +112,109 @@
         </form>
       </div>
     </div>
-  {% endfor %}  <!-- ✅ ここでループ終了 -->
+    {% endfor %}
 
-  {% if rest and rest|length > 0 %}
-    <h4>試合に参加できなかったプレイヤー</h4>
-    <div class="list-group mb-4">
-      {% for player in rest %}
-        <div class="list-group-item">
-          {{ player.display_name }}
-        </div>
-      {% endfor %}
+    {% if rest and rest|length > 0 %}
+      <h4>試合に参加できなかったプレイヤー</h4>
+      <div class="list-group mb-4">
+        {% for player in rest %}
+          <div class="list-group-item">
+            {{ player.display_name }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="alert alert-info">
+      まだ試合の組み合わせが作成されていません。
     </div>
   {% endif %}
+</div>
 
-{% else %}
-  <div class="alert alert-info">
-    まだ試合の組み合わせが作成されていません。
-  </div>
-{% endif %}
+<div id="score-container" data-total-courts="{{ matches|length }}"></div>
 
+<!-- <script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const totalCourts = parseInt(document.getElementById("score-container").dataset.totalCourts);
+    const completedCourts = new Set();
 
+    document.querySelectorAll(".score-form").forEach(form => {
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
 
+        const formData = new FormData(form);
+        const courtNumber = form.dataset.court;
+        const response = await fetch("/game/submit_score", {
+          method: "POST",
+          body: formData
+        });
 
-      <!-- ✅ コート単位で1つだけスコア入力フォーム -->
-      <form method="POST" action="{{ url_for('game.submit_score', match_id=match_id, court_number=match.court) }}" class="mt-3">
-        <div class="row">
-          <div class="col-md-3">
-            <input type="number" name="score_team_a" class="form-control" placeholder="チームAスコア" required>
-          </div>
-          <div class="col-md-3">
-            <input type="number" name="score_team_b" class="form-control" placeholder="チームBスコア" required>
-          </div>
-          <div class="col-md-3">
-            <button type="submit" class="btn btn-sm btn-success">スコア送信</button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
-{% endfor %} 
+        const result = await response.json();
+        const statusMsg = form.querySelector(".status-msg");
 
-  {% if rest and rest|length > 0 %}
-    <h4>試合に参加できなかったプレイヤー</h4>
-    <div class="list-group mb-4">
-      {% for player in rest %}
-        <div class="list-group-item">
-          {{ player.display_name }}
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-{% else %}
-  <div class="alert alert-info">
-    まだ試合の組み合わせが作成されていません。
-  </div>
-{% endif %}
+        if (result.success) {
+          statusMsg.textContent = `✅ コート${courtNumber} スコア登録完了`;
+          completedCourts.add(courtNumber);
 
+          if (completedCourts.size === totalCourts) {
+            console.log("すべてのスコアが登録されたので、新しいペアリングを実行します...");
+
+            const res = await fetch("/game/create_pairings", { method: "POST" });
+            if (res.ok) {
+              window.location.href = "/game/pairings";
+            } else {
+              alert("ペアリング作成に失敗しました");
+            }
+          }
+        } else {
+          statusMsg.textContent = "⚠️ 登録失敗: " + result.message;
+          statusMsg.classList.remove("text-success");
+          statusMsg.classList.add("text-danger");
+        }
+      });
+    });
+  });
+
+  
+</script> -->
 
 <script>
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
+  const totalCourts = parseInt(document.getElementById("score-container").dataset.totalCourts);
+  const completedCourts = new Set();
+
   document.querySelectorAll(".score-form").forEach(form => {
-    form.addEventListener("submit", async function(event) {
+    form.addEventListener("submit", async function (event) {
       event.preventDefault();
 
-      const formData = new FormData(form);
-      const courtNumber = form.dataset.court;
-      const response = await fetch("/game/submit_score", {
-        method: "POST",
-        body: formData
-      });
+      try {
+        const formData = new FormData(form);
+        const courtNumber = form.dataset.court;
+        
+        const response = await fetch("/game/submit_score", {
+          method: "POST",
+          body: formData
+        });
 
-      const result = await response.json();
-      const statusMsg = form.querySelector(".status-msg");
-      if (result.success) {
-        statusMsg.textContent = `✅ コート${courtNumber} スコア登録完了`;
-      } else {
-        statusMsg.textContent = `⚠️ 登録失敗: ${result.message}`;
-        statusMsg.classList.remove("text-success");
-        statusMsg.classList.add("text-danger");
+        const result = await response.json();
+        const statusMsg = form.querySelector(".status-msg");
+
+        if (result.success) {
+          statusMsg.textContent = `✅ コート${courtNumber} スコア登録完了`;
+          completedCourts.add(courtNumber);
+
+          // 全コートのスコアが完了した場合の処理は削除
+          // 管理者が手動で「ペアリングを実行する」ボタンを押すまで待機
+          
+        } else {
+          statusMsg.textContent = "⚠️ 登録失敗: " + result.message;
+          statusMsg.classList.remove("text-success");
+          statusMsg.classList.add("text-danger");
+        }
+      } catch (error) {
+        console.error("エラー:", error);
+        const statusMsg = form.querySelector(".status-msg");
+        statusMsg.textContent = "⚠️ 通信エラーが発生しました";
       }
     });
   });
@@ -206,5 +222,6 @@ document.addEventListener("DOMContentLoaded", function() {
 </script>
 
 
-</div>
+
+
 {% endblock %}

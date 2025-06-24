@@ -4,7 +4,7 @@ import boto3
 import uuid
 from datetime import datetime
 import random
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 
 bp_game = Blueprint('game', __name__)
@@ -14,7 +14,7 @@ dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
 match_table = dynamodb.Table('bad-game-match_entries')
 user_table = dynamodb.Table("bad-users")
 
-@bp_game.route('/create_pairings')
+@bp_game.route('/create_pairings', methods=["GET", "POST"])
 @login_required
 def create_pairings():
     # ✅ エントリー中のプレイヤーを取得（match_id = 'pending' & entry_status = 'active'）
@@ -115,8 +115,11 @@ def create_pairings():
             }
         )
 
-    flash("ペアリングが完了しました", "success")
-    return render_template("game/pairings.html", matches=matches, rest=rest, match_id=match_id)
+    if request.method == "POST" or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({"success": True, "match_id": match_id})
+    else:
+        flash("ペアリングが完了しました", "success")
+        return render_template("game/pairings.html", matches=matches, rest=rest, match_id=match_id)
 
 
 @bp_game.route("/pairings")
@@ -125,13 +128,25 @@ def pairings():
     """試合組み合わせ・参加者一覧ページ (統合版)"""
     # 1. 参加待ちプレイヤー（pendingステータス）を取得
     pending_response = match_table.scan(
-        FilterExpression=Attr('match_id').eq('pending')
-    )
+        FilterExpression=And(
+            Attr('match_id').eq('pending'),
+            Attr('entry_status').eq('active')
+        )
+    )  
+    
     pending_players = pending_response.get("Items", [])
+
+    # 👇ログ追加
+    current_app.logger.info(f"🔎 pending_players: {len(pending_players)} 件")
+    for p in pending_players:
+        current_app.logger.info(f"👤 {p.get('display_name')} (entry_id: {p.get('entry_id')}) match_id: {p.get('match_id')} status: {p.get('entry_status')}")
     
     # 2. 休憩中のプレイヤーを取得
     resting_response = match_table.scan(
-        FilterExpression=Attr('match_id').eq('resting')
+        FilterExpression=And(
+            Attr('match_id').eq('resting'),
+            Attr('entry_status').eq('active')
+        )
     )
     resting_players = resting_response.get("Items", [])
     
@@ -220,63 +235,124 @@ def generate_match_id():
     match_id = f"{today_str}_{count:03d}"  # "20250623_001"
     return match_id
 
-@bp_game.route("/register")
-@login_required
-def register():
-    """参加登録または休憩から復帰"""
-    try:
-        # すでに "pending" 状態か確認
-        pending_response = match_table.scan(
-            FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('pending')
-        )
-        if pending_response.get('Items'):
-            flash("すでに参加登録されています", "info")
-            return redirect(url_for("game.pairings"))
+# @bp_game.route("/register")
+# @login_required
+# def register():
+#     """参加登録または休憩から復帰"""
+#     try:
+#         # すでに "pending" 状態か確認
+#         pending_response = match_table.scan(
+#             FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('pending')
+#         )
+#         if pending_response.get('Items'):
+#             flash("すでに参加登録されています", "info")
+#             return redirect(url_for("game.pairings"))
         
-        # "resting" 状態なら pending に戻す
-        resting_response = match_table.scan(
-            FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
-        )
-        resting_items = resting_response.get('Items', [])
-        if resting_items:
-            for item in resting_items:
-                match_table.update_item(
-                    Key={'entry_id': item['entry_id']},
-                    UpdateExpression="SET match_id = :pending, entry_status = :status",
-                    ExpressionAttributeValues={
-                        ':pending': 'pending',
-                        ':status': 'active'
-                    }
-                )
-            flash("休憩から復帰しました。引き続き参加します", "success")
-            return redirect(url_for("game.pairings"))
+#         # "resting" 状態なら pending に戻す
+#         resting_response = match_table.scan(
+#             FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
+#         )
+#         resting_items = resting_response.get('Items', [])
+#         if resting_items:
+#             for item in resting_items:
+#                 match_table.update_item(
+#                     Key={'entry_id': item['entry_id']},
+#                     UpdateExpression="SET match_id = :pending, entry_status = :status",
+#                     ExpressionAttributeValues={
+#                         ':pending': 'pending',
+#                         ':status': 'active'
+#                     }
+#                 )
+#             flash("休憩から復帰しました。引き続き参加します", "success")
+#             return redirect(url_for("game.pairings"))
         
-        # 新規エントリー
-        entry_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+#         # 新規エントリー
+#         entry_id = str(uuid.uuid4())
+#         now = datetime.now().isoformat()
         
-        # skill_score の取得
-        user_response = user_table.get_item(Key={"user#user_id": current_user.get_id()})
-        skill_score = user_response.get("Item", {}).get("skill_score", 50)
+#         # skill_score の取得
+#         user_response = user_table.get_item(Key={"user#user_id": current_user.get_id()})
+#         skill_score = user_response.get("Item", {}).get("skill_score", 50)
 
-        # 登録（←ここで entry_status を追加）
-        match_table.put_item(Item={
-            'entry_id': entry_id,
-            'user_id': current_user.get_id(),
-            'match_id': "pending",
-            'entry_status': "active",  # ← 追加！
-            'display_name': current_user.display_name,
-            'skill_score': skill_score,
-            'joined_at': now
-        })
+#         # 登録（←ここで entry_status を追加）
+#         match_table.put_item(Item={
+#             'entry_id': entry_id,
+#             'user_id': current_user.get_id(),
+#             'match_id': "pending",
+#             'entry_status': "active",  # ← 追加！
+#             'display_name': current_user.display_name,
+#             'skill_score': skill_score,
+#             'joined_at': now
+#         })
         
-        flash("参加登録が完了しました", "success")
+#         flash("参加登録が完了しました", "success")
+    
+#     except Exception as e:
+#         current_app.logger.error(f"参加登録エラー: {str(e)}")
+#         flash(f"参加登録中にエラーが発生しました: {str(e)}", "danger")
+    
+#     return redirect(url_for("game.pairings"))
+
+@bp_game.route("/waiting")
+@login_required
+def waiting():
+    """待機画面（アクセス時に自動参加登録）"""
+    try:
+        # 自動参加登録処理
+        auto_register_user()
+        
+        # 待機画面のデータを取得
+        pending_players = get_pending_players()
+        resting_players = get_resting_players()
+        
+        # ユーザーの現在の状態を確認
+        user_status = get_user_status(current_user.get_id())
+        
+        return render_template('game/waiting.html',
+                     pending_players=pending_players,
+                     resting_players=resting_players,
+                     is_registered=user_status['is_registered'],
+                     is_resting=user_status['is_resting'],
+                     current_user_skill_score=user_status['skill_score'])
     
     except Exception as e:
-        current_app.logger.error(f"参加登録エラー: {str(e)}")
-        flash(f"参加登録中にエラーが発生しました: {str(e)}", "danger")
+        current_app.logger.error(f"待機画面エラー: {str(e)}")
+        flash(f"エラーが発生しました: {str(e)}", "danger")
+        # main.dashboard → game.pairings に変更
+        return redirect(url_for("game.pairings"))
+
+def auto_register_user():
+    """自動参加登録（register関数のロジックを流用）"""
+    # すでに "pending" 状態か確認
+    pending_response = match_table.scan(
+        FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('pending')
+    )
+    if pending_response.get('Items'):
+        return  # すでに登録済み
     
-    return redirect(url_for("game.pairings"))
+    # "resting" 状態なら何もしない（手動で復帰してもらう）
+    resting_response = match_table.scan(
+        FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
+    )
+    if resting_response.get('Items'):
+        return  # 休憩中は自動復帰しない
+    
+    # 新規エントリー（register関数と同じロジック）
+    entry_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    
+    user_response = user_table.get_item(Key={"user#user_id": current_user.get_id()})
+    skill_score = user_response.get("Item", {}).get("skill_score", 50)
+
+    match_table.put_item(Item={
+        'entry_id': entry_id,
+        'user_id': current_user.get_id(),
+        'match_id': "pending",
+        'entry_status': "active",
+        'display_name': current_user.display_name,
+        'skill_score': skill_score,
+        'joined_at': now
+    })
 
 @bp_game.route("/cancel")
 @login_required
@@ -339,6 +415,32 @@ def rest():
         flash(f"休憩設定中にエラーが発生しました: {str(e)}", "danger")
     
     return redirect(url_for("game.pairings"))
+
+@bp_game.route("/resume")
+@login_required
+def resume():
+    """休憩から復帰"""
+    try:
+        # resting → pending に変更
+        resting_response = match_table.scan(
+            FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
+        )
+        
+        for item in resting_response.get('Items', []):
+            match_table.update_item(
+                Key={'entry_id': item['entry_id']},
+                UpdateExpression="SET match_id = :pending, entry_status = :status",
+                ExpressionAttributeValues={
+                    ':pending': 'pending',
+                    ':status': 'active'
+                }
+            )
+        
+        flash("参加を再開しました", "success")
+    except Exception as e:
+        flash(f"エラー: {str(e)}", "danger")
+    
+    return redirect(url_for("game.waiting"))
 
 
 
@@ -420,26 +522,145 @@ def submit_score():
         score_a = int(request.form["score_team_a"])
         score_b = int(request.form["score_team_b"])
 
-        # 該当するエントリを取得して status を更新
+        # 🔍 ログを追加（ここ）
+        current_app.logger.info(f"📥 スコア受信: match_id={match_id}, court_number={court_number}")
+
+        # 該当する試合に出場中の全エントリーを取得
         response = match_table.scan(
             FilterExpression=Attr("match_id").eq(match_id) & Attr("court").eq(court_number)
         )
         entries = response.get("Items", [])
 
-        for entry in entries:
-            match_table.update_item(
-                Key={"entry_id": entry["entry_id"]},
-                UpdateExpression="SET match_id = :resting, entry_status = :status REMOVE court, team",
-                ExpressionAttributeValues={
-                    ":resting": "resting",
-                    ":status": "active"
-                }
-            )
+        # ✅ ログ追加（取得件数と内容）
+        current_app.logger.info(f"📦 試合終了: 復帰対象エントリー数: {len(entries)}")
+        for e in entries:
+            current_app.logger.info(f"🔍 対象: {e.get('display_name')} (court={e.get('court')}, match_id={e.get('match_id')})")
 
-        return jsonify({"success": True}), 200  # ✅ ここが重要！
+        for entry in entries:
+            try:
+                match_table.update_item(
+                    Key={"entry_id": entry["entry_id"]},
+                    UpdateExpression="SET match_id = :pending, entry_status = :active REMOVE court, team",
+                    ExpressionAttributeValues={
+                        ":pending": "pending",
+                        ":active": "active"
+                    }
+                )
+                current_app.logger.info(f"✅ {entry['display_name']} を pending に復帰")
+            except Exception as e:
+                current_app.logger.error(f"❌ {entry['display_name']} の更新に失敗: {e}")
+
+        return jsonify({"success": True}), 200
+
     except Exception as e:
         current_app.logger.error(f"スコア登録エラー: {str(e)}")
-        return jsonify({"success": False, "message": str(e)}), 500  # ✅ こちらも修正！
+        return jsonify({"success": False, "message": str(e)}), 500
+    
+
+def get_pending_players():
+    """参加待ちプレイヤーを取得"""
+    try:
+        response = match_table.scan(
+            FilterExpression=Attr('match_id').eq('pending') & Attr('entry_status').eq('active')
+        )
+        
+        players = []
+        for item in response.get('Items', []):
+            # ユーザー詳細情報を取得
+            user_response = user_table.get_item(Key={"user#user_id": item['user_id']})
+            user_data = user_response.get("Item", {})
+            
+            player_info = {
+                'entry_id': item['entry_id'],
+                'user_id': item['user_id'],
+                'display_name': item.get('display_name', user_data.get('display_name', '不明')),
+                'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
+                'badminton_experience': user_data.get('badminton_experience', '未設定'),
+                'joined_at': item.get('joined_at')
+            }
+            players.append(player_info)
+        
+        # 参加時刻でソート
+        players.sort(key=lambda x: x.get('joined_at', ''))
+        return players
+        
+    except Exception as e:
+        current_app.logger.error(f"参加待ちプレイヤー取得エラー: {str(e)}")
+        return []
+
+
+def get_resting_players():
+    """休憩中プレイヤーを取得"""
+    try:
+        response = match_table.scan(
+            FilterExpression=Attr('match_id').eq('resting')
+        )
+        
+        players = []
+        for item in response.get('Items', []):
+            # ユーザー詳細情報を取得
+            user_response = user_table.get_item(Key={"user#user_id": item['user_id']})
+            user_data = user_response.get("Item", {})
+            
+            player_info = {
+                'entry_id': item['entry_id'],
+                'user_id': item['user_id'],
+                'display_name': item.get('display_name', user_data.get('display_name', '不明')),
+                'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
+                'badminton_experience': user_data.get('badminton_experience', '未設定'),
+                'joined_at': item.get('joined_at')
+            }
+            players.append(player_info)
+        
+        return players
+        
+    except Exception as e:
+        current_app.logger.error(f"休憩中プレイヤー取得エラー: {str(e)}")
+        return []
+
+
+def get_user_status(user_id):
+    """ユーザーの現在の状態を取得"""
+    try:
+        # pending状態の確認
+        pending_response = match_table.scan(
+            FilterExpression=Attr('user_id').eq(user_id) & Attr('match_id').eq('pending')
+        )
+        is_registered = bool(pending_response.get('Items'))
+        
+        # resting状態の確認
+        resting_response = match_table.scan(
+            FilterExpression=Attr('user_id').eq(user_id) & Attr('match_id').eq('resting')
+        )
+        is_resting = bool(resting_response.get('Items'))
+        
+        # スキルスコアを取得
+        skill_score = None
+        
+        # pending_itemsまたはresting_itemsからスキルスコアを取得
+        all_items = pending_response.get('Items', []) + resting_response.get('Items', [])
+        if all_items:
+            skill_score = all_items[0].get('skill_score')
+        
+        # 見つからない場合はuser_tableから取得
+        if skill_score is None:
+            user_response = user_table.get_item(Key={"user#user_id": user_id})
+            user_data = user_response.get("Item", {})
+            skill_score = user_data.get("skill_score", 50)
+        
+        return {
+            'is_registered': is_registered,
+            'is_resting': is_resting,
+            'skill_score': skill_score  # ←追加
+        }
+        
+    except Exception as e:
+        current_app.logger.error(f"ユーザー状態取得エラー: {str(e)}")
+        return {
+            'is_registered': False,
+            'is_resting': False,
+            'skill_score': 50  # ←追加
+        }
 
 # @bp_game.route("/create_pairings")
 # @login_required

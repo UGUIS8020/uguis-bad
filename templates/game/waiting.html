@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>試合待機画面 - バドミントン管理システム</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .waiting-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .status-card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            transition: transform 0.2s ease;
+        }
+        
+        .status-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .player-count {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .player-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: none;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }
+        
+        .player-item:hover {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            transform: translateX(5px);
+        }
+        
+        .skill-badge {
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            color: white;
+            border-radius: 20px;
+            padding: 5px 12px;
+            font-size: 0.85rem;
+        }
+        
+        .experience-badge {
+            background: linear-gradient(45deg, #28a745, #1e7e34);
+            color: white;
+            border-radius: 20px;
+            padding: 5px 12px;
+            font-size: 0.85rem;
+        }
+        
+        .refresh-icon {
+            transition: transform 0.5s ease;
+        }
+        
+        .refresh-icon.spinning {
+            transform: rotate(360deg);
+        }
+        
+        .action-buttons {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        
+        .floating-btn {
+            border-radius: 50px;
+            padding: 12px 20px;
+            margin-left: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .floating-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .update-status {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="waiting-container">
+        <!-- ヘッダーセクション -->
+        <div class="header-section">
+            <h1 class="mb-3">
+                <i class="fas fa-shuttlecock-cock"></i> 試合待機画面
+            </h1>
+            <p class="mb-0">次の試合開始までお待ちください</p>
+            <div class="update-status">
+                <small>
+                    <i class="fas fa-sync-alt refresh-icon" id="refreshIcon"></i>
+                    自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
+                </small>
+            </div>
+        </div>
+
+        <!-- 現在の状態表示 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card status-card bg-primary text-white">
+                    <div class="card-body text-center">
+                        <i class="fas fa-users fa-2x mb-3"></i>
+                        <div class="player-count">{{ pending_players|length }}</div>
+                        <h5>参加待ちプレイヤー</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card status-card bg-warning text-dark">
+                    <div class="card-body text-center">
+                        <i class="fas fa-coffee fa-2x mb-3"></i>
+                        <div class="player-count">{{ resting_players|length }}</div>
+                        <h5>休憩中プレイヤー</h5>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- あなたの状態 - シンプル版 -->
+        <div class="card status-card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-user-circle"></i> {{ current_user.display_name }} 
+                    {% if current_user_skill_score %}
+                        <span class="badge bg-light text-dark ms-2">スキル: {{ current_user_skill_score }}</span>
+                    {% endif %}
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if is_registered %}
+                    <div class="alert alert-success mb-0">
+                        <i class="fas fa-check-circle"></i> 参加登録中 - 試合開始までお待ちください
+                    </div>
+                {% elif is_resting %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-pause-circle"></i> 休憩中 - 復帰する場合は「再開する」ボタンを押してください
+                    </div>
+                {% else %}
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle"></i> 自動で参加登録されました
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 参加待ちプレイヤー一覧 -->
+        <div class="card status-card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-list"></i> 参加待ちプレイヤー ({{ pending_players|length }}人)
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if pending_players %}
+                    <div class="row">
+                        {% for player in pending_players %}
+                        <div class="col-lg-6 col-md-12 mb-3">
+                            <div class="player-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">
+                                            <i class="fas fa-user-circle text-primary"></i>
+                                            {{ player.display_name }}
+                                        </h6>
+                                        <small class="text-muted">
+                                            参加時刻: {{ player.joined_at[:19] if player.joined_at else '不明' }}
+                                        </small>
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="skill-badge">
+                                            スキル: {{ player.skill_score }}
+                                        </span>
+                                        <br>
+                                        <span class="experience-badge mt-1 d-inline-block">
+                                            {{ player.badminton_experience }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-user-times fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">参加待ちのプレイヤーはいません</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 休憩中プレイヤー一覧 -->
+        {% if resting_players %}
+        <div class="card status-card mt-4">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">
+                    <i class="fas fa-coffee"></i> 休憩中プレイヤー ({{ resting_players|length }}人)
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for player in resting_players %}
+                    <div class="col-lg-6 col-md-12 mb-3">
+                        <div class="player-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">
+                                        {% if player.is_current_user %}
+                                            <i class="fas fa-user-clock text-success"></i>
+                                            {{ player.display_name }} <span class="badge bg-success">あなた</span>
+                                        {% else %}
+                                            <i class="fas fa-user-clock text-warning"></i>
+                                            {{ player.display_name }}
+                                        {% endif %}
+                                    </h6>
+                                </div>
+                                <div class="text-end">
+                                    {% if current_user.administrator or player.is_current_user %}
+                                        {% if player.skill_score %}
+                                            <span class="skill-badge">
+                                                スキル: {{ player.skill_score }}
+                                            </span>
+                                            <br>
+                                        {% endif %}
+                                    {% endif %}
+                                    <span class="experience-badge {% if not ((current_user.administrator or player.is_current_user) and player.skill_score) %}mt-1{% endif %} d-inline-block">
+                                        {{ player.badminton_experience }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ペアリング可能な人数に達した場合の通知 -->
+        {% if pending_players|length >= 4 %}
+        <div class="alert alert-success mt-4">
+            <i class="fas fa-check-circle"></i>
+            <strong>ペアリング可能人数に達しました！</strong>
+            管理者がペアリングを実行するまでお待ちください。
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- フローティングアクションボタン -->
+    <div class="action-buttons">
+        {% if is_resting %}
+            <a href="{{ url_for('game.resume') }}" class="btn btn-success floating-btn">
+                <i class="fas fa-play"></i> 再開する
+            </a>
+        {% elif is_registered %}
+            <a href="{{ url_for('game.rest') }}" class="btn btn-warning floating-btn">
+                <i class="fas fa-pause"></i> 休憩する
+            </a>
+        {% endif %}
+        
+        <a href="{{ url_for('game.pairings') }}" class="btn btn-info floating-btn">
+            <i class="fas fa-list-alt"></i> 管理画面
+        </a>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let lastUpdateTime = new Date();
+
+        function updateTimestamp() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('ja-JP');
+            document.getElementById('lastUpdate').textContent = timeString;
+        }
+
+        function rotateRefreshIcon() {
+            const icon = document.getElementById('refreshIcon');
+            icon.classList.add('spinning');
+            setTimeout(() => {
+                icon.classList.remove('spinning');
+            }, 500);
+        }
+
+        async function checkForUpdates() {
+            try {
+                rotateRefreshIcon();
+                
+                // APIエンドポイントで新しいペアリングをチェック
+                const response = await fetch('/api/waiting_status');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // 新しいペアリングが作成された場合のみリダイレクト
+                    if (data.new_pairing_available) {
+                        window.location.href = '/game/pairings';
+                        return;
+                    }
+                    
+                    // プレイヤー数に変化があった場合、ページをリロード
+                    const currentPendingCount = {{ pending_players|length }};
+                    const currentRestingCount = {{ resting_players|length }};
+                    
+                    if (data.pending_count !== currentPendingCount || 
+                        data.resting_count !== currentRestingCount) {
+                        location.reload();
+                    }
+                }
+                
+                lastUpdateTime = new Date();
+                updateTimestamp();
+            } catch (error) {
+                console.error('更新チェックでエラー:', error);
+                // エラー時は単純に時刻のみ更新
+                lastUpdateTime = new Date();
+                updateTimestamp();
+            }
+        }
+
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            updateTimestamp();
+            // 10秒ごとに自動更新
+            setInterval(checkForUpdates, 10000);
+        });
+
+        // ページの可視性が変わった時の処理
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) {
+                checkForUpdates();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,51 +1,40 @@
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr
 
-# テーブル名
-TABLE_NAME = "bad-game-match_entries"
-dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
-table = dynamodb.Table(TABLE_NAME)
+dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+table = dynamodb.Table("match_entries")
 
-# 全件スキャンして entry_status を追加し、badminton_experience を削除
-def update_entries():
-    print(f"Updating entries in table: {TABLE_NAME}")
-    
-    # 1. 全件取得
-    response = table.scan()
-    items = response.get('Items', [])
+# スキャンして court を持つ全エントリ取得
+response = table.scan(
+    FilterExpression=Attr("court").exists()
+)
 
-    print(f"Found {len(items)} items to update.")
+items = response.get("Items", [])
+updated_count = 0
 
-    # 2. 1件ずつ処理
-    for item in items:
-        entry_id = item.get('entry_id')
-        if not entry_id:
-            continue
+print(f"🔍 対象件数: {len(items)} 件")
 
-        update_expr = []
-        expr_attr_values = {}
-        expr_attr_names = {}
+for item in items:
+    entry_id = item["entry_id"]
+    court_value = item.get("court")
 
-        # entry_status を追加（存在しなければ）
-        if 'entry_status' not in item:
-            update_expr.append("SET #status = :status")
-            expr_attr_values[":status"] = "active"
-            expr_attr_names["#status"] = "entry_status"
+    # case 1: "なし" や None → 削除
+    if court_value in ["なし", "None", None]:
+        table.update_item(
+            Key={"entry_id": entry_id},
+            UpdateExpression="REMOVE court"
+        )
+        print(f"🗑 court 削除: {entry_id}")
+        updated_count += 1
 
-        # badminton_experience を削除
-        if 'badminton_experience' in item:
-            update_expr.append("REMOVE #experience")
-            expr_attr_names["#experience"] = "badminton_experience"
+    # case 2: "1" や "2" → 数値に変換
+    elif isinstance(court_value, str) and court_value.isdigit():
+        table.update_item(
+            Key={"entry_id": entry_id},
+            UpdateExpression="SET court = :court",
+            ExpressionAttributeValues={":court": int(court_value)}
+        )
+        print(f"🔁 court 数値化: {entry_id} → {court_value}")
+        updated_count += 1
 
-        if update_expr:
-            update_expression = " ".join(update_expr)
-            print(f"Updating {entry_id} with: {update_expression}")
-            table.update_item(
-                Key={"entry_id": entry_id},
-                UpdateExpression=update_expression,
-                ExpressionAttributeValues=expr_attr_values or None,
-                ExpressionAttributeNames=expr_attr_names
-            )
-
-if __name__ == "__main__":
-    update_entries()
+print(f"✅ 更新完了: {updated_count} 件")
