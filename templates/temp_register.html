@@ -80,10 +80,19 @@
 
                             <!-- メールアドレス -->
                             <div class="mb-3">
-                                <label class="form-label">メールアドレス(連絡が取れるアドレスを記入してください) <span class="badge bg-warning text-dark">必須</span></label>
+                                <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
                                 {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg", required=true) }}
                                 {% if form.email.errors %}
                                     <p class="text-danger">{{ form.email.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- メールアドレス確認 -->
+                            <div class="mb-3">
+                                <label class="form-label">メールアドレス（確認） <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.confirm_email, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
+                                {% if form.confirm_email.errors %}
+                                    <p class="text-danger">{{ form.confirm_email.errors[0] }}</p>
                                 {% endif %}
                             </div>
 
@@ -93,6 +102,15 @@
                                 {{ render_field(form.password, placeholder="8文字以上で設定してください", class="form-control form-control-lg", required=true) }}
                                 {% if form.password.errors %}
                                     <p class="text-danger">{{ form.password.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- パスワード確認 -->
+                            <div class="mb-3">
+                                <label class="form-label">パスワード（確認） <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.confirm_password, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
+                                {% if form.confirm_password.errors %}
+                                    <p class="text-danger">{{ form.confirm_password.errors[0] }}</p>
                                 {% endif %}
                             </div>
 

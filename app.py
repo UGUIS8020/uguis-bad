@@ -365,12 +365,22 @@ class TempRegistrationForm(FlaskForm):
         ]
     )
     
-    # メールアドレス
+     # メールアドレス
     email = StringField(
         'メールアドレス', 
         validators=[
             DataRequired(message='メールアドレスを入力してください'),
             Email(message='正しいメールアドレスを入力してください')
+        ]
+    )
+
+    # メールアドレス確認
+    confirm_email = StringField(
+        'メールアドレス（確認）',
+        validators=[
+            DataRequired(message='確認用メールアドレスを入力してください'),
+            Email(message='正しいメールアドレスを入力してください'),
+            EqualTo('email', message='メールアドレスが一致しません')
         ]
     )
     
@@ -380,6 +390,15 @@ class TempRegistrationForm(FlaskForm):
         validators=[
             DataRequired(message='パスワードを入力してください'),
             Length(min=8, message='パスワードは8文字以上で入力してください')
+        ]
+    )
+
+    # パスワード確認
+    confirm_password = PasswordField(
+        'パスワード（確認）',
+        validators=[
+            DataRequired(message='確認用パスワードを入力してください'),
+            EqualTo('password', message='パスワードが一致しません')
         ]
     )
     
