@@ -178,15 +178,24 @@
             </div>
         </div>
 
+         <div class="card status-card mb-4">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('game.create_pairings') }}">
+                    <button type="submit" class="btn btn-success btn-lg">
+                        <i class="fas fa-play-circle"></i> ペアリングを実行する（16人 → 4試合）
+                    </button>
+                </form>
+            </div>
+        </div>
+
         <!-- 参加待ちプレイヤー一覧 -->
         <div class="card status-card">
             <div class="card-header bg-primary text-white">
                 <h5 class="mb-0">
                     <i class="fas fa-list"></i> 参加待ちプレイヤー ({{ pending_players|length }}人)
                 </h5>
-            </div>
-
-            
+            </div>         
+                   
 
 
 
@@ -288,15 +297,8 @@
             管理者がペアリングを実行するまでお待ちください。
         </div>
         {% endif %}
-    </div>
-
-    {% if current_user.is_authenticated and current_user.administrator and pending_players|length >= 4 %}
-    <form method="POST" action="{{ url_for('start_pairing') }}">
-        <button type="submit" class="btn btn-success mt-3">
-            <i class="fas fa-play-circle"></i> 試合を開始する（{{ pending_players|length }}人）
-        </button>
-    </form>
-    {% endif %}
+    </div>   
+   
 
     <!-- フローティングアクションボタン -->
     <div class="action-buttons">
@@ -308,11 +310,8 @@
             <a href="{{ url_for('game.rest') }}" class="btn btn-warning floating-btn">
                 <i class="fas fa-pause"></i> 休憩する
             </a>
-        {% endif %}
+        {% endif %}        
         
-        <!-- <a href="{{ url_for('game.pairings') }}" class="btn btn-info floating-btn">
-            <i class="fas fa-list-alt"></i> 管理画面
-        </a> -->
     </div>
 
     <!-- JavaScript -->
