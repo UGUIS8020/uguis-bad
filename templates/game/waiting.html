@@ -249,10 +249,13 @@
                                             </span>
                                             <br>
                                         {% endif %}
-                                    {% endif %}
-                                    <span class="experience-badge {% if not ((current_user.administrator or player.is_current_user) and player.skill_score) %}mt-1{% endif %} d-inline-block">
-                                        {{ player.badminton_experience }}
-                                    </span>
+                                        {% if player.join_count is defined %}
+                                            <span class="badge bg-success mt-1 d-inline-block">
+                                                {{ player.join_count }}回
+                                            </span>
+                                        {% endif %}
+
+                                    {% endif %}                                    
                                 </div>
                             </div>
                         </div>
@@ -294,13 +297,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     <script>
         let lastUpdateTime = new Date();
-
+        // 現在のプレイヤー数を動的に管理
+        let currentPendingCount = {{ pending_players|length }};
+        let currentRestingCount = {{ resting_players|length }};        
+    
         function updateTimestamp() {
             const now = new Date();
             const timeString = now.toLocaleTimeString('ja-JP');
             document.getElementById('lastUpdate').textContent = timeString;
         }
-
+    
         function rotateRefreshIcon() {
             const icon = document.getElementById('refreshIcon');
             icon.classList.add('spinning');
@@ -308,51 +314,45 @@
                 icon.classList.remove('spinning');
             }, 500);
         }
-
+    
         async function checkForUpdates() {
             try {
                 rotateRefreshIcon();
-                
-                // APIエンドポイントで新しいペアリングをチェック
-                const response = await fetch('/api/waiting_status');
+                const response = await fetch('/game/api/waiting_status');
                 if (response.ok) {
                     const data = await response.json();
                     
-                    // 新しいペアリングが作成された場合のみリダイレクト
                     if (data.new_pairing_available) {
                         window.location.href = '/game/pairings';
                         return;
                     }
                     
-                    // プレイヤー数に変化があった場合、ページをリロード
-                    const currentPendingCount = {{ pending_players|length }};
-                    const currentRestingCount = {{ resting_players|length }};
-                    
-                    if (data.pending_count !== currentPendingCount || 
+                    // プレイヤー数が変化した場合
+                    if (data.pending_count !== currentPendingCount ||
                         data.resting_count !== currentRestingCount) {
+                        
+                        // 数値を更新してからリロード
+                        currentPendingCount = data.pending_count;
+                        currentRestingCount = data.resting_count;
                         location.reload();
+                        return;
                     }
                 }
-                
                 lastUpdateTime = new Date();
                 updateTimestamp();
             } catch (error) {
                 console.error('更新チェックでエラー:', error);
-                // エラー時は単純に時刻のみ更新
                 lastUpdateTime = new Date();
                 updateTimestamp();
             }
         }
-
-        // 初期化
-        document.addEventListener('DOMContentLoaded', function() {
+    
+        document.addEventListener('DOMContentLoaded', function () {
             updateTimestamp();
-            // 10秒ごとに自動更新
-            setInterval(checkForUpdates, 10000);
+            setInterval(checkForUpdates, 15000);
         });
-
-        // ページの可視性が変わった時の処理
-        document.addEventListener('visibilitychange', function() {
+    
+        document.addEventListener('visibilitychange', function () {
             if (!document.hidden) {
                 checkForUpdates();
             }

@@ -99,14 +99,20 @@
             {% if current_user.is_authenticated and current_user.administrator %}
                 <li class="nav-item">
                     <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}">
-                        テストデータ作成
+                        データ作成
                     </a>
                 </li>
                 <li class="nav-item">
                     <a class="btn btn-outline-secondary ms-2" href="{{ url_for('game.clear_test_data') }}">
-                        テストデータ削除
+                        データ削除
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="btn btn-outline-info ms-2" href="{{ url_for('badminton_chat_logs_page') }}">
+                        ログ
+                    </a>
+                </li>
+                
             {% endif %}
             
             <ul class="navbar-nav ms-auto">
@@ -127,9 +133,9 @@
                 </li>                   
             
                 <li class="nav-item">
-                    <a class="nav-link fw-bold text-warning" href="{{ url_for('game.pairings') }}" class="nav-link">
+                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.id) }}">
                         {{ current_user.display_name | truncate(10) }}
-                    </a> 
+                    </a>  
                 </li>
                 {% else %}
                 <li class="nav-item">

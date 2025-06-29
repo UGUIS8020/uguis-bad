@@ -1,6 +1,6 @@
 from flask_caching import Cache
 from flask_wtf import FlaskForm
-from flask import Flask, render_template, request, redirect, url_for, flash, abort, session, jsonify, current_app
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, session, jsonify, current_app, json
 from flask_login import UserMixin, LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from wtforms import ValidationError, StringField, PasswordField, SubmitField, SelectField, DateField, BooleanField, IntegerField
@@ -8,7 +8,7 @@ from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional, N
 import pytz
 import os
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime, date, timedelta
@@ -21,12 +21,15 @@ import random
 from urllib.parse import urlparse, urljoin
 from utils.db import get_schedule_table, get_schedules_with_formatting 
 from uguu.post import post
+from badminton_logs_functions import get_badminton_chat_logs
+from decimal import Decimal
+
 
 from dotenv import load_dotenv
 
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.WARNING)
-logging.basicConfig(level=logging.WARNING)
+# log = logging.getLogger('werkzeug')
+# log.setLevel(logging.WARNING)
+logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
 
 # Flask-Login用
@@ -99,6 +102,7 @@ def create_app():
         app.table_name = os.getenv("TABLE_NAME_USER")
         app.table_name_board = os.getenv("TABLE_NAME_BOARD")
         app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
+        app.table_name_users = app.table_name
         app.table = app.dynamodb.Table(app.table_name)           # dynamodb_resource → dynamodb
         app.table_board = app.dynamodb.Table(app.table_name_board)     # dynamodb_resource → dynamodb
         app.table_schedule = app.dynamodb.Table(app.table_name_schedule) # dynamodb_resource → dynamodb
@@ -181,7 +185,7 @@ class RegistrationForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1～3年未満', '1～3年未満'),
+            ('1-3年未満', '1-3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -242,7 +246,7 @@ class UpdateUserForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1～3年未満', '1～3年未満'),
+            ('1-3年未満', '1-3年未満'),
             ('3年以上', '3年以上')
         ], 
         validators=[
@@ -343,11 +347,21 @@ class TempRegistrationForm(FlaskForm):
             ('', 'バドミントン歴を選択してください'),
             ('未経験', '未経験'),
             ('1年未満', '1年未満'),
-            ('1～3年未満', '1～3年未満'),
-            ('3年以上', '3年以上')
+            ('1-3年未満', '1-3年未満'),
+            ('3-5年未満', '3-5年未満'),
+            ('5年以上', '5年以上')
         ], 
         validators=[
             DataRequired(message='バドミントン歴を選択してください')
+        ]
+    )
+
+    # 電話番号
+    phone = StringField(
+        '電話番号',
+        validators=[
+            DataRequired(message='電話番号を入力してください'),
+            Length(min=10, max=15, message='正しい電話番号を入力してください')
         ]
     )
     
@@ -452,11 +466,6 @@ class LoginForm(FlaskForm):
             app.logger.debug("Password validation failed")
             raise ValidationError('パスワードが正しくありません')
 
-
-
-
-
-
 class User(UserMixin):
     def __init__(self, user_id, display_name, user_name, furigana, email, password_hash,
                  gender, date_of_birth, post_code, address, phone, guardian_name, emergency_phone, badminton_experience,
@@ -529,38 +538,52 @@ class User(UserMixin):
         
 
 @cache.memoize(timeout=900)
-def get_participants_info(schedule): 
-    logger.info("Executing get_schedules_with_formatting")
+def get_participants_info(schedule):     
     participants_info = []
+    today = date.today().isoformat()  # 今日の日付（例: "2025-06-29"）
+
     try:
         user_table = app.dynamodb.Table(app.table_name)
-        
-        if 'participants' in schedule and schedule['participants']:
+        history_table = app.dynamodb.Table("bad-users-history")
+
+        if 'participants' in schedule and schedule['participants']:            
             for participant_id in schedule['participants']:
                 try:
-                    scan_response = user_table.scan(
+                    response = user_table.scan(
                         FilterExpression='contains(#uid, :pid)',
-                        ExpressionAttributeNames={
-                            '#uid': 'user#user_id'
-                        },
-                        ExpressionAttributeValues={
-                            ':pid': participant_id
-                        }
+                        ExpressionAttributeNames={'#uid': 'user#user_id'},
+                        ExpressionAttributeValues={':pid': participant_id}
                     )
-                    
-                    if scan_response.get('Items'):
-                        user = scan_response['Items'][0]
-                        participants_info.append({
-                            'user_id': participant_id,
+                    if response.get('Items'):
+                        user = response['Items'][0]                        
+                        raw_score = user.get('skill_score')
+                        skill_score = int(raw_score) if isinstance(raw_score, (Decimal, int, float)) else '未設定'
+
+                        # 🔽 過去の日付だけをカウント
+                        try:
+                            count_response = history_table.scan(
+                                FilterExpression=Attr('user_id').eq(participant_id)
+                            )
+                            history_items = count_response.get('Items', [])
+                            join_count = sum(1 for item in history_items if item.get('date') and item['date'] < today)
+                        except Exception as e:
+                            app.logger.warning(f"[参加回数取得エラー] user_id={participant_id}: {str(e)}")
+                            join_count = 0
+
+                        participants_info.append({                            
+                            'user_id': user.get('user#user_id'),
                             'display_name': user.get('display_name', '名前なし'),
-                            'experience': user.get('badminton_experience', '未設定')
+                            'skill_score': skill_score,
+                            'join_count': join_count
                         })
+                    else:
+                        logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
                 except Exception as e:
-                    app.logger.error(f"参加者情報の取得中にエラー: {str(e)}")
-                    
+                    app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
+
     except Exception as e:
-        app.logger.error(f"参加者情報の取得中にエラー: {str(e)}")
-        
+        app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
+
     return participants_info
 
 
@@ -578,10 +601,7 @@ def format_date(value):
 @app.route('/schedules')
 def get_schedules():
     schedules = get_schedules_with_formatting()
-    return jsonify(schedules)
-    
-
-    
+    return jsonify(schedules)    
 
     
 
@@ -590,37 +610,68 @@ def get_schedules():
 def index():
     try:
         schedules = get_schedules_with_formatting()
-        
-        # 画像ファイルのリスト
+        logger.info(f"[index] スケジュール件数: {len(schedules)}")
+
+        # 各スケジュールに参加者情報を追加
+        for schedule in schedules:
+            logger.info(f"[index] スケジュールID: {schedule.get('schedule_id', '不明')}")
+            logger.info(f"[index] 参加者リスト: {schedule.get('participants')}")
+            schedule["participants_info"] = get_participants_info(schedule)
+
         image_files = [
             'images/top001.jpg',
             'images/top002.jpg',
             'images/top003.jpg',
             'images/top004.jpg',
-            'images/top005.jpg'           
-            
+            'images/top005.jpg'
         ]
-        
-        # ランダムに画像を選択
+
         selected_image = random.choice(image_files)
-        
-        # for schedule in schedules:
-        #     print(f"Schedule data: {schedule}")
-        
+
         return render_template("index.html", 
-                             schedules=schedules,
-                             selected_image=selected_image,  # 選択された画像をテンプレートに渡す
-                             canonical=url_for('index', _external=True))
+                               schedules=schedules,
+                               selected_image=selected_image,
+                               canonical=url_for('index', _external=True))
         
-    except Exception as e:        
+    except Exception as e:
+        logger.error(f"[index] スケジュール取得エラー: {e}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return render_template("index.html", schedules=[], selected_image='images/default.jpg')
+    
+    
+@app.route("/day_of_participants", methods=["GET"])
+def day_of_participants():
+    try:
+        date = request.args.get("date")
+        if not date:
+            flash("日付が指定されていません", "warning")
+            return redirect(url_for("index"))
+
+        schedules = get_schedules_with_formatting()
+        schedule = next((s for s in schedules if s.get("date") == date), None)
+        if not schedule:
+            flash(f"{date} のスケジュールが見つかりません", "warning")
+            return redirect(url_for("index"))
+
+        participants = get_participants_info(schedule)
+
+        return render_template("day_of_participants.html", 
+                               date=date,
+                               location=schedule.get("location"),
+                               participants=participants)
+
+    except Exception as e:
+        logger.error(f"[day_of_participants] エラー: {e}")
+        flash("参加者情報の取得中にエラーが発生しました", "danger")
+        return render_template("day_of_participants.html", participants=[], date="未定", location="未定")
 
 
 @app.route('/temp_register', methods=['GET', 'POST'])
 def temp_register():
-    form = TempRegistrationForm()
+    form = TempRegistrationForm()    
+
     if form.validate_on_submit():
+        skill_score = int(request.form.get('skill_score', 0))
         try:
             current_time = datetime.now().isoformat()  # UTCで統一
             hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
@@ -636,9 +687,11 @@ def temp_register():
                 "badminton_experience": form.badminton_experience.data,
                 "email": form.email.data,
                 "password": hashed_password,
+                "phone": form.phone.data,
                 "organization": "仮登録",
                 "created_at": current_time,
-                "administrator": False
+                "administrator": False,
+                "skill_score": skill_score
             }
 
             # DynamoDBに保存
@@ -689,6 +742,23 @@ def join_schedule(schedule_id):
             participants.append(current_user.id)
             message = "参加登録が完了しました！"
             is_joining = True
+            if is_joining and not previously_joined(schedule_id, current_user.id):
+                increment_practice_count(current_user.id)
+                try:
+                    joined_at = datetime.utcnow().isoformat()
+                    history_table = app.dynamodb.Table("bad-users-history")
+                    history_table.put_item(
+                        Item={
+                            "user_id": current_user.id,
+                            "joined_at": joined_at,
+                            "schedule_id": schedule_id,
+                            "date": date,
+                            "location": schedule.get("location", "未設定")
+                        }
+                    )
+                    app.logger.info(f"[履歴保存成功] user_id={current_user.id}, schedule_id={schedule_id}, joined_at={joined_at}")
+                except Exception as e:
+                    app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
 
         # DynamoDB の更新
         schedule_table.update_item(
@@ -722,6 +792,58 @@ def join_schedule(schedule_id):
         app.logger.error(f"Unexpected error in join_schedule: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': '予期しないエラーが発生しました。'}), 500
 
+def previously_joined(schedule_id, user_id):
+    """
+    ユーザーがすでに参加履歴に登録されているかを確認する。
+    """
+    history_table = app.dynamodb.Table("bad-users-history")
+
+    response = history_table.query(
+        KeyConditionExpression=Key("user_id").eq(user_id)
+    )
+
+    for item in response.get("Items", []):
+        if item.get("schedule_id") == schedule_id:
+            return True
+    return False
+
+def increment_practice_count(user_id):
+    user_table = app.dynamodb.Table(app.table_name_users)
+
+    user_table.update_item(
+        Key={'user#user_id': user_id},
+        UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
+        ExpressionAttributeValues={
+            ':start': Decimal(0),
+            ':inc': Decimal(1)
+        }
+    )
+
+@app.route('/participants/by_date/<schedule_id>')
+@login_required
+def participants_by_date(schedule_id):
+    schedule_table = app.dynamodb.Table(app.table_name_schedule)
+    response = schedule_table.scan(FilterExpression=Key('schedule_id').eq(schedule_id))
+    items = response.get('Items', [])
+    
+    if not items:
+        flash('指定されたスケジュールが見つかりません', 'warning')
+        return redirect(url_for('index'))
+
+    schedule = items[0]
+    participants = schedule.get('participants', [])
+
+    user_table = app.dynamodb.Table(app.table_name_users)
+    participants_info = []
+
+    for uid in participants:
+        user_resp = user_table.scan(FilterExpression=Key('user#user_id').eq(uid))
+        if user_resp.get("Items"):
+            participants_info.append(user_resp["Items"][0])
+
+    return render_template('participants_by_date.html',
+                           schedule=schedule,
+                           participants_info=participants_info)
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
@@ -837,8 +959,7 @@ def login():
 
     if current_user.is_authenticated:
         return redirect(url_for('index')) 
-
-    # form = LoginForm(dynamodb_table=app.table)
+    
     form = LoginForm()
     if form.validate_on_submit():
         try:
@@ -1253,7 +1374,54 @@ def bad_manager():
 
 @app.route("/videos")
 def video_link():
-    return render_template("video_link.html")  
+    return render_template("video_link.html")
+
+
+
+@app.route('/badminton-chat-logs')
+def badminton_chat_logs_page():
+    """
+    バドミントンチャットログ表示ページ
+    """
+    return render_template('badminton_chat_logs.html')
+
+# JSON API用（既存のまま）
+@app.route('/api/badminton-chat-logs', methods=['GET'])
+def api_chat_logs():
+    """
+    バドミントンチャットログAPI（JSON専用）
+    """
+    cache_filter = request.args.get('cache')
+    limit = int(request.args.get('limit', 100))
+    
+    result = get_badminton_chat_logs(cache_filter, limit)
+    return jsonify(result)
+
+@app.route('/update_skill_score', methods=['POST'])
+def update_skill_score():
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        new_score = data.get("skill_score")
+
+        if not user_id or new_score is None:
+            return jsonify({"error": "Missing parameters"}), 400
+
+        # DynamoDB テーブルを取得
+        table = app.dynamodb.Table(app.table_name)
+
+        # データ更新
+        table.update_item(
+            Key={'user#user_id': user_id},
+            UpdateExpression='SET skill_score = :score',
+            ExpressionAttributeValues={':score': Decimal(str(new_score))}
+        )
+
+        return jsonify({"message": "Skill score updated", "updated_score": new_score}), 200
+
+    except Exception as e:
+        app.logger.error(f"[update_skill_score] 更新エラー: {e}")
+        return jsonify({"error": "更新に失敗しました"}), 500
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 match_table = dynamodb.Table("bad-game-match_entries")

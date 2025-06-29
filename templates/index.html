@@ -54,8 +54,7 @@
     <h1>鶯バドミントン 越谷市</h1> 
     <img src="{{ url_for('static', filename=selected_image) }}" alt="バドミントンの画像" class="img-fluid">
     <h2 class="mb-3">バドミントンメンバー募集</h2>
-    <p>初級者～上級者どなたでも参加できます<br>
-        レベルが違っても楽しくゲームできる方<br>
+    <p>初級者～上級者レベルが違っても楽しくゲームできる方<br>
     小中学生、未経験者はご相談ください<br>
                 </p>
     
@@ -119,6 +118,9 @@
             <div class="d-flex align-items-center justify-content-between">
                 <!-- 日付と会場情報 -->
                 <div class="d-flex align-items-center m-0 w-100">
+                    
+
+                    {% if current_user.is_authenticated and current_user.administrator %}
                     <button class="accordion-button collapsed p-2 w-100" 
                             type="button" 
                             style="width: auto; box-shadow: none;"
@@ -126,6 +128,11 @@
                             data-bs-target="#collapse{{ schedule.schedule_id }}"
                             aria-expanded="false"
                             aria-controls="collapse{{ schedule.schedule_id }}">
+                        {% else %}
+                        <!-- 一般ユーザー：見た目は同じ、クリック不可 -->
+                        <div class="accordion-button collapsed p-2 w-100"
+                                style="width: auto; box-shadow: none; cursor: default;">
+                        {% endif %}
                             
                         <div class="d-flex align-items-center flex-nowrap w-100">
                             <div class="d-flex align-items-center flex-grow-1">
@@ -180,41 +187,44 @@
                             </button>                         
                     </h2>
                     
+                    {% if current_user.is_authenticated and current_user.administrator %}
                     <div id="collapse{{ schedule.schedule_id }}" 
-                         class="accordion-collapse collapse" 
-                         aria-labelledby="heading{{ schedule.schedule_id }}"
-                         data-bs-parent="#scheduleAccordion">
-                        <div class="accordion-body">
-                            <!-- 参加者一覧 -->
-                            <div class="text-start">
-                                <h5 class="mb-3">
-                                    <i class="bi bi-people-fill text-primary"></i>
+                        class="accordion-collapse collapse" 
+                        aria-labelledby="heading{{ schedule.schedule_id }}"
+                        data-bs-parent="#scheduleAccordion">
+                    <div class="accordion-body">
+                        <!-- 参加者一覧 -->
+                        <div class="text-start">
+                            <h5 class="mb-3">
+                                <i class="bi bi-people-fill text-primary"></i>
+                                <a href="{{ url_for('day_of_participants', date=schedule.date) }}" class="text-decoration-none text-dark">
                                     参加者一覧
-                                </h5>
-                                {% if schedule.participants_info %}
-                                    <div class="row">
-                                        {% for participant in schedule.participants_info %}
-                                            <div class="col-md-4 col-sm-6 mb-2">
-                                                <div class="card">
-                                                    <div class="card-body py-2">
-                                                         <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" 
-                                                        class="participant-name"
-                                                        onclick="event.stopPropagation();">  <!-- イベントの伝播を停止 -->
-                                                            {{ participant.display_name }}
-                                                        </a>
-                                                        <span class="badge ms-2">{{ participant.badminton_experience }}</span>
-                                                        
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        {% endfor %}
+                                </a>
+                            </h5>
+                        {% if schedule.participants_info %}                                             
+
+
+                            <div class="row">
+                            {% for participant in schedule.participants_info %}
+                                <div class="col-md-3 col-sm-4 mb-1">
+                                <div class="card">
+                                    <div class="card-body py-2">
+                                        
+                                        <span class="participant-name">
+                                            {{ participant.display_name }}
+
                                     </div>
-                                {% else %}
-                                    <p class="text-muted">まだ参加者がいません</p>
-                                {% endif %}
+                                </div>
+                                </div>
+                            {% endfor %}
                             </div>
+                        {% else %}
+                            <p class="text-muted">まだ参加者がいません</p>
+                        {% endif %}
                         </div>
                     </div>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -239,17 +249,14 @@
     </div>   
 </div>
 
+
 <script>
     async function joinSchedule(button) {
         const scheduleId = button.getAttribute('data-schedule-id');
         const scheduleDate = button.getAttribute('data-schedule-date');
 
-        console.log('Schedule ID:', scheduleId);
-        console.log('Date:', scheduleDate);
-
         if (!scheduleId || !scheduleDate) {
             alert('スケジュール情報が不足しています。');
-            console.error('Invalid scheduleId or date:', { scheduleId, scheduleDate });
             return;
         }
 
@@ -265,100 +272,25 @@
 
             if (!response.ok) {
                 const errorData = await response.json();
-                console.error('Error response:', errorData);
                 alert(errorData.message || 'エラーが発生しました');
                 return;
             }
 
             const data = await response.json();
-            console.log('Success response:', data);
-
-            // ボタンの状態を更新
-            button.classList.toggle('btn-primary', !data.is_joining);
-            button.classList.toggle('btn-danger', data.is_joining);
-            button.textContent = data.is_joining ? '参加済' : '参加';
 
             if (data.message) {
                 alert(data.message);
             }
 
-            // 参加者数の表示更新
-            const participantElement = document.querySelector(`#participants-count-${scheduleId}`);
-            if (participantElement) {
-                participantElement.textContent = `参加者 ${data.participants_count}`;
-            }
-
-            // 参加者リストを更新
-            await refreshScheduleList();
+            // ページをリロードして変更を反映
+            location.reload();
 
         } catch (error) {
             console.error('Fetch error:', error);
             alert('通信エラーが発生しました');
         }
     }
-    
-    async function refreshScheduleList() {
-        try {
-            const response = await fetch('/schedules');
-            if (response.ok) {
-                const schedules = await response.json();
-                console.log('Fetched schedules:', schedules); // デバッグログ追加
-    
-                // 各スケジュールの参加者リストを更新
-                schedules.forEach(schedule => {
-                    console.log('Processing schedule:', schedule); // デバッグログ追加
-                    
-                    // 参加者リストのコンテナを取得
-                    const participantsContainer = document.querySelector(`#collapse${schedule.schedule_id} .row`);
-                    console.log('Container found:', participantsContainer); // デバッグログ追加
-                    
-                    if (!participantsContainer) {
-                        console.log(`Container not found for schedule ${schedule.schedule_id}`); // デバッグログ追加
-                        return;
-                    }
-    
-                    if (schedule.participants_info && schedule.participants_info.length > 0) {
-                        console.log('Participants info:', schedule.participants_info); // デバッグログ追加
-                        
-                        // 参加者がいる場合、リストを生成
-                        const participantsList = schedule.participants_info.map(participant => {
-                            console.log('Processing participant:', participant); // デバッグログ追加
-                            return `
-                                <div class="col-md-4 col-sm-6 mb-2">
-                                    <div class="card">
-                                        <div class="card-body py-2">
-                                            <span class="participant-name">${participant.display_name}</span>
-                                            ${participant.experience ? 
-                                                `<span class="badge bg-primary ms-2">${participant.experience}</span>` 
-                                                : ''}
-                                            ${participant.badminton_experience ? 
-                                                `<span class="badge bg-success ms-2">${participant.badminton_experience}</span>` 
-                                                : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('');
-                        
-                        console.log('Generated HTML:', participantsList); // デバッグログ追加
-                        participantsContainer.innerHTML = participantsList;
-                    } else {
-                        console.log('No participants for schedule:', schedule.schedule_id); // デバッグログ追加
-                        participantsContainer.innerHTML = '<p class="text-muted">まだ参加者がいません</p>';
-                    }
-                });
-            } else {
-                console.error('Failed to fetch schedules:', response.status); // デバッグログ追加
-            }
-        } catch (error) {
-            console.error('Error refreshing schedule list:', error);
-        }
-    }
-    
-    // 追加: ページ読み込み時に初期データを表示
-    document.addEventListener('DOMContentLoaded', () => {
-        refreshScheduleList();
-    });
 </script>
+
         
 {% endblock %}

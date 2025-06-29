@@ -91,39 +91,7 @@ def get_schedules_with_formatting():
         
     except Exception as e:
         logger.error(f"Error in get_schedules_with_formatting: {str(e)}")
-        return []
-    
-# def get_users_batch(user_ids):
-#     """ユーザー情報を一括取得する関数"""
-#     try:
-#         user_table = current_app.dynamodb.Table(os.getenv('TABLE_NAME_USER', 'bad-users'))
-        
-#         # ユーザーIDのリストをバッチ処理用に変換
-#         keys = [{'user#user_id': user_id} for user_id in user_ids]
-        
-#         # バッチでユーザー情報を取得
-#         response = current_app.dynamodb.batch_get_item(
-#             RequestItems={
-#                 os.getenv('TABLE_NAME_USER', 'bad-users'): {
-#                     'Keys': keys
-#                 }
-#             }
-#         )
-        
-#         # 結果を辞書形式に整理
-#         users = {}
-#         if 'Responses' in response:
-#             for user in response['Responses'][os.getenv('TABLE_NAME_USER', 'bad-users')]:
-#                 user_id = user['user#user_id']
-                
-#                 users[user_id] = user
-                
-#         return users
-        
-#     except Exception as e:
-#         logger.error(f"Error batch getting users: {e}")
-#         return {}
-    
+        return []    
 
 def get_users_batch(user_ids):
     """ユーザー情報を一括取得する関数（正しくデシリアライズ）"""

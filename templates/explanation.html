@@ -188,7 +188,7 @@
                                                         onclick="event.stopPropagation();">  <!-- イベントの伝播を停止 -->
                                                             {{ participant.display_name }}
                                                         </a>
-                                                        <span class="badge ms-2">{{ participant.badminton_experience }}</span>
+                                                        <span class="badge ms-2">{{ participant.skill_score }}</span>
                                                         
                                                     </div>
                                                 </div>
@@ -324,11 +324,11 @@
                                     <div class="card">
                                         <div class="card-body py-2">
                                             <span class="participant-name">${participant.display_name}</span>
-                                            ${participant.experience ? 
-                                                `<span class="badge bg-primary ms-2">${participant.experience}</span>` 
+                                            ${participant.skill_score ? 
+                                                `<span class="badge bg-primary ms-2">${participant.skill_score}</span>` 
                                                 : ''}
-                                            ${participant.badminton_experience ? 
-                                                `<span class="badge bg-success ms-2">${participant.badminton_experience}</span>` 
+                                            ${participant.skill_score ? 
+                                                `<span class="badge bg-success ms-2">${participant.skill_score}</span>` 
                                                 : ''}
                                         </div>
                                     </div>

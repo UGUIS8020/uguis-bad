@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 import boto3
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 import random
 from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
@@ -296,30 +296,57 @@ def generate_match_id():
 @bp_game.route("/waiting")
 @login_required
 def waiting():
-    """待機画面（アクセス時に自動参加登録）"""
     try:
-        # 自動参加登録処理
         auto_register_user()
-        
-        # 待機画面のデータを取得
+
         pending_players = get_pending_players()
         resting_players = get_resting_players()
-        
-        # ユーザーの現在の状態を確認
         user_status = get_user_status(current_user.get_id())
-        
-        return render_template('game/waiting.html',
-                     pending_players=pending_players,
-                     resting_players=resting_players,
-                     is_registered=user_status['is_registered'],
-                     is_resting=user_status['is_resting'],
-                     current_user_skill_score=user_status['skill_score'])
-    
+
+        # 🔽 参加回数を取得
+        today = date.today().isoformat()
+        history_table = current_app.dynamodb.Table("bad-users-history")
+        history_response = history_table.scan(
+            FilterExpression=Attr('user_id').eq(current_user.get_id())
+        )
+        history_items = history_response.get('Items', [])
+        join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
+
+        return render_template(
+            'game/waiting.html',
+            pending_players=pending_players,
+            resting_players=resting_players,
+            is_registered=user_status['is_registered'],
+            is_resting=user_status['is_resting'],
+            current_user_skill_score=user_status['skill_score'],
+            current_user_join_count=join_count  # 🔽 追加
+        )
     except Exception as e:
         current_app.logger.error(f"待機画面エラー: {str(e)}")
         flash(f"エラーが発生しました: {str(e)}", "danger")
-        # main.dashboard → game.pairings に変更
         return redirect(url_for("game.pairings"))
+    
+@bp_game.route("/api/waiting_status")  # <- これを追加
+@login_required
+def waiting_status_api():
+    """待機状況のAPIエンドポイント - 15秒間隔で自動更新"""
+    try:
+        pending_players = get_pending_players()
+        resting_players = get_resting_players()
+        
+        return jsonify({
+            'pending_count': len(pending_players),
+            'resting_count': len(resting_players),
+            'new_pairing_available': False,
+            'status': 'success'
+        })
+    
+    except Exception as e:
+        current_app.logger.error(f"待機状況API エラー: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
 
 def auto_register_user():
     """自動参加登録（register関数のロジックを流用）"""
@@ -560,30 +587,46 @@ def submit_score():
 def get_pending_players():
     """参加待ちプレイヤーを取得"""
     try:
+        today = date.today().isoformat()
+        history_table = current_app.dynamodb.Table("bad-users-history")
         response = match_table.scan(
             FilterExpression=Attr('match_id').eq('pending') & Attr('entry_status').eq('active')
         )
-        
+
         players = []
         for item in response.get('Items', []):
+            user_id = item['user_id']
+
             # ユーザー詳細情報を取得
-            user_response = user_table.get_item(Key={"user#user_id": item['user_id']})
+            user_response = user_table.get_item(Key={"user#user_id": user_id})
             user_data = user_response.get("Item", {})
-            
+
+            # 🟢 履歴から参加回数を取得
+            try:
+                history_response = history_table.scan(
+                    FilterExpression=Attr('user_id').eq(user_id)
+                )
+                history_items = history_response.get('Items', [])
+                join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
+            except Exception as e:
+                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {str(e)}")
+                join_count = 0
+
             player_info = {
                 'entry_id': item['entry_id'],
-                'user_id': item['user_id'],
+                'user_id': user_id,
                 'display_name': item.get('display_name', user_data.get('display_name', '不明')),
                 'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
                 'badminton_experience': user_data.get('badminton_experience', '未設定'),
-                'joined_at': item.get('joined_at')
+                'joined_at': item.get('joined_at'),
+                'join_count': join_count  # 🔽 参加回数を追加
             }
             players.append(player_info)
-        
+
         # 参加時刻でソート
         players.sort(key=lambda x: x.get('joined_at', ''))
         return players
-        
+
     except Exception as e:
         current_app.logger.error(f"参加待ちプレイヤー取得エラー: {str(e)}")
         return []
@@ -592,28 +635,46 @@ def get_pending_players():
 def get_resting_players():
     """休憩中プレイヤーを取得"""
     try:
+        today = date.today().isoformat()
+        history_table = current_app.dynamodb.Table("bad-users-history")
+
         response = match_table.scan(
             FilterExpression=Attr('match_id').eq('resting')
         )
-        
+
         players = []
         for item in response.get('Items', []):
+            user_id = item['user_id']
+
             # ユーザー詳細情報を取得
-            user_response = user_table.get_item(Key={"user#user_id": item['user_id']})
+            user_response = user_table.get_item(Key={"user#user_id": user_id})
             user_data = user_response.get("Item", {})
-            
+
+            # 🔽 履歴から参加回数を取得
+            try:
+                history_response = history_table.scan(
+                    FilterExpression=Attr('user_id').eq(user_id)
+                )
+                history_items = history_response.get('Items', [])
+                join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
+            except Exception as e:
+                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {str(e)}")
+                join_count = 0
+
             player_info = {
                 'entry_id': item['entry_id'],
-                'user_id': item['user_id'],
+                'user_id': user_id,
                 'display_name': item.get('display_name', user_data.get('display_name', '不明')),
                 'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
                 'badminton_experience': user_data.get('badminton_experience', '未設定'),
-                'joined_at': item.get('joined_at')
+                'joined_at': item.get('joined_at'),
+                'join_count': join_count,  # ✅ 追加
+                'is_current_user': user_id == current_user.get_id()  # ✅ 追加
             }
             players.append(player_info)
-        
+
         return players
-        
+
     except Exception as e:
         current_app.logger.error(f"休憩中プレイヤー取得エラー: {str(e)}")
         return []
