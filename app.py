@@ -540,11 +540,9 @@ class User(UserMixin):
 @cache.memoize(timeout=900)
 def get_participants_info(schedule):     
     participants_info = []
-    today = date.today().isoformat()  # 今日の日付（例: "2025-06-29"）
 
     try:
         user_table = app.dynamodb.Table(app.table_name)
-        history_table = app.dynamodb.Table("bad-users-history")
 
         if 'participants' in schedule and schedule['participants']:            
             for participant_id in schedule['participants']:
@@ -556,25 +554,19 @@ def get_participants_info(schedule):
                     )
                     if response.get('Items'):
                         user = response['Items'][0]                        
+                        
                         raw_score = user.get('skill_score')
-                        skill_score = int(raw_score) if isinstance(raw_score, (Decimal, int, float)) else '未設定'
-
-                        # 🔽 過去の日付だけをカウント
-                        try:
-                            count_response = history_table.scan(
-                                FilterExpression=Attr('user_id').eq(participant_id)
-                            )
-                            history_items = count_response.get('Items', [])
-                            join_count = sum(1 for item in history_items if item.get('date') and item['date'] < today)
-                        except Exception as e:
-                            app.logger.warning(f"[参加回数取得エラー] user_id={participant_id}: {str(e)}")
-                            join_count = 0
+                        if isinstance(raw_score, Decimal):
+                            skill_score = int(raw_score)
+                        elif isinstance(raw_score, (int, float)):
+                            skill_score = int(raw_score)
+                        else:
+                            skill_score = '未設定'
 
                         participants_info.append({                            
                             'user_id': user.get('user#user_id'),
                             'display_name': user.get('display_name', '名前なし'),
-                            'skill_score': skill_score,
-                            'join_count': join_count
+                            'skill_score': skill_score
                         })
                     else:
                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
@@ -745,18 +737,16 @@ def join_schedule(schedule_id):
             if is_joining and not previously_joined(schedule_id, current_user.id):
                 increment_practice_count(current_user.id)
                 try:
-                    joined_at = datetime.utcnow().isoformat()
                     history_table = app.dynamodb.Table("bad-users-history")
                     history_table.put_item(
                         Item={
                             "user_id": current_user.id,
-                            "joined_at": joined_at,
+                            "joined_at": datetime.utcnow().isoformat(),
                             "schedule_id": schedule_id,
                             "date": date,
                             "location": schedule.get("location", "未設定")
                         }
                     )
-                    app.logger.info(f"[履歴保存成功] user_id={current_user.id}, schedule_id={schedule_id}, joined_at={joined_at}")
                 except Exception as e:
                     app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
 
@@ -794,18 +784,14 @@ def join_schedule(schedule_id):
 
 def previously_joined(schedule_id, user_id):
     """
-    ユーザーがすでに参加履歴に登録されているかを確認する。
+    過去にそのスケジュールに参加していたかを確認する。
     """
-    history_table = app.dynamodb.Table("bad-users-history")
+    schedule_table = app.dynamodb.Table(app.table_name_schedule)
 
-    response = history_table.query(
-        KeyConditionExpression=Key("user_id").eq(user_id)
+    response = schedule_table.scan(
+        FilterExpression=Attr('schedule_id').eq(schedule_id) & Attr('participants').contains(user_id)
     )
-
-    for item in response.get("Items", []):
-        if item.get("schedule_id") == schedule_id:
-            return True
-    return False
+    return bool(response.get('Items'))
 
 def increment_practice_count(user_id):
     user_table = app.dynamodb.Table(app.table_name_users)
@@ -1437,9 +1423,10 @@ for blueprint in [uguu, post, users]:
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
 app.register_blueprint(bp_game, url_prefix='/game')
 
-if __name__ == "__main__":       
-    app.run(debug=True)
+# if __name__ == "__main__":       
+#     app.run(debug=True)
 
-# if __name__ == "__main__":
-#     app.run(debug=False, host='0.0.0.0', port=5000)
+
+if __name__ == "__main__":
+    app.run(debug=True)
 
