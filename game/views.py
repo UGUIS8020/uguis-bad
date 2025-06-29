@@ -293,6 +293,11 @@ def generate_match_id():
     
 #     return redirect(url_for("game.pairings"))
 
+@bp_game.route("/waitingu")
+@login_required
+def waitingu():
+    return render_template("game/waiting.html")
+
 @bp_game.route("/waiting")
 @login_required
 def waiting():
@@ -324,7 +329,9 @@ def waiting():
     except Exception as e:
         current_app.logger.error(f"待機画面エラー: {str(e)}")
         flash(f"エラーが発生しました: {str(e)}", "danger")
-        return redirect(url_for("game.pairings"))
+        return redirect(url_for("game.waiting"))
+    
+
     
 @bp_game.route("/api/waiting_status")  # <- これを追加
 @login_required

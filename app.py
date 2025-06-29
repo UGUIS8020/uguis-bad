@@ -1431,7 +1431,6 @@ def update_skill_score():
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 match_table = dynamodb.Table("bad-game-match_entries")
 
-
 from uguu.timeline import uguu
 from uguu.users import users
 from schedule.views import bp as bp_schedule

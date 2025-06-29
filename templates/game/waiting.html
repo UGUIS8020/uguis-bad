@@ -27,7 +27,7 @@
         .player-count {
             font-size: 2.5rem;
             font-weight: bold;
-            color: #007bff;
+            color: #ffffff;
         }
         
         .player-item {
@@ -143,6 +143,14 @@
             </div>
         </div>
 
+        <!-- {% if current_user.administrator %}
+            <div class="d-flex justify-content-between align-items-center mb-4">
+              <a href="{{ url_for('game.create_pairings') }}" class="btn btn-primary">
+                ペアリングを実行する
+              </a>
+            </div>
+            {% endif %} -->
+
         <!-- あなたの状態 - シンプル版 -->
         <div class="card status-card mb-4">
             <div class="card-header bg-info text-white">
@@ -177,6 +185,12 @@
                     <i class="fas fa-list"></i> 参加待ちプレイヤー ({{ pending_players|length }}人)
                 </h5>
             </div>
+
+            
+
+
+
+
             <div class="card-body">
                 {% if pending_players %}
                     <div class="row">
@@ -276,6 +290,14 @@
         {% endif %}
     </div>
 
+    {% if current_user.is_authenticated and current_user.administrator and pending_players|length >= 4 %}
+    <form method="POST" action="{{ url_for('start_pairing') }}">
+        <button type="submit" class="btn btn-success mt-3">
+            <i class="fas fa-play-circle"></i> 試合を開始する（{{ pending_players|length }}人）
+        </button>
+    </form>
+    {% endif %}
+
     <!-- フローティングアクションボタン -->
     <div class="action-buttons">
         {% if is_resting %}
@@ -288,18 +310,17 @@
             </a>
         {% endif %}
         
-        <a href="{{ url_for('game.pairings') }}" class="btn btn-info floating-btn">
+        <!-- <a href="{{ url_for('game.pairings') }}" class="btn btn-info floating-btn">
             <i class="fas fa-list-alt"></i> 管理画面
-        </a>
+        </a> -->
     </div>
 
     <!-- JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     <script>
         let lastUpdateTime = new Date();
-        // 現在のプレイヤー数を動的に管理
         let currentPendingCount = {{ pending_players|length }};
-        let currentRestingCount = {{ resting_players|length }};        
+        let currentRestingCount = {{ resting_players|length }};
     
         function updateTimestamp() {
             const now = new Date();
@@ -321,23 +342,23 @@
                 const response = await fetch('/game/api/waiting_status');
                 if (response.ok) {
                     const data = await response.json();
-                    
-                    if (data.new_pairing_available) {
-                        window.location.href = '/game/pairings';
-                        return;
-                    }
-                    
-                    // プレイヤー数が変化した場合
+    
+                    // ペアリングが利用可能になったときの自動遷移を削除 or コメントアウト
+                    // if (data.new_pairing_available) {
+                    //     window.location.href = '/game/pairings';
+                    //     return;
+                    // }
+    
+                    // プレイヤー数が変化した場合はページリロード
                     if (data.pending_count !== currentPendingCount ||
                         data.resting_count !== currentRestingCount) {
-                        
-                        // 数値を更新してからリロード
                         currentPendingCount = data.pending_count;
                         currentRestingCount = data.resting_count;
                         location.reload();
                         return;
                     }
                 }
+    
                 lastUpdateTime = new Date();
                 updateTimestamp();
             } catch (error) {
@@ -349,12 +370,12 @@
     
         document.addEventListener('DOMContentLoaded', function () {
             updateTimestamp();
-            setInterval(checkForUpdates, 15000);
+            setInterval(checkForUpdates, 15000); // 15秒ごとに更新確認
         });
     
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) {
-                checkForUpdates();
+                checkForUpdates(); // タブに戻ったらすぐ確認
             }
         });
     </script>
