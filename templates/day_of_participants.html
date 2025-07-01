@@ -16,12 +16,25 @@
                             <h5 class="card-title">{{ participant.display_name }}</h5>
                             <p class="card-text">
                                 スキル: 
-                                {% if participant.skill_score %}
-                                    <span class="badge bg-primary">{{ participant.skill_score }}</span>
+                                <span id="skill-badge-{{ participant.user_id }}"
+                                    class="badge {% if participant.skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge"
+                                    onclick="editSkillScore('{{ participant.user_id }}', '{{ participant.user_id }}')"
+                                    title="クリックして編集"
+                                    style="cursor: pointer; font-size: 1rem; padding: 0.5em 0.8em;">
+                                {% if participant.skill_score is not none %}
+                                    {{ participant.skill_score }}
                                 {% else %}
-                                    <span class="badge bg-secondary">未設定</span>
+                                    未設定
                                 {% endif %}
-                            </p>
+                                </span>
+
+                                <div id="edit-controls-{{ participant.user_id }}" style="display: none;">
+                                    <button class="btn btn-sm btn-success"
+                                            onclick="saveSkillScore('{{ participant.user_id }}', '{{ participant.user_id }}')">保存</button>
+                                    <button class="btn btn-sm btn-secondary"
+                                            onclick="cancelEdit('{{ participant.user_id }}')">キャンセル</button>
+                                </div>
+
                             <p class="card-text">
                                 参加回数: 
                                 {% if participant.join_count is defined %}
@@ -42,4 +55,171 @@
         <p class="text-muted">この日の参加者はいません。</p>
     {% endif %}
 </div>
+
+<!-- スキルスコア編集用のスタイル -->
+<style>
+    .editable-badge {
+        cursor: pointer;
+        position: relative;
+    }
+    .editable-badge:hover {
+        opacity: 0.8;
+    }
+    .edit-input {
+        width: 60px;
+        text-align: center;
+        border: none;
+        background: transparent;
+        color: white;
+        font-size: 0.875em;
+    }
+    .edit-input:focus {
+        outline: 1px solid rgba(255,255,255,0.5);
+    }
+    .save-cancel-buttons {
+        margin-top: 5px;
+    }
+    .save-cancel-buttons .btn {
+        margin-right: 2px;
+    }
+</style>
+
+<!-- スキルスコア編集用のJavaScript -->
+<script>
+let editingStates = {}; // 複数の編集状態を管理
+
+function editSkillScore(participantId, userId) {
+    if (editingStates[participantId]) return;
+    
+    const badge = document.getElementById(`skill-badge-${participantId}`);
+    const controls = document.getElementById(`edit-controls-${participantId}`);
+    
+    const originalValue = badge.textContent.trim();
+    editingStates[participantId] = {
+        originalValue: originalValue,
+        userId: userId
+    };
+    
+    // 現在の値を取得（"未設定"の場合は空文字）
+    const currentValue = originalValue === '未設定' ? '' : originalValue;
+    
+    // 入力フィールドに変更
+    badge.innerHTML = `<input type="number" class="edit-input" value="${currentValue}" id="skill-input-${participantId}" min="0" max="100" placeholder="0-100">`;
+    controls.style.display = 'block';
+    
+    // フォーカスを設定
+    const input = document.getElementById(`skill-input-${participantId}`);
+    input.focus();
+    input.select();
+    
+    // キーボードイベント
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            saveSkillScore(participantId, userId);
+        } else if (e.key === 'Escape') {
+            cancelEdit(participantId);
+        }
+    });
+}
+
+function saveSkillScore(participantId, userId) {
+    const input = document.getElementById(`skill-input-${participantId}`);
+    const newValue = input.value.trim();
+    
+    // バリデーション
+    if (newValue === '') {
+        alert('スキルスコアを入力してください');
+        return;
+    }
+    
+    const numValue = parseInt(newValue);
+    if (isNaN(numValue) || numValue < 0 || numValue > 100) {
+        alert('0から100の数値を入力してください');
+        return;
+    }
+    
+    // サーバーに保存
+    fetch('/update_skill_score', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            user_id: userId,
+            skill_score: numValue
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => Promise.reject(err));
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            // スキルスコア更新後に最新情報を取得
+            fetch(`/api/user_info/${userId}`)
+                .then(response => response.json())
+                .then(user => {
+                    const badge = document.getElementById(`skill-badge-${participantId}`);
+                    const controls = document.getElementById(`edit-controls-${participantId}`);
+    
+                    const updatedScore = user.skill_score ?? '未設定';
+                    badge.innerHTML = updatedScore;
+                    badge.className = updatedScore !== '未設定'
+                        ? 'badge bg-primary editable-badge'
+                        : 'badge bg-secondary editable-badge';
+                    badge.setAttribute('onclick', `editSkillScore('${participantId}', '${userId}')`);
+    
+                    controls.style.display = 'none';
+                    delete editingStates[participantId];
+    
+                    showMessage('スキルスコアが保存されました', 'success');
+                })
+                .catch(err => {
+                    console.error('最新データ取得失敗:', err);
+                    showMessage('スキルスコアは保存されましたが、表示の更新に失敗しました。', 'warning');
+                });
+        } else {
+            throw new Error(data.error || '保存に失敗しました');
+        }
+    });
+}
+
+function cancelEdit(participantId) {
+    const badge = document.getElementById(`skill-badge-${participantId}`);
+    const controls = document.getElementById(`edit-controls-${participantId}`);
+    const state = editingStates[participantId];
+    
+    if (state) {
+        badge.textContent = state.originalValue;
+        controls.style.display = 'none';
+        delete editingStates[participantId];
+    }
+}
+
+function showMessage(text, type) {
+    // 既存のメッセージがあれば削除
+    const existingAlert = document.querySelector('.floating-alert');
+    if (existingAlert) {
+        existingAlert.remove();
+    }
+    
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type} alert-dismissible fade show floating-alert`;
+    alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
+    alert.innerHTML = `
+        ${text}
+        <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+    `;
+    document.body.appendChild(alert);
+    
+    setTimeout(() => {
+        if (alert.parentElement) {
+            alert.remove();
+        }
+    }, 3000);
+}
+</script>
+
 {% endblock %}

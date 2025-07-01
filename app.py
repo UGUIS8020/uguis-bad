@@ -556,7 +556,7 @@ class User(UserMixin):
         return item
         
 
-@cache.memoize(timeout=900)
+@cache.memoize(timeout=600)
 def get_participants_info(schedule):     
     participants_info = []
 
@@ -580,7 +580,7 @@ def get_participants_info(schedule):
                         elif isinstance(raw_score, (int, float)):
                             skill_score = int(raw_score)
                         else:
-                            skill_score = '未設定'
+                            skill_score = None
 
                         participants_info.append({                            
                             'user_id': user.get('user#user_id'),
@@ -1410,7 +1410,7 @@ def update_skill_score():
         new_score = data.get("skill_score")
 
         if not user_id or new_score is None:
-            return jsonify({"error": "Missing parameters"}), 400
+            return jsonify({"success": False, "error": "Missing parameters"}), 400
 
         # DynamoDB テーブルを取得
         table = app.dynamodb.Table(app.table_name)
@@ -1422,11 +1422,47 @@ def update_skill_score():
             ExpressionAttributeValues={':score': Decimal(str(new_score))}
         )
 
-        return jsonify({"message": "Skill score updated", "updated_score": new_score}), 200
+        return jsonify({
+            "success": True,
+            "message": "Skill score updated",
+            "updated_score": new_score
+        }), 200
 
     except Exception as e:
         app.logger.error(f"[update_skill_score] 更新エラー: {e}")
-        return jsonify({"error": "更新に失敗しました"}), 500
+        return jsonify({
+            "success": False,
+            "error": "更新に失敗しました"
+        }), 500
+    
+@app.route('/api/user_info/<user_id>')
+def get_user_info(user_id):
+    try:
+        table = app.dynamodb.Table(app.table_name)
+        response = table.get_item(Key={'user#user_id': user_id})
+        item = response.get('Item')
+
+        if not item:
+            return jsonify({'error': 'ユーザーが見つかりません'}), 404
+
+        # スキルスコアを処理
+        raw_score = item.get('skill_score')
+        if isinstance(raw_score, Decimal):
+            skill_score = int(raw_score)
+        elif isinstance(raw_score, (int, float)):
+            skill_score = int(raw_score)
+        else:
+            skill_score = None
+
+        return jsonify({
+            'user_id': item.get('user#user_id'),
+            'display_name': item.get('display_name', '名前なし'),
+            'skill_score': skill_score
+        })
+
+    except Exception as e:
+        app.logger.error(f"/api/user_info エラー: {e}")
+        return jsonify({'error': 'サーバーエラー'}), 500
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 match_table = dynamodb.Table("bad-game-match_entries")

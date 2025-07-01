@@ -110,15 +110,42 @@
         <!-- ヘッダーセクション -->
         <div class="header-section">
             <h1 class="mb-3">
-                <i class="fas fa-shuttlecock-cock"></i> 試合待機画面
+                <i class="fas fa-shuttlecock-cock"></i> 体育館UGUIS<br>
             </h1>
-            <p class="mb-0">次の試合開始までお待ちください</p>
+            <p class="mb-0">試合開始までお待ちください</p>
             <div class="update-status">
                 <small>
                     <i class="fas fa-sync-alt refresh-icon" id="refreshIcon"></i>
                     自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
                 </small>
+                
             </div>
+            <!-- あなたの状態 - シンプル版 -->
+        <div class="card status-card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-user-circle"></i> {{ current_user.display_name }} 
+                    {% if current_user_skill_score %}
+                        <span class="badge bg-light text-dark ms-2">スキル: {{ current_user_skill_score }}</span>
+                    {% endif %}
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if is_registered %}
+                    <div class="alert alert-success mb-0">
+                        <i class="fas fa-check-circle"></i> 参加登録中 - 試合開始までお待ちください
+                    </div>
+                {% elif is_resting %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-pause-circle"></i> 休憩中 - 復帰する場合は「再開する」ボタンを押してください
+                    </div>
+                {% else %}
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle"></i> 自動で参加登録されました
+                    </div>
+                {% endif %}
+            </div>
+        </div>    
         </div>
 
         <!-- 現在の状態表示 -->
@@ -151,42 +178,7 @@
             </div>
             {% endif %} -->
 
-        <!-- あなたの状態 - シンプル版 -->
-        <div class="card status-card mb-4">
-            <div class="card-header bg-info text-white">
-                <h5 class="mb-0">
-                    <i class="fas fa-user-circle"></i> {{ current_user.display_name }} 
-                    {% if current_user_skill_score %}
-                        <span class="badge bg-light text-dark ms-2">スキル: {{ current_user_skill_score }}</span>
-                    {% endif %}
-                </h5>
-            </div>
-            <div class="card-body">
-                {% if is_registered %}
-                    <div class="alert alert-success mb-0">
-                        <i class="fas fa-check-circle"></i> 参加登録中 - 試合開始までお待ちください
-                    </div>
-                {% elif is_resting %}
-                    <div class="alert alert-warning mb-0">
-                        <i class="fas fa-pause-circle"></i> 休憩中 - 復帰する場合は「再開する」ボタンを押してください
-                    </div>
-                {% else %}
-                    <div class="alert alert-info mb-0">
-                        <i class="fas fa-info-circle"></i> 自動で参加登録されました
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-
-         <div class="card status-card mb-4">
-            <div class="card-body">
-                <form method="POST" action="{{ url_for('game.create_pairings') }}">
-                    <button type="submit" class="btn btn-success btn-lg">
-                        <i class="fas fa-play-circle"></i> ペアリングを実行する（16人 → 4試合）
-                    </button>
-                </form>
-            </div>
-        </div>
+        <!-- あなたの状態 - シンプル版 -->            
 
         <!-- 参加待ちプレイヤー一覧 -->
         <div class="card status-card">
@@ -194,7 +186,30 @@
                 <h5 class="mb-0">
                     <i class="fas fa-list"></i> 参加待ちプレイヤー ({{ pending_players|length }}人)
                 </h5>
-            </div>         
+            </div>     
+            
+            <div class="card status-card mb-4">
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('game.create_pairings') }}">
+                        <div class="row align-items-center mb-3">
+                            <div class="col-auto">
+                                <label for="max_courts" class="form-label fw-bold mb-0">使用コート数：</label>
+                            </div>
+                            <div class="col-auto">
+                                <select name="max_courts" id="max_courts" class="form-select">
+                                    {% for i in range(1, 7) %}
+                                        <option value="{{ i }}" {% if i == 4 %}selected{% endif %}>{{ i }}面</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-success btn-lg">
+                            <i class="fas fa-play-circle"></i>
+                            ペアリングを実行する（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
+                        </button>
+                    </form>
+                </div>
+            </div>
                    
 
 
@@ -314,69 +329,209 @@
         
     </div>
 
-    <!-- JavaScript -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let lastUpdateTime = new Date();
-        let currentPendingCount = {{ pending_players|length }};
-        let currentRestingCount = {{ resting_players|length }};
+
+
+    <div class="container mt-4">
+        <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
+            <h5 class="text-success fw-bold mb-0">
+                🎾 本日の試合（{{ match_courts|length }}面）
+            </h5>
+            <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
+                <div class="input-group">
+                    <label class="input-group-text" for="score_format">試合点数</label>
+                    <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
+                        <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
+                        <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+    </div>
+               
+            
+            
+            {% for court in match_courts.values() %}
+                <div class="col">
+                    <div class="card h-100 shadow-sm">
+                    <div class="card-header bg-success text-white text-center">
+                        コート{{ court.court_number }}
+                    </div>
+                    <div class="card-body">
+
+                        <form class="score-form" 
+                            data-court-number="{{ court.court_number }}"
+                            action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
+                            
+                            <div class="d-flex align-items-center mb-2">
+                                <div class="me-3">
+                                    <span class="badge bg-danger me-2">Aチーム</span>
+                                    {{ court.team_a | map(attribute='display_name') | join(', ') }}
+                                </div>
+                                <input type="number" name="team1_score" class="form-control form-control-sm"
+                                    placeholder="Aチーム得点" required style="width: 200px;">
+                            </div>
+
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="me-3">
+                                    <span class="badge bg-primary me-2">Bチーム</span>
+                                    {{ court.team_b | map(attribute='display_name') | join(', ') }}
+                                </div>
+                                <input type="number" name="team2_score" class="form-control form-control-sm"
+                                    placeholder="Bチーム得点" required style="width: 200px;">
+                            </div>
+
+                            <button type="submit" class="btn btn-outline-success w-100">スコア送信</button>
+                        </form>
+
+                    </div>
+                    </div>
+                </div>
+                {% endfor %} 
+
     
-        function updateTimestamp() {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('ja-JP');
-            document.getElementById('lastUpdate').textContent = timeString;
-        }
-    
-        function rotateRefreshIcon() {
-            const icon = document.getElementById('refreshIcon');
-            icon.classList.add('spinning');
-            setTimeout(() => {
-                icon.classList.remove('spinning');
-            }, 500);
-        }
-    
-        async function checkForUpdates() {
-            try {
-                rotateRefreshIcon();
-                const response = await fetch('/game/api/waiting_status');
-                if (response.ok) {
-                    const data = await response.json();
-    
-                    // ペアリングが利用可能になったときの自動遷移を削除 or コメントアウト
-                    // if (data.new_pairing_available) {
-                    //     window.location.href = '/game/pairings';
-                    //     return;
-                    // }
-    
-                    // プレイヤー数が変化した場合はページリロード
-                    if (data.pending_count !== currentPendingCount ||
-                        data.resting_count !== currentRestingCount) {
-                        currentPendingCount = data.pending_count;
-                        currentRestingCount = data.resting_count;
-                        location.reload();
-                        return;
+        </div>
+    </div>
+
+      {% if current_user.administrator %}
+        <div class="text-center mt-4">
+            <form action="{{ url_for('game.start_next_match') }}" method="post">
+            <button type="submit" class="btn btn-primary">
+                次の試合を開始する
+            </button>
+            </form>
+        </div>
+        {% endif %}
+
+
+
+        <script>
+            let lastUpdateTime = new Date();
+            let currentPendingCount = {{ pending_players|length }};
+            let currentRestingCount = {{ resting_players|length }};
+            let isSubmitting = false;
+            let isInputting = false;
+            
+            function updateTimestamp() {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString('ja-JP');
+                const updateEl = document.getElementById('lastUpdate');
+                if (updateEl) updateEl.textContent = timeString;
+            }
+            
+            function rotateRefreshIcon() {
+                const icon = document.getElementById('refreshIcon');
+                if (!icon) return;
+                icon.classList.add('spinning');
+                setTimeout(() => {
+                    icon.classList.remove('spinning');
+                }, 500);
+            }
+            
+            async function checkForUpdates() {
+                if (isSubmitting || isInputting) return;
+            
+                try {
+                    rotateRefreshIcon();
+                    const response = await fetch('/game/api/waiting_status');
+                    if (response.ok) {
+                        const data = await response.json();
+            
+                        if (data.new_pairing_available) {
+                            window.location.href = '/game/enter_the_court';
+                            return;
+                        }
+            
+                        if (data.pending_count !== currentPendingCount ||
+                            data.resting_count !== currentRestingCount) {
+                            currentPendingCount = data.pending_count;
+                            currentRestingCount = data.resting_count;
+                            location.reload();
+                            return;
+                        }
                     }
+            
+                    lastUpdateTime = new Date();
+                    updateTimestamp();
+                } catch (error) {
+                    console.error('更新チェックでエラー:', error);
+                    lastUpdateTime = new Date();
+                    updateTimestamp();
                 }
-    
-                lastUpdateTime = new Date();
-                updateTimestamp();
-            } catch (error) {
-                console.error('更新チェックでエラー:', error);
-                lastUpdateTime = new Date();
-                updateTimestamp();
             }
-        }
-    
-        document.addEventListener('DOMContentLoaded', function () {
-            updateTimestamp();
-            setInterval(checkForUpdates, 15000); // 15秒ごとに更新確認
-        });
-    
-        document.addEventListener('visibilitychange', function () {
-            if (!document.hidden) {
-                checkForUpdates(); // タブに戻ったらすぐ確認
-            }
-        });
-    </script>
+            
+            document.addEventListener("DOMContentLoaded", function () {
+                updateTimestamp();
+                setInterval(checkForUpdates, 15000);
+            
+                const scoreForms = document.querySelectorAll(".score-form");
+                let submittedCount = 0;
+                const totalForms = scoreForms.length;
+            
+                scoreForms.forEach(form => {
+                    // 入力中フラグを有効に
+                    const inputs = form.querySelectorAll("input[type='number']");
+                    inputs.forEach(input => {
+                        input.addEventListener("focus", () => isInputting = true);
+                        input.addEventListener("blur", () => isInputting = false);
+                    });
+            
+                    // フォーム送信時の処理
+                    form.addEventListener("submit", function (e) {
+                        e.preventDefault(); // ✅ 送信リロードを防止
+                        isSubmitting = true;
+            
+                        const formData = new FormData(form);
+                        const actionUrl = form.getAttribute("action");
+            
+                        fetch(actionUrl, {
+                            method: "POST",
+                            body: formData,
+                        })
+                        .then(response => {
+                            if (!response.ok) throw new Error("送信エラー");
+            
+                            const submitBtn = form.querySelector("button[type='submit']");
+                            if (submitBtn) {
+                                submitBtn.disabled = true;
+                                submitBtn.textContent = "送信済み";
+                                submitBtn.classList.remove("btn-outline-success");
+                                submitBtn.classList.add("btn-success");
+                            }
+            
+                            submittedCount++;
+                            isSubmitting = false;
+            
+                            if (submittedCount === totalForms) {
+                                console.log("✅ 全スコア送信完了 → 試合終了処理へ");
+                            
+                                fetch("{{ url_for('game.start_next_match') }}", {
+                                    method: "POST"
+                                }).then(res => {
+                                    if (res.ok) {
+                                        // 🔁 試合終了後に待機画面に戻す（ペアリングはしない）
+                                        window.location.href = "{{ url_for('game.enter_the_court') }}";
+                                    } else {
+                                        alert("試合終了の送信に失敗しました");
+                                    }
+                                });
+                            }
+                        })
+                        .catch(error => {
+                            isSubmitting = false;
+                            console.error("送信失敗:", error);
+                            alert("スコアの送信に失敗しました。再度お試しください。");
+                        });
+                    });
+                });
+            });
+            
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    checkForUpdates();
+                }
+            });
+            </script>
+ 
+
 </body>
 </html>
