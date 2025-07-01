@@ -109,19 +109,20 @@
     <div class="waiting-container">
         <!-- ヘッダーセクション -->
         <div class="header-section">
-            <h1 class="mb-3">
+            <h1 class="mb-2">
                 <i class="fas fa-shuttlecock-cock"></i> 体育館UGUIS<br>
-            </h1>
-            <p class="mb-0">試合開始までお待ちください</p>
-            <div class="update-status">
-                <small>
-                    <i class="fas fa-sync-alt refresh-icon" id="refreshIcon"></i>
-                    自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
-                </small>
-                
+            </h1>           
+
+           <div class="d-flex align-items-center justify-content-center flex-wrap">
+            <p class="mb-0 me-3">試合開始までお待ちください</p>
+            <small class="text-muted">
+                <i class="fas fa-sync-alt refresh-icon" id="refreshIcon"></i>
+                自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
+            </small>
             </div>
+
             <!-- あなたの状態 - シンプル版 -->
-        <div class="card status-card mb-4">
+        <div class="card status-card mt-4 mb-4">
             <div class="card-header bg-info text-white">
                 <h5 class="mb-0">
                     <i class="fas fa-user-circle"></i> {{ current_user.display_name }} 
@@ -198,7 +199,7 @@
                             <div class="col-auto">
                                 <select name="max_courts" id="max_courts" class="form-select">
                                     {% for i in range(1, 7) %}
-                                        <option value="{{ i }}" {% if i == 4 %}selected{% endif %}>{{ i }}面</option>
+                                        <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -461,7 +462,7 @@
             
             document.addEventListener("DOMContentLoaded", function () {
                 updateTimestamp();
-                setInterval(checkForUpdates, 15000);
+                setInterval(checkForUpdates, 30000); // 30秒ごとに更新チェック
             
                 const scoreForms = document.querySelectorAll(".score-form");
                 let submittedCount = 0;

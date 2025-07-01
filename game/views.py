@@ -258,6 +258,11 @@ def get_pending_players():
 
         # 参加時刻でソート
         players.sort(key=lambda x: x.get('joined_at', ''))
+
+        current_app.logger.info(f"[PENDING PLAYERS] 表示件数: {len(players)}")
+        for p in players:
+            current_app.logger.info(f"  - {p['display_name']}（{p['skill_score']}点）参加時刻: {p['joined_at']}")
+
         return players
 
     except Exception as e:
@@ -356,31 +361,33 @@ def get_user_status(user_id):
         }
     
 def auto_register_user():
-    """自動参加登録（register関数のロジックを流用）"""
+    """自動参加登録（休憩中でも入場すれば自動的に pending 登録）"""
+    user_id = current_user.get_id()
+
     # すでに "pending" 状態か確認
     pending_response = match_table.scan(
-        FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('pending')
+        FilterExpression=Attr('user_id').eq(user_id) & Attr('match_id').eq('pending')
     )
     if pending_response.get('Items'):
         return  # すでに登録済み
-    
-    # "resting" 状態なら何もしない（手動で復帰してもらう）
+
+    # 休憩中データがあれば削除
     resting_response = match_table.scan(
-        FilterExpression=Attr('user_id').eq(current_user.get_id()) & Attr('match_id').eq('resting')
+        FilterExpression=Attr('user_id').eq(user_id) & Attr('match_id').eq('resting')
     )
-    if resting_response.get('Items'):
-        return  # 休憩中は自動復帰しない
-    
-    # 新規エントリー（register関数と同じロジック）
+    for item in resting_response.get('Items', []):
+        match_table.delete_item(Key={'entry_id': item['entry_id']})
+
+    # 新規エントリー（pending 登録）
     entry_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
-    
-    user_response = user_table.get_item(Key={"user#user_id": current_user.get_id()})
+
+    user_response = user_table.get_item(Key={"user#user_id": user_id})
     skill_score = user_response.get("Item", {}).get("skill_score", 50)
 
     match_table.put_item(Item={
         'entry_id': entry_id,
-        'user_id': current_user.get_id(),
+        'user_id': user_id,
         'match_id': "pending",
         'entry_status': "active",
         'display_name': current_user.display_name,
