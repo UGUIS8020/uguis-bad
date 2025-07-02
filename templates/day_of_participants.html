@@ -15,7 +15,7 @@
                         <div class="card-body">
                             <h5 class="card-title">{{ participant.display_name }}</h5>
                             <p class="card-text">
-                                スキル: 
+                                戦闘力: 
                                 <span id="skill-badge-{{ participant.user_id }}"
                                     class="badge {% if participant.skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge"
                                     onclick="editSkillScore('{{ participant.user_id }}', '{{ participant.user_id }}')"
@@ -56,7 +56,7 @@
     {% endif %}
 </div>
 
-<!-- スキルスコア編集用のスタイル -->
+<!-- 戦闘力編集用のスタイル -->
 <style>
     .editable-badge {
         cursor: pointer;
@@ -84,7 +84,7 @@
     }
 </style>
 
-<!-- スキルスコア編集用のJavaScript -->
+<!-- 戦闘力編集用のJavaScript -->
 <script>
 let editingStates = {}; // 複数の編集状態を管理
 
@@ -128,7 +128,7 @@ function saveSkillScore(participantId, userId) {
     
     // バリデーション
     if (newValue === '') {
-        alert('スキルスコアを入力してください');
+        alert('戦闘力を入力してください');
         return;
     }
     
@@ -157,7 +157,7 @@ function saveSkillScore(participantId, userId) {
     })
     .then(data => {
         if (data.success) {
-            // スキルスコア更新後に最新情報を取得
+            // 戦闘力更新後に最新情報を取得
             fetch(`/api/user_info/${userId}`)
                 .then(response => response.json())
                 .then(user => {
@@ -174,11 +174,11 @@ function saveSkillScore(participantId, userId) {
                     controls.style.display = 'none';
                     delete editingStates[participantId];
     
-                    showMessage('スキルスコアが保存されました', 'success');
+                    showMessage('戦闘力が保存されました', 'success');
                 })
                 .catch(err => {
                     console.error('最新データ取得失敗:', err);
-                    showMessage('スキルスコアは保存されましたが、表示の更新に失敗しました。', 'warning');
+                    showMessage('戦闘力は保存されましたが、表示の更新に失敗しました。', 'warning');
                 });
         } else {
             throw new Error(data.error || '保存に失敗しました');

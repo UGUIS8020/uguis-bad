@@ -556,6 +556,54 @@ class User(UserMixin):
         return item
         
 
+# @cache.memoize(timeout=600)
+# def get_participants_info(schedule):     
+#     participants_info = []
+
+#     try:
+#         user_table = app.dynamodb.Table(app.table_name)
+
+#         if 'participants' in schedule and schedule['participants']:            
+#             for participant_id in schedule['participants']:
+#                 try:
+#                     response = user_table.scan(
+#                         FilterExpression='contains(#uid, :pid)',
+#                         ExpressionAttributeNames={'#uid': 'user#user_id'},
+#                         ExpressionAttributeValues={':pid': participant_id}
+#                     )
+#                     if response.get('Items'):
+#                         user = response['Items'][0]                        
+                        
+#                         raw_score = user.get('skill_score')
+#                         if isinstance(raw_score, Decimal):
+#                             skill_score = int(raw_score)
+#                         elif isinstance(raw_score, (int, float)):
+#                             skill_score = int(raw_score)
+#                         else:
+#                             skill_score = None
+
+#                         participants_info.append({                            
+#                             'user_id': user.get('user#user_id'),
+#                             'display_name': user.get('display_name', '名前なし'),
+#                             'skill_score': skill_score
+#                         })
+#                     else:
+#                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
+#                 except Exception as e:
+#                     app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
+
+#     except Exception as e:
+#         app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
+
+#     return participants_info
+
+
+
+
+
+
+
+# 緊急修正版: scanをget_itemに変更
 @cache.memoize(timeout=600)
 def get_participants_info(schedule):     
     participants_info = []
@@ -566,13 +614,13 @@ def get_participants_info(schedule):
         if 'participants' in schedule and schedule['participants']:            
             for participant_id in schedule['participants']:
                 try:
-                    response = user_table.scan(
-                        FilterExpression='contains(#uid, :pid)',
-                        ExpressionAttributeNames={'#uid': 'user#user_id'},
-                        ExpressionAttributeValues={':pid': participant_id}
+                    # scanを削除してget_itemに変更
+                    response = user_table.get_item(
+                        Key={'user#user_id': participant_id}
                     )
-                    if response.get('Items'):
-                        user = response['Items'][0]                        
+                    
+                    if 'Item' in response:
+                        user = response['Item']                        
                         
                         raw_score = user.get('skill_score')
                         if isinstance(raw_score, Decimal):
@@ -598,6 +646,48 @@ def get_participants_info(schedule):
     return participants_info
 
 
+# さらに最適化版: バッチ取得
+@cache.memoize(timeout=600) 
+def get_all_users_dict():
+    """全ユーザーを1回のscanで取得し辞書として返す"""
+    try:
+        user_table = app.dynamodb.Table(app.table_name)
+        response = user_table.scan()  # 1回だけscan
+        
+        users_dict = {}
+        for user in response.get('Items', []):
+            user_id = user.get('user#user_id')
+            if user_id:
+                raw_score = user.get('skill_score')
+                if isinstance(raw_score, Decimal):
+                    skill_score = int(raw_score)
+                elif isinstance(raw_score, (int, float)):
+                    skill_score = int(raw_score)
+                else:
+                    skill_score = None
+                
+                users_dict[user_id] = {
+                    'user_id': user_id,
+                    'display_name': user.get('display_name', '名前なし'),
+                    'skill_score': skill_score
+                }
+        
+        logger.info(f"ユーザー辞書を作成: {len(users_dict)}人")
+        return users_dict
+    except Exception as e:
+        app.logger.error(f"ユーザー一括取得エラー: {str(e)}")
+        return {}
+
+
+
+
+
+
+
+
+
+
+
 @app.template_filter('format_date')
 def format_date(value):
     """日付を 'MM/DD' 形式にフォーマット"""
@@ -620,14 +710,11 @@ def get_schedules():
 @app.route("/index", methods=['GET'])
 def index():
     try:
+        # 軽量なスケジュール情報のみ取得
         schedules = get_schedules_with_formatting()
         logger.info(f"[index] スケジュール件数: {len(schedules)}")
 
-        # 各スケジュールに参加者情報を追加
-        for schedule in schedules:
-            logger.info(f"[index] スケジュールID: {schedule.get('schedule_id', '不明')}")
-            logger.info(f"[index] 参加者リスト: {schedule.get('participants')}")
-            schedule["participants_info"] = get_participants_info(schedule)
+        # 参加者詳細情報は取得しない
 
         image_files = [
             'images/top001.jpg',
@@ -1445,7 +1532,7 @@ def get_user_info(user_id):
         if not item:
             return jsonify({'error': 'ユーザーが見つかりません'}), 404
 
-        # スキルスコアを処理
+        # 戦闘力を処理
         raw_score = item.get('skill_score')
         if isinstance(raw_score, Decimal):
             skill_score = int(raw_score)
