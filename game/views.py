@@ -15,6 +15,7 @@ bp_game = Blueprint('game', __name__)
 # DynamoDBリソース取得
 dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
 match_table = dynamodb.Table('bad-game-match_entries')
+game_meta_table = dynamodb.Table('bad-game-matches')
 user_table = dynamodb.Table("bad-users")
     
 @bp_game.route("/enter_the_court")
@@ -74,7 +75,7 @@ def enter_the_court():
     
 def get_latest_match_id():
     today_prefix = datetime.now().strftime("%Y%m%d")
-    response = match_table.scan(
+    response = game_meta_table.scan(
         FilterExpression=Attr("match_id").begins_with(today_prefix)
     )
     items = response.get("Items", [])
@@ -143,10 +144,10 @@ def get_latest_match_id():
     """
     try:
         today_prefix = datetime.now().strftime("%Y%m%d")
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        game_meta_table = dynamodb.Table('bad-game-matches')
 
-        response = match_table.scan(
-            FilterExpression=Attr("match_id").begins_with(today_prefix)
+        response = game_meta_table.scan(
+            FilterExpression=Attr("match_id").begins_with(today_prefix) & Attr("type").eq("meta")
         )
         items = response.get("Items", [])
 
@@ -573,6 +574,9 @@ def perform_pairing(entries, match_id, max_courts=6):
     rest = []
     court_number = 1
 
+    match_table = current_app.dynamodb.Table("bad-game-match_entries")
+    game_meta_table = current_app.dynamodb.Table("bad-game-matches")
+
     random.shuffle(entries)
     max_players = max_courts * 4
     players = entries[:max_players]
@@ -642,8 +646,7 @@ def perform_pairing(entries, match_id, max_courts=6):
         }
 
     # ✅ メタデータ保存（チーム構成付き）
-    match_table.put_item(Item={
-        'entry_id': f"meta#{match_id}",
+    game_meta_table.put_item(Item={
         'match_id': match_id,
         'is_started': False,
         'type': 'meta',
@@ -702,11 +705,22 @@ def start_next_match():
         return "参加者が見つかりません", 400
 
     new_match_id = generate_match_id()
-    new_entries = []
+    match_table = current_app.dynamodb.Table("bad-game-match_entries")
 
-    match_table = current_app.dynamodb.Table("bad-game-match_entries")  # ← 追加
-
+    # 重複除去: user_id ごとに最新のエントリーだけを残す
+    unique_players = {}
     for p in current_players:
+        uid = p["user_id"]
+        if uid not in unique_players:
+            unique_players[uid] = p
+        else:
+            # より新しい joined_at を持つ方を残す
+            if p.get("joined_at", "") > unique_players[uid].get("joined_at", ""):
+                unique_players[uid] = p
+
+    # 重複除去後の新エントリー
+    new_entries = []
+    for p in unique_players.values():
         new_entries.append({
             'entry_id': str(uuid.uuid4()),
             'user_id': p['user_id'],
@@ -718,9 +732,11 @@ def start_next_match():
             'joined_at': datetime.now().isoformat()
         })
 
+    # DynamoDBに新規エントリーを登録
     for entry in new_entries:
         match_table.put_item(Item=entry)
 
+    # ペアリング処理を実行
     perform_pairing(new_entries, new_match_id)
 
     return redirect(url_for("game.enter_the_court"))
@@ -768,9 +784,10 @@ def show_pairings():
 
 def generate_match_id():
     today_str = datetime.now().strftime("%Y%m%d")  # "20250623"
+    game_meta_table = current_app.dynamodb.Table("bad-game-matches")
     
     # すでに存在する今日のmatch_idを数える（prefix一致で検索）
-    response = match_table.scan(
+    response = game_meta_table.scan(
         FilterExpression="begins_with(match_id, :prefix)",
         ExpressionAttributeValues={":prefix": today_str}
     )
@@ -877,10 +894,10 @@ def waiting_status():
     new_pairing_available = False
 
     if latest_match_id:
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")  # ✅ 実際のテーブル名に修正
+        game_meta_table = current_app.dynamodb.Table("bad-game-matches")
         try:
-            # ✅ entry_id の形式に合わせて meta# を追加
-            response = match_table.get_item(Key={"entry_id": f"meta#{latest_match_id}"})
+            # ✅ entry_id の形式に合わせて meta# を追加            
+            response = game_meta_table.get_item(Key={"match_id": latest_match_id})
             match_item = response.get("Item", {})
 
             print(f"✅ 試合データ: {match_item}")
@@ -905,6 +922,28 @@ def set_score_format():
         session["score_format"] = selected_format
     return redirect(url_for("game.enter_the_court"))
 
+@bp_game.route('/game/api/match_score_status/<match_id>')
+@login_required
+def match_score_status(match_id):    
+    game_meta_table = current_app.dynamodb.Table("bad-game-matches")
+    meta_entry_id = f"meta#{match_id}"
+
+    try:        
+        response = game_meta_table.get_item(Key={'match_id': match_id})
+        
+        match_item = response.get('Item', {})
+
+        # コート数は事前にどこかに保存されているか、固定値でも可
+        court_count = 3  # 例
+        all_submitted = all(
+            match_item.get(f"court_{i}_score") for i in range(1, court_count + 1)
+        )
+
+        return jsonify({"all_submitted": all_submitted})
+    except Exception as e:
+        current_app.logger.error(f"[スコア確認エラー] {e}")
+        return jsonify({"error": "確認に失敗しました"}), 500
+
 @bp_game.route("/game/submit_score/<match_id>/court/<int:court_number>", methods=["POST"])
 @login_required
 def submit_score(match_id, court_number):
@@ -918,11 +957,12 @@ def submit_score(match_id, court_number):
 
         winner = "A" if team1_score > team2_score else "B"
 
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        game_meta_table = current_app.dynamodb.Table("bad-game-matches")
         result_table = current_app.dynamodb.Table("bad-game-results")
 
-        meta_entry_id = f"meta#{match_id}"
-        response = match_table.get_item(Key={"entry_id": meta_entry_id})
+        meta_entry_id = f"meta#{match_id}"        
+        response = game_meta_table.get_item(Key={"match_id": match_id})
+        
         match_item = response.get("Item")
         if not match_item:
             flash("試合データが見つかりません", "danger")
@@ -953,13 +993,7 @@ def submit_score(match_id, court_number):
         if winner == "A":
             update_individual_win_loss(team_a, team_b)
         else:
-            update_individual_win_loss(team_b, team_a)
-
-        match_table.update_item(
-            Key={"entry_id": meta_entry_id},
-            UpdateExpression=f"SET court_{court_number}_score = :score",
-            ExpressionAttributeValues={":score": f"{team1_score}-{team2_score}"}
-        )
+            update_individual_win_loss(team_b, team_a)        
 
         flash(f"{court_number}番コートのスコアを記録しました（勝者: チーム{winner}）", "success")
         return redirect(url_for("game.enter_the_court"))
@@ -967,6 +1001,9 @@ def submit_score(match_id, court_number):
     except Exception:
         flash("スコアの送信中にエラーが発生しました", "danger")
         return redirect(url_for("game.enter_the_court"))
+    
+
+
 
 @bp_game.route('/create_test_data')
 @login_required

@@ -1,30 +1,31 @@
 import boto3
 
-dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
+# DynamoDBリソースの取得（リージョンは必要に応じて変更）
+dynamodb = boto3.client('dynamodb', region_name='ap-northeast-1')
 
-table_name = "bad-game-results"
+def create_bad_game_matches_table():
+    try:
+        response = dynamodb.create_table(
+            TableName='bad-game-matches',
+            KeySchema=[
+                {
+                    'AttributeName': 'match_id',
+                    'KeyType': 'HASH'  # パーティションキー
+                }
+            ],
+            AttributeDefinitions=[
+                {
+                    'AttributeName': 'match_id',
+                    'AttributeType': 'S'
+                }
+            ],
+            BillingMode='PAY_PER_REQUEST',  # オンデマンド課金
+        )
+        print("✅ テーブル作成開始:", response['TableDescription']['TableName'])
+    except dynamodb.exceptions.ResourceInUseException:
+        print("⚠️ すでにテーブルは存在しています。")
+    except Exception as e:
+        print("❌ エラー:", str(e))
 
-try:
-    table = dynamodb.create_table(
-        TableName=table_name,
-        KeySchema=[
-            {
-                'AttributeName': 'result_id',
-                'KeyType': 'HASH'  # Partition key
-            }
-        ],
-        AttributeDefinitions=[
-            {
-                'AttributeName': 'result_id',
-                'AttributeType': 'S'
-            }
-        ],
-        BillingMode='PAY_PER_REQUEST',  # オートスケーリング
-    )
-
-    print("Creating table... wait until ACTIVE")
-    table.wait_until_exists()
-    print(f"✅ Table '{table_name}' created successfully.")
-
-except Exception as e:
-    print(f"❌ Error creating table: {e}")
+if __name__ == '__main__':
+    create_bad_game_matches_table()
