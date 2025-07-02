@@ -132,8 +132,10 @@ def get_schedules_with_formatting():
                     'date': schedule.get('date'),
                     'day_of_week': schedule.get('day_of_week'),
                     'formatted_date': formatted_date,
-                    'time': schedule.get('time'),
-                    'location': schedule.get('location'),
+                    'start_time': schedule.get('start_time', ''),  
+                    'end_time': schedule.get('end_time', ''),      
+                    'venue': schedule.get('venue', ''),            
+                    'court': schedule.get('court', ''),          
                     'max_participants': int(schedule.get('max_participants', 10)),
                     'participants_count': len(participants),
                     'participants': participants,  # IDのみ保持
