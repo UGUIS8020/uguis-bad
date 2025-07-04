@@ -98,7 +98,7 @@
 
             {% if current_user.is_authenticated and current_user.administrator %}
                 <li class="nav-item">
-                    <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}">
+                    <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}" target="_blank" rel="noopener noreferrer">
                         データ作成
                     </a>
                 </li>

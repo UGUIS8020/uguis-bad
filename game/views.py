@@ -641,12 +641,23 @@ def create_pairings():
     except (ValueError, TypeError):
         max_courts = 6
 
-    # 🔧 修正: フィルター条件を変更
+    # 🔍 1. pending をすべて取得
     response = match_table.scan(
         FilterExpression=Attr("entry_status").eq("pending")
     )
-    entries = [e for e in response.get("Items", []) if str(e.get("entry_status")) == "pending"]
-    print(f"Pending entries count: {len(entries)}")
+    raw_entries = response.get("Items", [])
+    print(f"🔎 raw pending entries: {len(raw_entries)}")
+
+    # ✅ 2. 同一 user_id を1件に絞る（joined_at が新しいものを優先）
+    entries_by_user = {}
+    for entry in raw_entries:
+        uid = entry["user_id"]
+        joined_at = entry.get("joined_at", "")
+        if uid not in entries_by_user or joined_at > entries_by_user[uid].get("joined_at", ""):
+            entries_by_user[uid] = entry
+
+    entries = list(entries_by_user.values())
+    print(f"✅ 重複除去後の entries: {len(entries)}")
 
     if len(entries) < 4:
         flash("4人以上のエントリーが必要です。", "danger")
@@ -658,9 +669,6 @@ def create_pairings():
     flash(f"ペアリングが完了しました！{len(matches)}試合が開始されます", "success")
     return redirect(url_for('game.enter_the_court'))
 
-# 
-
-# 
 
 def perform_pairing(entries, match_id, max_courts=6):
     matches = []
