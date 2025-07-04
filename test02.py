@@ -1,31 +1,39 @@
 import boto3
 
-# DynamoDBリソースの取得（リージョンは必要に応じて変更）
-dynamodb = boto3.client('dynamodb', region_name='ap-northeast-1')
+# DynamoDB初期化
+dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+table = dynamodb.Table("bad-game-match_entries")
 
-def create_bad_game_matches_table():
-    try:
-        response = dynamodb.create_table(
-            TableName='bad-game-matches',
-            KeySchema=[
-                {
-                    'AttributeName': 'match_id',
-                    'KeyType': 'HASH'  # パーティションキー
-                }
-            ],
-            AttributeDefinitions=[
-                {
-                    'AttributeName': 'match_id',
-                    'AttributeType': 'S'
-                }
-            ],
-            BillingMode='PAY_PER_REQUEST',  # オンデマンド課金
-        )
-        print("✅ テーブル作成開始:", response['TableDescription']['TableName'])
-    except dynamodb.exceptions.ResourceInUseException:
-        print("⚠️ すでにテーブルは存在しています。")
-    except Exception as e:
-        print("❌ エラー:", str(e))
+# 全件取得
+response = table.scan()
+items = response.get("Items", [])
 
-if __name__ == '__main__':
-    create_bad_game_matches_table()
+# 各アイテムに対して更新処理
+for item in items:
+    entry_id = item["entry_id"]
+
+    update_expression = []
+    expression_values = {}
+
+    # 存在しないフィールドだけ追加
+    if "match_count" not in item:
+        update_expression.append("match_count = :mc")
+        expression_values[":mc"] = 0
+
+    if "rest_count" not in item:
+        update_expression.append("rest_count = :rc")
+        expression_values[":rc"] = 0
+
+    # 更新が必要な場合だけ更新処理を実行
+    if update_expression:
+        try:
+            table.update_item(
+                Key={"entry_id": entry_id},  # ✅ 修正: 正しい主キーを使う
+                UpdateExpression="SET " + ", ".join(update_expression),
+                ExpressionAttributeValues=expression_values
+            )
+            print(f"✅ Updated: {entry_id}")
+        except Exception as e:
+            print(f"❌ Error updating {entry_id}: {e}")
+
+print("🎉 全ての処理が完了しました")

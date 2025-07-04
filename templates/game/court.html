@@ -101,6 +101,30 @@
     </style>
 </head>
 <body class="bg-light">
+
+    {% if current_user.administrator %}
+<div class="position-absolute top-0 end-0 mt-3 me-3">
+    <div class="d-flex flex-column gap-2">
+        <!-- 練習おわりボタン -->
+        <form method="POST" action="{{ url_for('game.reset_participants') }}" class="d-inline"
+              onsubmit="return confirm('本当に全員をリセットしますか？');">
+            <button type="submit" class="btn btn-danger btn-lg fw-bold px-4 py-2">
+                練習おわり
+            </button>
+        </form>
+        
+        <!-- 困ったときのボタン -->
+        <form method="POST" action="{{ url_for('game.start_next_match') }}" class="d-inline">
+            <button type="submit" class="btn btn-warning btn-lg fw-bold px-4 py-2"
+                    onclick="return confirm('現在の参加者のみで強制的に次の試合を開始します。参加待ちプレイヤーは除外されます。本当に実行しますか？')">
+                困ったときのボタン
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+
     <div class="waiting-container">
         <!-- ヘッダーセクション -->
         <div class="header-section">
@@ -115,6 +139,8 @@
                 自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
             </small>
             </div>
+
+            
 
             <!-- あなたの状態 - 横並び・中央揃え版 -->
 <div class="card status-card mt-4 mb-4">
@@ -283,57 +309,48 @@
                
             
             
-            {% for court in match_courts.values() %}
-                <div class="col">
-                    <div class="card h-100 shadow-sm">
-                    <div class="card-header bg-success text-white text-center">
-                        コート{{ court.court_number }}
+    
+{% for court in match_courts.values() %}
+<div class="col">
+    <div class="card h-100 shadow-sm">
+        <div class="card-header bg-success text-white text-center">
+            <h4 class="mb-0">コート{{ court.court_number }}</h4>
+        </div>
+        <div class="card-body">
+
+            <form class="score-form" 
+                data-court-number="{{ court.court_number }}"
+                action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
+                
+                <div class="d-flex align-items-center mb-3">
+                    <div class="me-2">
+                        <span class="badge bg-danger me-2 fs-5">Aチーム</span>
+                        <span class="fs-5 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' ') }}</span>
                     </div>
-                    <div class="card-body">
-
-                        <form class="score-form" 
-                            data-court-number="{{ court.court_number }}"
-                            action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
-                            
-                            <div class="d-flex align-items-center mb-2">
-                                <div class="me-3">
-                                    <span class="badge bg-danger me-2">Aチーム</span>
-                                    {{ court.team_a | map(attribute='display_name') | join(', ') }}
-                                </div>
-                                <input type="number" name="team1_score" class="form-control form-control-sm"
-                                    placeholder="Aチーム得点" required style="width: 200px;">
-                            </div>
-
-                            <div class="d-flex align-items-center mb-3">
-                                <div class="me-3">
-                                    <span class="badge bg-primary me-2">Bチーム</span>
-                                    {{ court.team_b | map(attribute='display_name') | join(', ') }}
-                                </div>
-                                <input type="number" name="team2_score" class="form-control form-control-sm"
-                                    placeholder="Bチーム得点" required style="width: 200px;">
-                            </div>
-
-                            <button type="submit" class="btn btn-outline-success w-100">スコア送信</button>
-                        </form>
-
-                    </div>
-                    </div>
+                    <input type="number" name="team1_score" class="form-control form-control-lg fs-4"
+                        placeholder="得点" required style="width: 120px;">
                 </div>
-                {% endfor %} 
+
+                <div class="d-flex align-items-center mb-4">
+                    <div class="me-2">
+                        <span class="badge bg-primary me-2 fs-5">Bチーム</span>
+                        <span class="fs-5 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' ') }}</span>
+                    </div>
+                    <input type="number" name="team2_score" class="form-control form-control-lg fs-4"
+                        placeholder="得点" required style="width: 120px;">
+                </div>
+
+                <button type="submit" class="btn btn-outline-success w-100 btn-lg fs-4">スコア送信</button>
+            </form>
+
+        </div>
+    </div>
+</div>
+{% endfor %}
 
     
         </div>
-    </div>
-
-      {% if current_user.administrator %}
-        <div class="text-center mt-4">
-            <form action="{{ url_for('game.start_next_match') }}" method="post">
-            <button type="submit" class="btn btn-primary">
-                次の試合を開始する
-            </button>
-            </form>
-        </div>
-        {% endif %}
+    </div>      
 
         <form method="POST" action="{{ url_for('game.leave_court') }}" class="d-inline">
             <button type="submit" class="btn btn-outline-danger" onclick="return confirm('本当にコートから退出しますか？')">
@@ -341,11 +358,7 @@
             </button>
         </form>
 
-        {% if current_user.administrator %}
-        <form method="POST" action="{{ url_for('game.reset_participants') }}" onsubmit="return confirm('本当に全員をリセットしますか？');">
-            <button type="submit" class="btn btn-danger">練習終了（全リセット）</button>
-        </form>
-        {% endif %}
+        
 
 
 
