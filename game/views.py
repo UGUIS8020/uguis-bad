@@ -200,6 +200,7 @@ def get_players_status(status, user_id=None):
     """
     指定した status（例: pending, resting）に該当するプレイヤーを取得。
     user_id を指定した場合はそのユーザーだけ返す。
+    🔧 重複除去機能を追加
     """
     try:
         today = date.today().isoformat()
@@ -220,6 +221,45 @@ def get_players_status(status, user_id=None):
 
         response = match_table.scan(FilterExpression=filter_expr)
         items = response.get('Items', [])
+
+        # 🔥 重複除去処理を追加
+        unique_users = {}
+        duplicates_found = []
+        
+        for item in items:
+            uid = item['user_id']
+            
+            if uid in unique_users:
+                # 重複発見
+                existing_item = unique_users[uid]
+                current_item = item
+                
+                # より新しいエントリーを選択（joined_atで比較）
+                existing_joined = existing_item.get('joined_at', '')
+                current_joined = current_item.get('joined_at', '')
+                
+                if current_joined > existing_joined:
+                    # 現在のアイテムの方が新しい
+                    duplicates_found.append(existing_item)
+                    unique_users[uid] = current_item
+                    current_app.logger.warning(f"🔄 重複解決: {current_item.get('display_name')} - 新しいエントリーを選択")
+                else:
+                    # 既存のアイテムの方が新しい
+                    duplicates_found.append(current_item)
+                    current_app.logger.warning(f"🔄 重複解決: {existing_item.get('display_name')} - 既存エントリーを保持")
+            else:
+                unique_users[uid] = item
+        
+        # 重複が見つかった場合はログに記録
+        if duplicates_found:
+            current_app.logger.error(f"🚨 get_players_status で重複を検出: {len(duplicates_found)}件")
+            for dup in duplicates_found:
+                current_app.logger.error(f"  - {dup.get('display_name')} (entry_id: {dup.get('entry_id')})")
+        
+        # 🔧 重複除去後のアイテムを使用
+        items = list(unique_users.values())
+        
+        current_app.logger.info(f"[{status.upper()} PLAYERS] 重複除去後件数: {len(items)}")
 
         players = []
 
@@ -260,6 +300,11 @@ def get_players_status(status, user_id=None):
                 'is_current_user': uid == current_user.get_id()
             }
             players.append(player_info)
+
+        # 🔧 デバッグ情報を追加
+        current_app.logger.info(f"[{status.upper()} PLAYERS] 表示件数: {len(players)}")
+        for player in players:
+            current_app.logger.info(f"  - {player['display_name']}（{player['rest_count']}点）参加時刻: {player['joined_at']}")
 
         return players
 
