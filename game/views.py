@@ -24,27 +24,26 @@ def enter_the_court():
     try:
         current_app.logger.info("=== コート入場開始 ===")
 
-        # 自動参加処理（必要なままでOK）
-        auto_register_user()
+        # 🔒 管理者は自動登録しない
+        if not current_user.administrator:
+            auto_register_user()
+        else:
+            current_app.logger.info("管理者なので自動登録をスキップ")
 
-        # 参加待ち・休憩中プレイヤー一覧
-        pending_players = get_players_status('pending')  # ← 修正
+        # 以下そのまま
+        pending_players = get_players_status('pending')
         resting_players = get_players_status('resting')
 
-        # ログイン中ユーザーの状態
         user_id = current_user.get_id()
-        is_registered = bool(get_players_status('pending', user_id))  # ← 修正
+        is_registered = bool(get_players_status('pending', user_id))
         is_resting = bool(get_players_status('resting', user_id))
 
-        # skill_score の取得（どちらかに存在する場合）
-        user_entries = get_players_status('pending', user_id) or get_players_status('resting', user_id)  # ← 修正
+        user_entries = get_players_status('pending', user_id) or get_players_status('resting', user_id)
         skill_score = user_entries[0]['skill_score'] if user_entries else 50
 
-        # 最新試合とプレイヤー構成
         match_id = get_latest_match_id()
         match_courts = get_match_players_by_court(match_id) if match_id else {}
 
-        # 試合履歴取得（本日より前の参加数）
         today = date.today().isoformat()
         history_table = current_app.dynamodb.Table("bad-users-history")
         history_response = history_table.scan(
@@ -69,8 +68,7 @@ def enter_the_court():
         current_app.logger.error(f"コート入場エラー詳細: {str(e)}")
         import traceback
         current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-        return f"エラー: {e}"
-    
+        return f"エラー: {e}"   
 
     
 def get_latest_match_id():
@@ -216,16 +214,24 @@ def get_players_status(status, user_id=None):
             user_response = user_table.get_item(Key={"user#user_id": uid})
             user_data = user_response.get("Item", {})
 
-            # 履歴から参加回数を取得
+            # 履歴取得
             try:
                 history_response = history_table.scan(
                     FilterExpression=Attr('user_id').eq(uid)
                 )
                 history_items = history_response.get('Items', [])
+
                 join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
+
+                # ✅ match_count と rest_count をカウント（本日分）
+                match_count = sum(1 for h in history_items if h.get('date') == today and h.get('type') == 'match')
+                rest_count = sum(1 for h in history_items if h.get('date') == today and h.get('type') == 'rest')
+
             except Exception as e:
                 current_app.logger.warning(f"[履歴取得エラー] user_id={uid}: {str(e)}")
                 join_count = 0
+                match_count = 0
+                rest_count = 0
 
             player_info = {
                 'entry_id': item['entry_id'],
@@ -235,6 +241,8 @@ def get_players_status(status, user_id=None):
                 'badminton_experience': user_data.get('badminton_experience', '未設定'),
                 'joined_at': item.get('joined_at'),
                 'join_count': join_count,
+                'match_count': match_count,
+                'rest_count': rest_count,
                 'is_current_user': uid == current_user.get_id()
             }
             players.append(player_info)
@@ -543,6 +551,38 @@ def admin_cleanup_duplicates():
     except Exception as e:
         current_app.logger.error(f"管理者クリーンアップエラー: {e}")
         return jsonify({'success': False, 'message': 'クリーンアップに失敗しました'})
+    
+def increment_match_count(user_id):
+    table = current_app.dynamodb.Table("bad-users-history")
+    today = date.today().isoformat()
+
+    table.update_item(
+        Key={
+            "user_id": user_id,
+            "joined_at": today  # ← 日付をjoined_atに
+        },
+        UpdateExpression="SET match_count = if_not_exists(match_count, :zero) + :inc",
+        ExpressionAttributeValues={
+            ":inc": 1,
+            ":zero": 0
+        }
+    )
+
+def increment_rest_count(user_id):
+    table = current_app.dynamodb.Table("bad-users-history")
+    today = date.today().isoformat()
+
+    table.update_item(
+        Key={
+            "user_id": user_id,
+            "joined_at": today
+        },
+        UpdateExpression="SET rest_count = if_not_exists(rest_count, :zero) + :inc",
+        ExpressionAttributeValues={
+            ":inc": 1,
+            ":zero": 0
+        }
+    )
 
 
 @bp_game.route('/create_pairings', methods=["GET", "POST"])
@@ -605,6 +645,8 @@ def perform_pairing(entries, match_id, max_courts=6):
                         ":s": "playing"
                     }
                 )
+                # ✅ 出場記録
+                increment_match_count(p["user_id"])
 
             for p in teamB:
                 match_table.update_item(
@@ -617,6 +659,8 @@ def perform_pairing(entries, match_id, max_courts=6):
                         ":s": "playing"
                     }
                 )
+                
+                increment_match_count(p["user_id"])
 
             matches.append({
                 "court": court_number,
@@ -625,7 +669,6 @@ def perform_pairing(entries, match_id, max_courts=6):
             })
             court_number += 1
 
-    # 休憩者処理
     for p in rest:
         match_table.update_item(
             Key={"entry_id": p["entry_id"]},
@@ -635,6 +678,7 @@ def perform_pairing(entries, match_id, max_courts=6):
                 ":s": "playing"
             }
         )
+        increment_rest_count(p["user_id"]) 
 
     # ✅ コートごとのチーム構成をmetaデータに追加
     court_data = {}
@@ -655,6 +699,7 @@ def perform_pairing(entries, match_id, max_courts=6):
     })
 
     return matches
+
 
 @bp_game.route("/finish_current_match", methods=["POST"])
 @login_required
@@ -1001,6 +1046,38 @@ def submit_score(match_id, court_number):
     except Exception:
         flash("スコアの送信中にエラーが発生しました", "danger")
         return redirect(url_for("game.enter_the_court"))
+    
+
+@bp_game.route('/reset_participants', methods=['POST'])
+@login_required
+def reset_participants():
+    """match_id が 'pending' のエントリーをすべて削除（練習終了）"""
+    if not current_user.administrator:
+        flash('管理者のみ実行できます', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+
+        # 条件: match_id = 'pending'
+        response = match_table.scan(
+            FilterExpression=Attr('match_id').eq('pending')
+        )
+        items = response.get('Items', [])
+
+        for item in items:
+            match_table.delete_item(Key={'entry_id': item['entry_id']})
+
+        flash(f"{len(items)} 件のエントリーを削除しました（練習終了）", 'info')
+        current_app.logger.info(f"[リセット成功] 削除件数: {len(items)} by {current_user.email}")
+
+    except Exception as e:
+        current_app.logger.error(f"[リセット失敗] {str(e)}")
+        flash("参加者のリセットに失敗しました", 'danger')
+
+    return redirect(url_for('game.enter_the_court'))
+
+
     
 
 

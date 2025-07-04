@@ -12,38 +12,41 @@
             {% for participant in participants %}
                 <div class="col-md-2 col-sm-3 mb-2">
                     <div class="card h-100">
-                        <div class="card-body">
+                        <div class="card-body text-center">  <!-- ★ 中央寄せ -->
                             <h5 class="card-title">{{ participant.display_name }}</h5>
-                            <p class="card-text">
-                                戦闘力: 
+                    
+                            <p class="card-text mt-3">
+                                <strong class="d-block">戦闘力</strong>
                                 <span id="skill-badge-{{ participant.user_id }}"
-                                    class="badge {% if participant.skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge"
+                                    class="badge {% if participant.skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge fs-4 fw-bold"
                                     onclick="editSkillScore('{{ participant.user_id }}', '{{ participant.user_id }}')"
                                     title="クリックして編集"
-                                    style="cursor: pointer; font-size: 1rem; padding: 0.5em 0.8em;">
-                                {% if participant.skill_score is not none %}
-                                    {{ participant.skill_score }}
-                                {% else %}
-                                    未設定
-                                {% endif %}
+                                    style="cursor: pointer; padding: 0.6em 1em;">
+                                    {% if participant.skill_score is not none %}
+                                        {{ participant.skill_score }}
+                                    {% else %}
+                                        未設定
+                                    {% endif %}
                                 </span>
-
-                                <div id="edit-controls-{{ participant.user_id }}" style="display: none;">
+                    
+                                <div id="edit-controls-{{ participant.user_id }}" class="mt-2" style="display: none;">
                                     <button class="btn btn-sm btn-success"
                                             onclick="saveSkillScore('{{ participant.user_id }}', '{{ participant.user_id }}')">保存</button>
                                     <button class="btn btn-sm btn-secondary"
                                             onclick="cancelEdit('{{ participant.user_id }}')">キャンセル</button>
                                 </div>
-
-                            <p class="card-text">
-                                参加回数: 
+                            </p>
+                    
+                            <p class="card-text mt-2">
+                                <strong class="d-block">参加回数</strong>
                                 {% if participant.join_count is defined %}
-                                    <span class="badge bg-success">{{ participant.join_count }} 回</span>
+                                    <span class="badge bg-success fs-5 fw-bold">{{ participant.join_count }} 回</span>
                                 {% else %}
-                                    <span class="badge bg-secondary">未集計</span>
+                                    <span class="badge bg-secondary fs-5 fw-bold">未集計</span>
                                 {% endif %}
                             </p>
-                            <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" class="btn btn-sm btn-outline-primary">
+                    
+                            <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" class="btn btn-sm btn-outline-primary mt-2">
                                 プロフィール
                             </a>
                         </div>

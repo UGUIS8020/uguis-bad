@@ -66,6 +66,18 @@
                                 {% endif %}
                             </div>
 
+                            <div class="mb-3">
+                                {{ form.date_of_birth.label(class="form-label") }}
+                                {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date", required=True) }}
+                                {% if form.date_of_birth.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.date_of_birth.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
                             <!-- バドミントン歴 -->
 
                             <!-- 電話番号 -->

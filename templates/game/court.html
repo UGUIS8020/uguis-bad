@@ -137,10 +137,6 @@
             <div class="alert alert-warning mb-0 py-1 px-3 d-inline-flex align-items-center">
                 <i class="fas fa-pause-circle me-2"></i> 休憩中 - 復帰する場合は「再開する」ボタンを押してください
             </div>
-        {% else %}
-            <div class="alert alert-info mb-0 py-1 px-3 d-inline-flex align-items-center">
-                <i class="fas fa-info-circle me-2"></i> 自動で参加登録されました
-            </div>
         {% endif %}
 
         <!-- アクションボタン -->
@@ -206,23 +202,30 @@
                 {% for player in pending_players %}
                 <div class="col-xxl-2 col-xl-3 col-lg-4 col-md-6 col-sm-12 mb-2">
                     <div class="player-item border rounded px-2 py-2 text-center h-100">
-                        <div class="fw-bold fs-5">
+                        <div class="fw-bold fs-5 mb-1">
                             {{ player.display_name }}
-                            <span class="badge bg-success mt-1 d-inline-block">
-                                {{ player.join_count }}回
-                            </span>
+                        </div>
+                        <div>
+                            {% if player.join_count is defined %}
+                                <span class="badge bg-info me-1">出席 {{ player.join_count }}回</span>
+                            {% endif %}
+                            {% if player.match_count is defined %}
+                                <span class="badge bg-success me-1">試合 {{ player.match_count }}回</span>
+                            {% endif %}
+                            {% if player.rest_count is defined %}
+                                <span class="badge bg-secondary">休憩 {{ player.rest_count }}回</span>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-                <div class="text-center py-4">
-                    <i class="fas fa-user-times fa-3x text-muted mb-3"></i>
-                    <p class="text-muted">参加待ちのプレイヤーはいません</p>
-                </div>
+            <div class="text-center py-4">
+                <i class="fas fa-user-times fa-3x text-muted mb-3"></i>
+                <p class="text-muted">参加待ちのプレイヤーはいません</p>
+            </div>
             {% endif %}
-        </div>
         </div>
 
         
@@ -338,6 +341,12 @@
             </button>
         </form>
 
+        {% if current_user.administrator %}
+        <form method="POST" action="{{ url_for('game.reset_participants') }}" onsubmit="return confirm('本当に全員をリセットしますか？');">
+            <button type="submit" class="btn btn-danger">練習終了（全リセット）</button>
+        </form>
+        {% endif %}
+
 
 
         <script>
@@ -440,12 +449,10 @@
                             if (submittedCount === totalForms) {
                                 console.log("✅ 全スコア送信完了 → 試合終了処理へ");
                             
-                                
                                 fetch("{{ url_for('game.finish_current_match') }}", {
                                     method: "POST"
                                 }).then(res => {
                                     if (res.ok) {
-                                        // ✅ 試合を終了し、全員を待機状態に戻した後、画面を再表示
                                         window.location.href = "{{ url_for('game.enter_the_court') }}";
                                     } else {
                                         alert("試合終了処理に失敗しました");
