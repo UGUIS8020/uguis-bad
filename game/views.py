@@ -1197,21 +1197,7 @@ def create_test_data():
         {'display_name': '田中太郎'},
         {'display_name': '佐藤花子'},
         {'display_name': '鈴木一郎'},
-        {'display_name': '高橋美咲'},
-        {'display_name': '山田健太'},
-        {'display_name': '渡辺さくら'},
-        {'display_name': '松本大輔'},
-        {'display_name': '中村実'},
-        {'display_name': '小林愛'},
-        {'display_name': '伊藤翔太'},
-        {'display_name': '加藤由香'},
-        {'display_name': '斎藤健一'},
-        {'display_name': '木村真理'},
-        {'display_name': '林大介'},
-        {'display_name': '森川美穂'},
-        {'display_name': '吉田直樹'},
-        {'display_name': '清水香織'},
-        {'display_name': '橋本雅人'},
+        {'display_name': '高橋美咲'}       
     ]
     
     try:
