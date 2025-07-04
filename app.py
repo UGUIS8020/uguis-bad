@@ -783,7 +783,7 @@ def temp_register():
                 "user_name": form.user_name.data,
                 "gender": form.gender.data,
                 "badminton_experience": form.badminton_experience.data,
-                "email": form.email.data,
+                "email": form.email.data.lower(),
                 "password": hashed_password,
                 "phone": form.phone.data,
                 "organization": "仮登録",
@@ -971,7 +971,7 @@ def signup():
                     "created_at": current_time,
                     "date_of_birth": form.date_of_birth.data.strftime('%Y-%m-%d'),
                     "display_name": form.display_name.data,
-                    "email": form.email.data,
+                    "email": form.email.data.lower(),
                     "furigana": form.furigana.data,
                     "gender": form.gender.data,
                     "password": hashed_password,
@@ -1055,15 +1055,17 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         try:
-            print("う")
-            # メールアドレスでユーザーを取得
             response = app.table.query(
                 IndexName='email-index',
                 KeyConditionExpression='email = :email',
                 ExpressionAttributeValues={
-                    ':email': form.email.data.lower()
+                    ':email': form.email.data
                 }
             )
+
+            print(f"Query response: {response}")
+            items = response.get('Items', [])
+            print(f"Items found: {len(items)}")
             
             items = response.get('Items', [])
             user_data = items[0] if items else None
