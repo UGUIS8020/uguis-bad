@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>スコア入力</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .submitted-btn {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .btn-orange {
+            background-color: #fd7e14;  /* オレンジ */
+            color: white;
+            border: none;
+        }
+
+        /* デバッグ用スタイル */
+        .debug-info {
+            background-color: #f8d7da;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>  
+</head>
+<body class="bg-light">    
+
+<div class="container mt-4">
+    <h2 class="mb-4">スコア入力画面</h2>    
+    
+    <!-- デバッグ情報表示エリア -->
+    <div id="debug-info" class="debug-info">
+        <p><strong>デバッグ情報:</strong></p>
+        <pre id="debug-data"></pre>
+        <button onclick="toggleDebug()" class="btn btn-sm btn-secondary">閉じる</button>
+    </div>
+
+    <!-- データが空の場合のメッセージ -->
+    <div id="no-data-message" class="alert alert-warning" style="display: none;">
+        <i class="fas fa-exclamation-triangle"></i> 表示するコートデータがありません。管理者に連絡してください。
+    </div>
+
+    <div class="container mt-4">
+        <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
+            <h5 class="text-success fw-bold mb-0">
+                🎾 本日の試合（{{ court_data|length }}面）
+            </h5>
+            <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
+                <div class="input-group">
+                    <label class="input-group-text" for="score_format">試合点数</label>
+                    <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
+                        <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
+                        <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- コートデータのループ -->
+    <div class="row row-cols-1 row-cols-md-2 g-4">
+        {% if match_courts and match_courts|length > 0 %}
+            {% for court_num, court in match_courts.items() %}
+            <div class="col">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-header bg-success text-white text-center">
+                        <h4 class="mb-0">コート{{ court_num }}</h4>
+                    </div>
+                    <div class="card-body">
+                        <form class="score-form" 
+                            data-court-number="{{ court_num }}"
+                            id="score-form-{{ court_num }}"
+                            action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
+                            
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="me-2">
+                                    <span class="badge bg-danger me-2 fs-5">Aチーム</span>
+                                    <span class="fs-5 fw-bold">
+                                        {% for player in court.team_a %}
+                                            {{ player.display_name }}{% if not loop.last %} {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div>
+                            </div>
+    
+                            <div class="d-flex align-items-center mb-4">
+                                <div class="me-2">
+                                    <span class="badge bg-primary me-2 fs-5">Bチーム</span>
+                                    <span class="fs-5 fw-bold">
+                                        {% for player in court.team_b %}
+                                            {{ player.display_name }}{% if not loop.last %} {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div class="row mt-3">
+                                <div class="col">
+                                    <label>チームAの得点</label>
+                                    <input type="number" name="team1_score" class="form-control" required min="0">
+                                </div>
+                                <div class="col">
+                                    <label>チームBの得点</label>
+                                    <input type="number" name="team2_score" class="form-control" required min="0">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-orange mt-3">スコア送信</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12">
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> コートデータが設定されていません。管理者に連絡してください。
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- 試合終了ボタン -->
+    <form method="POST" action="{{ url_for('game.finish_current_match') }}"
+          onsubmit="return confirm('すべてのスコアが送信済みです。試合を終了してよろしいですか？');">
+        <div class="text-center mb-5">
+            <button id="endMatchButton" type="submit" class="btn btn-danger btn-lg" disabled>試合終了</button>
+        </div>
+    </form>
+
+    <!-- デバッグボタン -->
+    <div class="text-center mb-5">
+        <button id="debugButton" class="btn btn-secondary">デバッグ情報表示</button>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const forms = document.querySelectorAll(".score-form");
+        const formStatus = {};
+        let submittedCount = 0;
+        const totalForms = forms.length;
+        
+        // データがない場合のメッセージ表示
+        if (totalForms === 0) {
+            document.getElementById("no-data-message").style.display = "block";
+        }
+    
+        // 試合終了ボタンを初期状態で無効に
+        const endButton = document.getElementById("endMatchButton");
+        if (endButton) endButton.disabled = true;
+    
+        // 各スコアフォームの送信処理
+        forms.forEach((form, index) => {
+            const formId = form.getAttribute("id");
+            formStatus[formId] = { submitted: false };
+    
+            form.addEventListener("submit", function (e) {
+                e.preventDefault();
+    
+                const formData = new FormData(form);
+                const actionUrl = form.getAttribute("action");
+                
+                // 同点チェック
+                const team1Score = parseInt(formData.get("team1_score"));
+                const team2Score = parseInt(formData.get("team2_score"));
+                
+                if (team1Score === team2Score) {
+                    alert("スコアが同点です。勝者を決めてください。");
+                    return;
+                }
+    
+                fetch(actionUrl, {
+                    method: "POST",
+                    body: formData,
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(text => {
+                            throw new Error(text || "送信エラー");
+                        });
+                    }
+                    return response;
+                })
+                .then(() => {
+                    const submitBtn = form.querySelector("button[type='submit']");
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = "送信済み";
+                        submitBtn.classList.remove("btn-orange");
+                        submitBtn.classList.add("submitted-btn");
+                    }
+    
+                    formStatus[formId].submitted = true;
+                    submittedCount++;
+    
+                    if (submittedCount === totalForms && endButton) {
+                        console.log("✅ 全スコア送信完了 → 試合終了ボタン有効化");
+                        endButton.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    alert(error.message || "スコア送信に失敗しました");
+                    console.error(error);
+                });
+            });
+        });
+    
+        // ✅ 試合終了ボタンのクリック処理を追加
+        if (endButton) {
+            endButton.addEventListener("click", function (e) {
+                e.preventDefault();
+                
+                if (confirm('すべてのスコアが送信済みです。試合を終了してよろしいですか？')) {
+                    fetch("/game/finish_current_match", {
+                        method: "POST"
+                    })
+                    .then(res => {
+                        if (res.ok) {
+                            // ✅ 自動で待機画面に遷移
+                            window.location.href = "/game/court";
+                        } else {
+                            return res.text().then(text => {
+                                throw new Error(text || "試合終了処理に失敗しました");
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        alert(error.message || "通信エラーが発生しました");
+                        console.error(error);
+                    });
+                }
+            });
+        }
+
+        // デバッグボタンの設定
+        const debugButton = document.getElementById("debugButton");
+        if (debugButton) {
+            debugButton.addEventListener("click", function() {
+                // サーバーからデータを取得
+                fetch("/game/debug_data")
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("debug-data").textContent = JSON.stringify(data, null, 2);
+                    document.getElementById("debug-info").style.display = "block";
+                })
+                .catch(error => {
+                    console.error("デバッグデータの取得に失敗:", error);
+                    document.getElementById("debug-data").textContent = "データ取得エラー: " + error.message;
+                    document.getElementById("debug-info").style.display = "block";
+                });
+            });
+        }
+    });
+
+    // デバッグ情報の表示/非表示を切り替える関数
+    function toggleDebug() {
+        const debugInfo = document.getElementById("debug-info");
+        debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
+    }
+</script>
+
+</body>
+</html>
