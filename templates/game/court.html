@@ -150,9 +150,7 @@
                     自動更新中... 最終更新: <span id="lastUpdate">読み込み中...</span>
                 </small>
             </div>
-        </div>
-
-            
+        </div>            
 
             <!-- あなたの状態 - 横並び・中央揃え版 -->
             <div class="card status-card mt-4 mb-4">
@@ -161,8 +159,8 @@
                         <i class="fas fa-user-circle me-2 fa-lg"></i> 
                         <strong>{{ current_user.display_name }}</strong>
                         {% if current_user_skill_score %}
-                            <span class="badge bg-light text-dark ms-4" style="font-size: 1.2rem;">
-                                戦闘力: {{ current_user_skill_score }}
+                            <span id="skillScoreBadge" class="badge bg-light text-dark ms-4" style="font-size: 1.2rem;">
+                                戦闘力: {{ current_user_skill_score or '???' }}
                             </span>
                         {% endif %}
                     </h4>
@@ -445,6 +443,19 @@
                 icon.classList.add('spinning');
                 setTimeout(() => icon.classList.remove('spinning'), 500);
             }
+            function updateSkillScore() {
+                fetch("/game/api/skill_score")
+                    .then(response => response.json())
+                    .then(data => {
+                        const scoreElement = document.getElementById("skillScoreBadge");
+                        console.log("[スキルスコア更新] 応答:", data);
+        
+                        if (scoreElement && data.skill_score !== undefined) {
+                            scoreElement.textContent = `戦闘力: ${data.skill_score.toFixed(2)}`;
+                        }
+                    })
+                    .catch(err => console.error("⚠️ スキルスコア取得エラー:", err));
+            }
 
             async function checkForUpdates() {
                 try {
@@ -483,21 +494,26 @@
             document.addEventListener("DOMContentLoaded", function () {
                 console.log('📱 コート画面初期化完了');
                 updateTimestamp();
-                
-                // 🔁 30秒ごとに自動更新チェック
-                setInterval(checkForUpdates, 30000);
-                
+                updateSkillScore();  // ✅ 初回スキルスコア取得
+            
+                // 🔁 30秒ごとに自動更新チェックとスキルスコア更新
+                setInterval(() => {
+                    checkForUpdates();
+                    updateSkillScore();  // ✅ 定期更新でも取得
+                }, 30000);
+            
                 // 🔄 手動更新ボタンがあれば設定
                 const refreshButton = document.getElementById('manualRefreshBtn');
                 if (refreshButton) {
-                    refreshButton.addEventListener('click', function() {
+                    refreshButton.addEventListener('click', function () {
                         console.log('🔄 手動更新実行');
                         checkForUpdates();
+                        updateSkillScore();  // ✅ 手動更新でも取得
                     });
-                }
+                }            
                 
-                console.log(`👥 現在の状況: 待機${currentPendingCount}人, 休憩${currentRestingCount}人`);
             });
+           
         </script>
  
 

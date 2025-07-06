@@ -30,7 +30,8 @@ def court():
         # ✅ 参加希望のプレイヤーだけ取得（休憩中など除外）
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
         response = match_table.scan(
-            FilterExpression=Attr("entry_status").eq("pending")
+            FilterExpression=Attr("entry_status").eq("pending") | Attr("entry_status").eq("resting"),
+            ConsistentRead=True
         )
         items = response.get("Items", [])
         current_app.logger.info(f"📊 参加待ちプレイヤー数: {len(items)}")
@@ -1743,6 +1744,19 @@ def get_organized_match_data(match_id):
     
     return match_courts
 
+@bp_game.route("/api/skill_score")
+@login_required
+def api_skill_score():
+    user_id = current_user.get_id()
+    table = current_app.dynamodb.Table("bad-users")
+    response = table.get_item(Key={"user#user_id": user_id})
+
+    if "Item" not in response:
+        return jsonify({"error": "User not found"}), 404
+
+    score = float(response["Item"].get("skill_score", 50))
+    return jsonify({"skill_score": round(score, 2)})
+
 
 
 
@@ -1751,8 +1765,7 @@ def get_organized_match_data(match_id):
 @login_required
 def create_test_data():
     """開発用：テストデータを作成（新設計対応）"""
-    if not current_user.administrator:
-        flash('管理者のみ実行可能です', 'danger')
+    if not current_user.administrator:        
         return redirect(url_for('index'))
     
     test_players = [
@@ -1788,13 +1801,10 @@ def create_test_data():
             'skill_score': player.get('skill_score', 50),
             'rest_count': 0,
         }
-            match_table.put_item(Item=item)
-
-        flash(f'{len(test_players)}人のテストデータを作成しました！', 'success')
+            match_table.put_item(Item=item)        
 
     except Exception as e:
-        current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')
-        flash(f'テストデータ作成に失敗: {e}', 'danger')
+        current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')        
 
     return redirect(url_for('game.court'))
 
@@ -1844,7 +1854,7 @@ def test_data_status():
 def clear_test_data():
     """開発用：test_user_ のテストデータを削除"""
     if not current_user.administrator:
-        flash('管理者のみ実行可能です', 'danger')
+        
         return redirect(url_for('index'))
 
     deleted_count = 0
@@ -1873,10 +1883,11 @@ def clear_test_data():
             last_evaluated_key = response.get('LastEvaluatedKey')
             if not last_evaluated_key:
                 break
-
-        flash(f'{deleted_count}件のテストデータを削除しました', 'success')
+        
     except Exception as e:
-        flash(f'テストデータ削除に失敗: {e}', 'danger')
 
-    return redirect(url_for('game.court'))
+        pass
+        
+
+   
 

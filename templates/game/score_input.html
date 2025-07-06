@@ -7,16 +7,17 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .submitted-btn {
-            background-color: #28a745;
+            background-color: #6c757d; /* 灰色 */
             color: white;
+            border: none;
         }
-
+    
         .btn-orange {
             background-color: #fd7e14;  /* オレンジ */
             color: white;
             border: none;
         }
-
+    
         /* デバッグ用スタイル */
         .debug-info {
             background-color: #f8d7da;
@@ -25,7 +26,7 @@
             border-radius: 5px;
             display: none;
         }
-    </style>  
+    </style>
 </head>
 <body class="bg-light">    
 
@@ -124,10 +125,11 @@
     </div>
 
     <!-- 試合終了ボタン -->
-    <form method="POST" action="{{ url_for('game.finish_current_match') }}"
-          onsubmit="return confirm('すべてのスコアが送信済みです。試合を終了してよろしいですか？');">
-        <div class="text-center mb-5">
-            <button id="endMatchButton" type="submit" class="btn btn-danger btn-lg" disabled>試合終了</button>
+    <form method="POST" action="{{ url_for('game.finish_current_match') }}">
+        <div class="text-center mt-5 mb-5">
+            <button id="endMatchButton" type="submit" class="btn btn-danger btn-xl px-5 py-3 fs-4" disabled>
+                試合終了
+            </button>
         </div>
     </form>
 
@@ -213,26 +215,23 @@
         if (endButton) {
             endButton.addEventListener("click", function (e) {
                 e.preventDefault();
-                
-                if (confirm('すべてのスコアが送信済みです。試合を終了してよろしいですか？')) {
-                    fetch("/game/finish_current_match", {
-                        method: "POST"
-                    })
-                    .then(res => {
-                        if (res.ok) {
-                            // ✅ 自動で待機画面に遷移
-                            window.location.href = "/game/court";
-                        } else {
-                            return res.text().then(text => {
-                                throw new Error(text || "試合終了処理に失敗しました");
-                            });
-                        }
-                    })
-                    .catch(error => {
-                        alert(error.message || "通信エラーが発生しました");
-                        console.error(error);
-                    });
-                }
+
+                fetch("/game/finish_current_match", {
+                    method: "POST"
+                })
+                .then(res => {
+                    if (res.ok) {
+                        window.location.href = "/game/court";
+                    } else {
+                        return res.text().then(text => {
+                            throw new Error(text || "試合終了処理に失敗しました");
+                        });
+                    }
+                })
+                .catch(error => {
+                    alert(error.message || "通信エラーが発生しました");
+                    console.error(error);
+                });
             });
         }
 
