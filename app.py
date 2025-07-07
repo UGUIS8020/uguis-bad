@@ -133,9 +133,11 @@ def tokyo_time():
 
 @login_manager.user_loader
 def load_user(user_id):
-    app.logger.debug(f"Loading user with ID: {user_id}")
+    # デバッグログを削除
+    # app.logger.debug(f"Loading user with ID: {user_id}")
 
     if not user_id:
+        # 警告ログは残す（重要な警告なので）
         app.logger.warning("No user_id provided to load_user")
         return None
 
@@ -151,13 +153,16 @@ def load_user(user_id):
         if 'Item' in response:
             user_data = response['Item']
             user = User.from_dynamodb_item(user_data)
-            app.logger.info(f"DynamoDB user data: {user_data}")
+            # ユーザーデータのログ出力を削除（機密情報を含むため）
+            # app.logger.info(f"DynamoDB user data: {user_data}")
             return user
         else:
+            # このログも削除可能ですが、デバッグに役立つので残すか検討
             app.logger.info(f"No user found for ID: {user_id}")
             return None
 
     except Exception as e:
+        # エラーログは残す（問題診断に重要）
         app.logger.error(f"Error loading user with ID: {user_id}: {str(e)}", exc_info=True)
         return None
 
@@ -704,12 +709,10 @@ def format_date(value):
         return value  # 変換できない場合はそのまま返す   
 
 
-
 @app.route('/schedules')
 def get_schedules():
     schedules = get_schedules_with_formatting()
-    return jsonify(schedules)    
-
+    return jsonify(schedules) 
     
 
 @app.route("/", methods=['GET'])
@@ -718,7 +721,6 @@ def index():
     try:
         # 軽量なスケジュール情報のみ取得
         schedules = get_schedules_with_formatting()
-        logger.info(f"[index] スケジュール件数: {len(schedules)}")
 
         # 参加者詳細情報の取得を追加
         user_table = current_app.dynamodb.Table("bad-users")  # 適宜変更
@@ -744,8 +746,9 @@ def index():
                             "user_id": user["user#user_id"],
                             "display_name": user.get("display_name", "不明")
                         })
-                except Exception as e:
-                    logger.warning(f"[参加者取得失敗] user_id={user_id}: {e}")
+                except Exception:
+                    # ログ出力を削除
+                    pass
 
             schedule["participants_info"] = participants_info
 
@@ -765,6 +768,7 @@ def index():
                                canonical=url_for('index', _external=True))
         
     except Exception as e:
+        # 重要なエラーのみログ出力を残す
         logger.error(f"[index] スケジュール取得エラー: {e}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return render_template("index.html", schedules=[], selected_image='images/default.jpg')
@@ -1183,27 +1187,26 @@ def user_maintenance():
         # テーブルからすべてのユーザーを取得
         response = app.table.scan()
         
-        # デバッグ用に取得したユーザーデータを表示
+        # ユーザーデータを処理
         users = response.get('Items', [])        
         for user in users:
             if 'user#user_id' in user:
                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
-
         
-
-         # created_at の降順でソート（新しい順）
+        # created_at の降順でソート（新しい順）
         sorted_users = sorted(users, 
                             key=lambda x: x.get('created_at'),
                             reverse=True)
-
-        app.logger.info(f"Sorted users by created_at: {sorted_users}")
-
+        
+        # ログ出力を削除
+        
         return render_template("user_maintenance.html", 
                              users=sorted_users, 
                              page=1, 
                              has_next=False)
 
     except ClientError as e:
+        # エラーログは重要なので残す（エラー発生時のデバッグに必要）
         app.logger.error(f"DynamoDB error: {str(e)}")
         flash('ユーザー情報の取得に失敗しました。', 'error')
         return redirect(url_for('index'))

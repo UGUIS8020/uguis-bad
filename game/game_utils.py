@@ -12,6 +12,59 @@ from dataclasses import dataclass
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
 
+# def update_trueskill_for_players(result_item):
+#     """
+#     TrueSkill を使って各プレイヤーのスキルスコアを更新
+#     result_item = {
+#         "team_a": [{"user_id": ..., "display_name": ...}, ...],
+#         "team_b": [{"user_id": ..., "display_name": ...}, ...],
+#         "winner": "A" または "B"
+#     }
+#     """
+#     user_table = current_app.dynamodb.Table("bad-users")
+
+#     def get_team_ratings(team):
+#         """チームのTrueSkill Ratingを取得する"""
+#         ratings = []
+#         for player in team:
+#             user_id = player.get("user_id")
+#             user_data = get_user_data(user_id, user_table)  # ← ここ！
+#             if user_data:
+#                 current_score = float(user_data.get("skill_score", 50))
+#                 rating = Rating(mu=current_score, sigma=3)
+#                 ratings.append((user_id, rating, current_score))
+#         return ratings
+
+#     ratings_a = get_team_ratings(result_item["team_a"])
+#     ratings_b = get_team_ratings(result_item["team_b"])
+#     winner = result_item.get("winner", "A")
+
+#     if not ratings_a or not ratings_b:
+#         current_app.logger.warning("⚠️ チームが空です。TrueSkill評価をスキップ")
+#         return
+
+#     if winner.upper() == "A":
+#         new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
+#     else:
+#         new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
+#         new_ratings = new_ratings[::-1]
+
+#     new_ratings_a, new_ratings_b = new_ratings
+
+#     def save(team_ratings, new_ratings, label):
+#         for (user_id, old_rating, name), new_rating in zip(team_ratings, new_ratings):
+#             new_score = round(new_rating.mu, 2)
+#             delta = round(new_rating.mu - old_rating.mu, 2)
+#             user_table.update_item(
+#                 Key={"user#user_id": user_id},
+#                 UpdateExpression="SET skill_score = :s",
+#                 ExpressionAttributeValues={":s": Decimal(str(new_score))}
+#             )
+#             current_app.logger.info(f"[{label}] {name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
+
+#     save(ratings_a, new_ratings_a, "Team A")
+#     save(ratings_b, new_ratings_b, "Team B")
+
 def update_trueskill_for_players(result_item):
     """
     TrueSkill を使って各プレイヤーのスキルスコアを更新
@@ -28,11 +81,25 @@ def update_trueskill_for_players(result_item):
         ratings = []
         for player in team:
             user_id = player.get("user_id")
-            user_data = get_user_data(user_id, user_table)  # ← ここ！
-            if user_data:
-                current_score = float(user_data.get("skill_score", 50))
-                rating = Rating(mu=current_score, sigma=3)
-                ratings.append((user_id, rating, current_score))
+            if not user_id:
+                current_app.logger.warning(f"ユーザーIDが空です: {player}")
+                continue
+                
+            # DynamoDBから直接ユーザーデータを取得する
+            try:
+                response = user_table.get_item(Key={"user#user_id": user_id})
+                user_data = response.get("Item")
+                
+                if user_data:
+                    current_score = float(user_data.get("skill_score", 50))
+                    rating = Rating(mu=current_score, sigma=3)
+                    display_name = player.get("display_name", user_data.get("display_name", "不明"))
+                    ratings.append((user_id, rating, display_name))
+                else:
+                    current_app.logger.warning(f"ユーザーが見つかりません: {user_id}")
+            except Exception as e:
+                current_app.logger.error(f"ユーザーデータ取得エラー: {str(e)}")
+                
         return ratings
 
     ratings_a = get_team_ratings(result_item["team_a"])
@@ -52,15 +119,18 @@ def update_trueskill_for_players(result_item):
     new_ratings_a, new_ratings_b = new_ratings
 
     def save(team_ratings, new_ratings, label):
-        for (user_id, old_rating, name), new_rating in zip(team_ratings, new_ratings):
+        for (user_id, old_rating, display_name), new_rating in zip(team_ratings, new_ratings):
             new_score = round(new_rating.mu, 2)
             delta = round(new_rating.mu - old_rating.mu, 2)
-            user_table.update_item(
-                Key={"user#user_id": user_id},
-                UpdateExpression="SET skill_score = :s",
-                ExpressionAttributeValues={":s": Decimal(str(new_score))}
-            )
-            current_app.logger.info(f"[{label}] {name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
+            try:
+                user_table.update_item(
+                    Key={"user#user_id": user_id},
+                    UpdateExpression="SET skill_score = :s",
+                    ExpressionAttributeValues={":s": Decimal(str(new_score))}
+                )
+                current_app.logger.info(f"[{label}] {display_name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
+            except Exception as e:
+                current_app.logger.error(f"スコア更新エラー: {user_id} {str(e)}")
 
     save(ratings_a, new_ratings_a, "Team A")
     save(ratings_b, new_ratings_b, "Team B")
