@@ -98,47 +98,122 @@ def court():
         return f"エラー: {e}"
 
     
+# def get_latest_match_id():
+#     """最新の試合IDを取得"""
+#     try:
+#         today_prefix = datetime.now().strftime("%Y%m%d")
+#         current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
+        
+#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+#         # まず全てのアイテムを確認
+#         all_response = match_table.scan()
+#         all_items = all_response.get("Items", [])
+#         current_app.logger.info(f"🔍 全アイテム数: {len(all_items)}")
+        
+#         # match_idを持つアイテムを確認
+#         items_with_match_id = [item for item in all_items if item.get("match_id") and item.get("match_id") != "pending"]
+#         current_app.logger.info(f"🔍 有効なmatch_idを持つアイテム数: {len(items_with_match_id)}")
+        
+#         for item in items_with_match_id[:5]:  # 最初の5件
+#             current_app.logger.info(f"🔍 match_id={item.get('match_id')}, name={item.get('display_name')}, status={item.get('entry_status')}")
+        
+#         # 今日のプレフィックスでフィルタリング
+#         response = match_table.scan(
+#             FilterExpression=Attr("match_id").begins_with(today_prefix)
+#         )
+#         items = response.get("Items", [])
+        
+#         current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
+        
+#         if not items:
+#             current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
+#             return None
+        
+#         latest = max(items, key=lambda x: x.get("match_id", ""))
+#         match_id = latest.get("match_id")
+        
+#         current_app.logger.info(f"🎯 最新の試合ID: {match_id}")
+#         return match_id
+        
+#     except Exception as e:
+#         current_app.logger.error(f"❌ match_id取得エラー: {e}")
+#         return None
+    
 def get_latest_match_id():
-    """最新の試合IDを取得"""
+    """最新の試合IDを取得する関数"""
+    current_app.logger.info("🔍 get_latest_match_id 開始")
+    
+    # 1. 進行中の試合を探す
+    current_app.logger.info("🔍 ステップ1: 進行中の試合を探す")
+    match_table = current_app.dynamodb.Table("bad-game-match_entries")
+    response = match_table.scan(
+        FilterExpression=Attr("entry_status").eq("playing")
+    )
+    playing_items = response.get("Items", [])
+    current_app.logger.info(f"🔍 進行中のプレイヤー数: {len(playing_items)}")
+    
+    if playing_items:
+        # 進行中の試合があれば、その試合IDを返す
+        for item in playing_items:
+            match_id = item.get("match_id")
+            if match_id and match_id != "pending":
+                current_app.logger.info(f"🎯 進行中の試合ID: {match_id}")
+                return match_id
+    
+    # 2. すべてのエントリーから非"pending"のmatch_idを探す
+    current_app.logger.info("🔍 ステップ2: 非pendingのmatch_idを探す")
     try:
-        today_prefix = datetime.now().strftime("%Y%m%d")
-        current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
-        
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
-        
-        # まず全てのアイテムを確認
-        all_response = match_table.scan()
-        all_items = all_response.get("Items", [])
-        current_app.logger.info(f"🔍 全アイテム数: {len(all_items)}")
-        
-        # match_idを持つアイテムを確認
-        items_with_match_id = [item for item in all_items if item.get("match_id") and item.get("match_id") != "pending"]
-        current_app.logger.info(f"🔍 有効なmatch_idを持つアイテム数: {len(items_with_match_id)}")
-        
-        for item in items_with_match_id[:5]:  # 最初の5件
-            current_app.logger.info(f"🔍 match_id={item.get('match_id')}, name={item.get('display_name')}, status={item.get('entry_status')}")
-        
-        # 今日のプレフィックスでフィルタリング
         response = match_table.scan(
-            FilterExpression=Attr("match_id").begins_with(today_prefix)
+            FilterExpression=Attr("match_id").ne("pending")
         )
         items = response.get("Items", [])
+        current_app.logger.info(f"🔍 非pendingのエントリー数: {len(items)}")
         
-        current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
-        
-        if not items:
-            current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
-            return None
-        
-        latest = max(items, key=lambda x: x.get("match_id", ""))
-        match_id = latest.get("match_id")
-        
-        current_app.logger.info(f"🎯 最新の試合ID: {match_id}")
-        return match_id
-        
+        if items:
+            # ユニークなmatch_idを抽出
+            unique_match_ids = set()
+            for item in items:
+                match_id = item.get("match_id")
+                if match_id and match_id != "pending":
+                    unique_match_ids.add(match_id)
+            
+            current_app.logger.info(f"🔍 ユニークなmatch_id数: {len(unique_match_ids)}")
+            if unique_match_ids:
+                # match_idをソート（降順）して最新のものを取得
+                latest_match_id = sorted(unique_match_ids, reverse=True)[0]
+                current_app.logger.info(f"🎯 最新の試合ID（非進行中）: {latest_match_id}")
+                return latest_match_id
     except Exception as e:
-        current_app.logger.error(f"❌ match_id取得エラー: {e}")
-        return None
+        current_app.logger.error(f"エントリー検索エラー: {str(e)}")
+    
+    # 3. 結果テーブルから最新の試合を取得
+    current_app.logger.info("🔍 ステップ3: 結果テーブルから最新の試合を取得")
+    result_table = current_app.dynamodb.Table("bad-game-results")
+    
+    try:
+        # すべての結果を取得
+        response = result_table.scan()
+        result_items = response.get("Items", [])
+        current_app.logger.info(f"🔍 結果テーブルのアイテム数: {len(result_items)}")
+        
+        if result_items:
+            # match_idの一覧をログに出力
+            match_ids = [item.get("match_id") for item in result_items if item.get("match_id")]
+            current_app.logger.info(f"🔍 結果テーブルのmatch_id一覧: {match_ids[:10]}...")  # 最初の10個だけ表示
+            
+            # 作成日時でソートして最新のものを取得
+            sorted_items = sorted(result_items, key=lambda x: x.get("created_at", ""), reverse=True)
+            if sorted_items:
+                latest_match_id = sorted_items[0].get("match_id")
+                current_app.logger.info(f"🎯 結果テーブルからの最新試合ID: {latest_match_id}")
+                return latest_match_id
+    except Exception as e:
+        current_app.logger.error(f"結果テーブル検索エラー: {str(e)}")
+    
+    # 該当する試合が見つからない場合はNoneを返す
+    current_app.logger.info("❌ 最新の試合IDが見つかりませんでした")
+    return None
 
 def get_match_players_by_court(match_id):
     """指定された試合IDに対するコート別のプレイヤー構成を取得"""
@@ -211,47 +286,47 @@ def get_match_players_by_court(match_id):
     
     return courts      
     
-def get_latest_match_id():
-    """最新の試合IDを取得"""
-    try:
-        today_prefix = datetime.now().strftime("%Y%m%d")
-        current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
+# def get_latest_match_id():
+#     """最新の試合IDを取得"""
+#     try:
+#         today_prefix = datetime.now().strftime("%Y%m%d")
+#         current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
         
-        # 🔥 同じテーブルから検索
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+#         # 🔥 同じテーブルから検索
+#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
         
-        response = match_table.scan(
-            FilterExpression=Attr("match_id").begins_with(today_prefix)
-        )
-        items = response.get("Items", [])
+#         response = match_table.scan(
+#             FilterExpression=Attr("match_id").begins_with(today_prefix)
+#         )
+#         items = response.get("Items", [])
         
-        current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
+#         current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
         
-        if not items:
-            current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
-            return None
+#         if not items:
+#             current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
+#             return None
         
-        # ユニークなmatch_idを抽出
-        unique_match_ids = set()
-        for item in items:
-            match_id = item.get("match_id")
-            if match_id and match_id != "pending":
-                unique_match_ids.add(match_id)
+#         # ユニークなmatch_idを抽出
+#         unique_match_ids = set()
+#         for item in items:
+#             match_id = item.get("match_id")
+#             if match_id and match_id != "pending":
+#                 unique_match_ids.add(match_id)
         
-        current_app.logger.info(f"🔍 ユニークなmatch_id: {list(unique_match_ids)}")
+#         current_app.logger.info(f"🔍 ユニークなmatch_id: {list(unique_match_ids)}")
         
-        if not unique_match_ids:
-            return None
+#         if not unique_match_ids:
+#             return None
         
-        # 最新のmatch_idを返す
-        latest_match_id = max(unique_match_ids)
-        current_app.logger.info(f"🎯 最新の試合ID: {latest_match_id}")
+#         # 最新のmatch_idを返す
+#         latest_match_id = max(unique_match_ids)
+#         current_app.logger.info(f"🎯 最新の試合ID: {latest_match_id}")
         
-        return latest_match_id
+#         return latest_match_id
         
-    except Exception as e:
-        current_app.logger.error(f"❌ match_id取得エラー: {e}")
-        return None
+#     except Exception as e:
+#         current_app.logger.error(f"❌ match_id取得エラー: {e}")
+#         return None
 
 @bp_game.route("/api/court_status")
 @login_required
