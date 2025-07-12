@@ -1,8 +1,10 @@
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
 import os
 from datetime import datetime
 import uuid
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class DynamoDB:

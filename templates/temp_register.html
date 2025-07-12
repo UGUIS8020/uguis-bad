@@ -41,7 +41,7 @@
                             <!-- 表示名 -->
                             <div class="mb-3">
                                 <label class="form-label">表示名 <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.display_name, placeholder="LINE名など、活動時に使用する名前", class="form-control form-control-lg") }}
+                                {{ render_field(form.display_name, placeholder="LINE名など、活動時に使用する名前", class="form-control form-control-lg", required=true) }}
                                 <div class="form-text text-light">※他の参加者に表示される名前になります</div>
                                 {% if form.display_name.errors %}
                                     <p class="text-warning">{{ form.display_name.errors[0] }}</p>
@@ -51,7 +51,7 @@
                             <!-- 名前 -->
                             <div class="mb-3">
                                 <label class="form-label">氏名 <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.user_name, placeholder="本名をご記入ください", class="form-control form-control-lg") }}
+                                {{ render_field(form.user_name, placeholder="本名をご記入ください(表示されません)", class="form-control form-control-lg", required=true) }}
                                 {% if form.user_name.errors %}
                                     <p class="text-warning">{{ form.user_name.errors[0] }}</p>
                                 {% endif %}
@@ -60,68 +60,146 @@
                             <!-- 性別 -->
                             <div class="mb-3">
                                 <label class="form-label">性別 <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.gender, class="form-control form-control-lg") }}
+                                {{ render_field(form.gender, class="form-control form-control-lg", required=true) }}
                                 {% if form.gender.errors %}
                                     <p class="text-warning">{{ form.gender.errors[0] }}</p>
                                 {% endif %}
                             </div>
 
-                            <!-- バドミントン歴 -->
                             <div class="mb-3">
-                                <label class="form-label">バドミントン経験 <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.badminton_experience, placeholder="例: 経験3年・社会人サークルで活動中", class="form-control form-control-lg") }}
-                                <div class="form-text text-light">※できるだけ詳しくご記入ください</div>
-                                {% if form.badminton_experience.errors %}
-                                    <p class="text-danger">{{ form.badminton_experience.errors[0] }}</p>
+                                {{ form.date_of_birth.label(class="form-label") }}
+                                {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date", required=True) }}
+                                {% if form.date_of_birth.errors %}
+                                    <div class="text-danger">
+                                        {% for error in form.date_of_birth.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
                                 {% endif %}
                             </div>
+
+                            <!-- バドミントン歴 -->
+
+                            <!-- 電話番号 -->
+                            <div class="mb-3">
+                                <label class="form-label">電話番号<span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.phone, placeholder="電話番号(ハイフン無しで)", class="form-control form-control-lg", required=true) }}
+                                {% if form.phone.errors %}
+                                    <p class="text-danger">{{ form.phone.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+                         
 
                             <!-- メールアドレス -->
                             <div class="mb-3">
                                 <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg") }}
+                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg", required=true) }}
                                 {% if form.email.errors %}
                                     <p class="text-danger">{{ form.email.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- メールアドレス確認 -->
+                            <div class="mb-3">
+                                <label class="form-label">メールアドレス（確認） <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.confirm_email, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
+                                {% if form.confirm_email.errors %}
+                                    <p class="text-danger">{{ form.confirm_email.errors[0] }}</p>
                                 {% endif %}
                             </div>
 
                             <!-- パスワード -->
                             <div class="mb-3">
                                 <label class="form-label">パスワード <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.password, placeholder="8文字以上で設定してください", class="form-control form-control-lg") }}
+                                {{ render_field(form.password, placeholder="8文字以上で設定してください", class="form-control form-control-lg", required=true) }}
                                 {% if form.password.errors %}
                                     <p class="text-danger">{{ form.password.errors[0] }}</p>
                                 {% endif %}
                             </div>
+
+                            <!-- パスワード確認 -->
+                            <div class="mb-3">
+                                <label class="form-label">パスワード（確認） <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.confirm_password, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
+                                {% if form.confirm_password.errors %}
+                                    <p class="text-danger">{{ form.confirm_password.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+
+                            <!-- レベル診断セクション -->
+                            <hr class="my-4" style="border-color: rgba(255,255,255,0.3);">
+                            <h5 class="mb-3">レベル診断（ゲーム参加またはレベル分けの参考にします）</h5>                            
+
+                            <!-- 質問1：バドミントン経験 -->
+                            <div class="mb-3">
+                                <label class="form-label">バドミントン経験 <span class="badge bg-warning text-dark">必須</span></label>
+                                {{ render_field(form.badminton_experience, class="form-control form-control-lg", required=true) }}
+                                {% if form.badminton_experience.errors %}
+                                    <p class="text-danger">{{ form.badminton_experience.errors[0] }}</p>
+                                {% endif %}
+                            </div>
+                            
+                            <!-- 質問2：ダブルス -->
+                            <div class="mb-3">
+                                <label class="form-label">ダブルスの試合形式でプレーできますか？ <span class="badge bg-warning text-dark">必須</span></label>
+                                <select name="doubles_ability" class="form-control form-control-lg" required>
+                                    <option value="">選択してください</option>
+                                    <option value="0">ルールがわからない</option>
+                                    <option value="10">何となくできる</option>
+                                    <option value="20">問題なくできる</option>
+                                </select>
+                            </div>
+
+                            <!-- 質問3：基本ストローク -->
+                            <div class="mb-3">
+                                <label class="form-label">基本ストローク（クリア・ドロップ・スマッシュ）はできますか？ <span class="badge bg-warning text-dark">必須</span></label>
+                                <select name="basic_strokes" class="form-control form-control-lg" required>
+                                    <option value="">選択してください</option>
+                                    <option value="0">全くできない</option>
+                                    <option value="5">1-2種類できる</option>
+                                    <option value="10">3種類くらいできる</option>
+                                    <option value="20">全部できる</option>
+                                </select>
+                            </div>                            
+
+                            <!-- スコア表示エリア -->
+                            <div id="scoreDisplay" class="alert alert-info" style="display: none;">
+                                <strong>診断結果：</strong>
+                                <span id="scoreText"></span>
+                                <div id="eligibilityText" class="mt-2"></div>
+                            </div>
+
+                            <input type="hidden" name="skill_score" id="skill_score_input" value="0">
 
                             <!-- 登録ボタン -->
                             <div class="mt-4">
                                 {{ form.submit(class="btn btn-outline-light btn-lg w-100") }}
                             </div>
                         </form>
-                        <script>
 
+                        
+                        
+                        <script>
                             document.addEventListener('DOMContentLoaded', function() {
                                 const birthdateInput = document.querySelector('input[name="date_of_birth"]');
                                 const guardianSection = document.getElementById('guardianSection');
-                            
+                        
                                 function calculateAge(birthdate) {
                                     const today = new Date();
                                     const birthDate = new Date(birthdate);
                                     let age = today.getFullYear() - birthDate.getFullYear();
                                     const monthDiff = today.getMonth() - birthDate.getMonth();
-                                    
+                        
                                     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
                                         age--;
                                     }
                                     return age;
                                 }
-                            
+                        
                                 if (birthdateInput) {
                                     function checkAge() {
                                         if (birthdateInput.value) {
                                             const age = calculateAge(birthdateInput.value);
-                                            console.log('Calculated age:', age); // デバッグ用
                                             if (age < 18) {
                                                 guardianSection.style.display = 'block';
                                             } else {
@@ -129,24 +207,68 @@
                                             }
                                         }
                                     }
-                            
-                                    // 初期チェック
+                        
                                     checkAge();
-                            
-                                    // 生年月日が変更されたときのチェック
                                     birthdateInput.addEventListener('change', checkAge);
                                 }
-                            });
+                        
+                                // レベル診断機能
+                                const assessmentSelects = document.querySelectorAll('#badminton_experience, select[name="doubles_ability"], select[name="basic_strokes"]');
+                                const scoreDisplay = document.getElementById('scoreDisplay');
+                                const scoreText = document.getElementById('scoreText');
+                                const eligibilityText = document.getElementById('eligibilityText');
+                        
+                                function calculateAssessmentScore() {
+                                    const experienceField = document.getElementById('badminton_experience');
+                                    let experience = 0;
+                        
+                                    if (experienceField && experienceField.value) {
+                                        const value = experienceField.value;
+                                        if (value === '未経験') experience = 0;
+                                        else if (value === '1年未満') experience = 5;
+                                        else if (value === '1-3年未満') experience = 10;
+                                        else if (value === '3-5年未満') experience = 15;
+                                        else if (value === '5年以上') experience = 20;
+                                    }
+                        
+                                    const doubles = parseInt(document.querySelector('select[name="doubles_ability"]')?.value || 0);
+                                    const strokes = parseInt(document.querySelector('select[name="basic_strokes"]')?.value || 0);                                    
+                        
+                                    const totalScore = experience + doubles + strokes;
+
+                                    document.getElementById('skill_score_input').value = totalScore;
+                        
+                                    if (experience || doubles || strokes) {
+                                        scoreText.textContent = `${totalScore}点`;
+                        
+                                        if (totalScore >= 30) {
+                                            eligibilityText.innerHTML = '<span class="text-success">✅ ゲーム参加OK！</span>';
+                                            scoreDisplay.className = 'alert alert-success';
+                                        } else {
+                                            eligibilityText.innerHTML = '<span class="text-warning">⚠️ 基本練習からスタートになります</span>';
+                                            scoreDisplay.className = 'alert alert-warning';
+                                        }
+                        
+                                        scoreDisplay.style.display = 'block';
+                                    }
+                                }
+                        
+                                assessmentSelects.forEach(select => {
+                                    select.addEventListener('change', calculateAssessmentScore);
+                                });
+                                calculateAssessmentScore();
                             
-                            document.querySelector('form').addEventListener('submit', function(e) {
-                                console.log('Form submission attempted');
-                                // フォームの各フィールドの値をログ出力
-                                const formData = new FormData(this);
-                                for (let [key, value] of formData.entries()) {
-                                    console.log(key + ': ' + value);
+                                // ✅ form送信前にログ取得（今は空処理）
+                                const form = document.querySelector('form');
+                                if (form) {
+                                    form.addEventListener('submit', function(e) {
+                                        const formData = new FormData(this);
+                                        for (let [key, value] of formData.entries()) {
+                                            // console.log(key, value); ← 確認したければ有効に
+                                        }
+                                    });
                                 }
                             });
-
                         </script>
                         
                     </div>

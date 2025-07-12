@@ -93,27 +93,55 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('schedule.admin_schedules') }}">練習予定</a>
                 </li>
-                {% endif %}
+                {% endif %}                
             </ul>
+
+            {% if current_user.is_authenticated and current_user.administrator %}
+                <li class="nav-item">
+                    <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}" target="_blank" rel="noopener noreferrer">
+                        データ作成
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-outline-secondary ms-2" href="{{ url_for('game.clear_test_data') }}">
+                        データ削除
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-outline-info ms-2" href="{{ url_for('badminton_chat_logs_page') }}">
+                        ログ
+                    </a>
+                </li>
+                
+            {% endif %}
             
-            <ul class="navbar-nav">
+            <ul class="navbar-nav ms-auto">
                 {% if current_user.is_authenticated %}
                 <li class="nav-item">
+                    <a class="btn btn-outline-danger ms-2" 
+                       href="{{ url_for('game.court') }}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       title="新しいタブで待機画面を開きます">                        
+                        <i class="fas fa-external-link-alt me-1"></i>
+                        コートに入る                        
+                    </a>
+                </li>
+                
+                <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('logout') }}">ログアウト</a>
-                </li> 
+                </li>                   
+            
+                <li class="nav-item">
+                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.id) }}">
+                        {{ current_user.display_name | truncate(10) }}
+                    </a>  
+                </li>
                 {% else %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
                 </li>
-                {% endif %}   
-
-                <li class="nav-item">
-                    {% if current_user.is_authenticated %}
-                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.get_id()) }}">
-                        {{ current_user.display_name }}
-                    </a>
-                    {% endif %}
-                </li>
+                {% endif %}
             </ul>
         </div>
       </div>
