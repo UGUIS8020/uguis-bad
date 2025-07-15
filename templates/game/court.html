@@ -377,16 +377,16 @@
                 
                 <div class="d-flex align-items-center mb-3">
                     <div class="me-2">
-                        <span class="badge bg-danger me-2 fs-5">Aチーム</span>
-                        <span class="fs-5 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' ') }}</span>
+                        <span class="badge bg-danger me-2 fs-5">A</span>
+                        <span class="fs-5 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
                     </div>
                     
                 </div>
 
                 <div class="d-flex align-items-center mb-4">
                     <div class="me-2">
-                        <span class="badge bg-primary me-2 fs-5">Bチーム</span>
-                        <span class="fs-5 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' ') }}</span>
+                        <span class="badge bg-primary me-2 fs-5">B</span>
+                        <span class="fs-5 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
                     </div>
                     
                 </div>
@@ -485,11 +485,11 @@
                 updateTimestamp();
                 updateSkillScore();  // ✅ 初回スキルスコア取得
 
-                // 🔁 25秒ごとに自動更新チェックとスキルスコア更新
+                // 🔁 20秒ごとに自動更新チェックとスキルスコア更新
                 setInterval(() => {
                     checkForUpdates();
                     updateSkillScore();  // ✅ 定期更新でも取得
-                }, 25000);
+                }, 20000);
             
                 // 🔄 手動更新ボタンがあれば設定
                 const refreshButton = document.getElementById('manualRefreshBtn');
