@@ -7,9 +7,10 @@ import random
 from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 from flask import session
-from .game_utils import update_trueskill_for_players, parse_players, BadmintonPairing, Player, generate_balanced_pairs_and_matches
+from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, BadmintonPairing, Player, generate_balanced_pairs_and_matches, sync_match_entries_with_updated_skills
 import pytz
 import re
+from decimal import Decimal
 
 
 
@@ -1160,6 +1161,107 @@ def perform_pairing_v2(entries, match_id, max_courts=6):
 #         current_app.logger.error(f"[試合終了処理エラー] {str(e)}")
 #         return "エラー", 500
 
+# @bp_game.route("/finish_current_match", methods=["POST"])
+# @login_required
+# def finish_current_match():
+#     try:
+#         # 最新の試合IDを取得
+#         match_id = get_latest_match_id()
+#         if not match_id:
+#             current_app.logger.warning("⚠️ アクティブな試合IDが見つかりません")
+#             return "アクティブな試合が見つかりません", 400
+
+#         current_app.logger.info(f"🏁 試合終了処理開始: match_id={match_id}")
+
+#         # 試合ID形式の検証（オプション）
+#         match_id_pattern = re.compile(r'^\d{8}_\d{6}$')
+#         if not match_id_pattern.match(match_id):
+#             current_app.logger.warning(f"⚠️ 非標準形式の試合ID: {match_id}")
+        
+#         # 試合に出ていたプレイヤーを pending に戻す処理
+#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
+#         playing_response = match_table.scan(
+#             FilterExpression=Attr("match_id").eq(match_id) & ~Attr("entry_id").contains("meta")
+#         )
+#         playing_players = playing_response.get("Items", [])
+        
+#         updated_count = 0
+#         for player in playing_players:
+#             try:
+#                 match_table.update_item(
+#                     Key={'entry_id': player['entry_id']},
+#                     UpdateExpression="SET entry_status = :pending, match_id = :mid REMOVE court_number, team_side",
+#                     ExpressionAttributeValues={
+#                         ":pending": "pending",
+#                         ":mid": "pending"
+#                     }
+#                 )
+#                 updated_count += 1
+#             except Exception as e:
+#                 current_app.logger.error(f"⚠️ プレイヤー更新エラー: {player.get('display_name', 'Unknown')} - {str(e)}")
+        
+#         current_app.logger.info(f"✅ {updated_count}/{len(playing_players)}人のプレイヤーを待機状態に更新")
+
+#         # TrueSkill評価の呼び出し
+#         results_table = current_app.dynamodb.Table("bad-game-results")
+#         response = results_table.scan(
+#             FilterExpression=Attr("match_id").eq(match_id)
+#         )
+#         match_results = response.get("Items", [])
+        
+#         current_app.logger.info(f"🎮 試合結果数: {len(match_results)}")
+
+#         skill_update_count = 0
+#         for result in match_results:
+#             try:
+#                 team_a = parse_players(result["team_a"])
+#                 team_b = parse_players(result["team_b"])
+#                 winner = result.get("winner", "A")
+
+#                 result_item = {
+#                     "team_a": team_a,
+#                     "team_b": team_b,
+#                     "winner": winner
+#                 }
+
+#                 current_app.logger.info(f"🎯 コート{result.get('court_number')}: {winner}チーム勝利")
+#                 update_trueskill_for_players(result_item)
+#                 skill_update_count += 1
+#             except Exception as e:
+#                 court_number = result.get('court_number', 'Unknown')
+#                 current_app.logger.error(f"⚠️ スキル更新エラー (コート{court_number}): {str(e)}")
+
+#         current_app.logger.info(f"✅ スキル更新完了: {skill_update_count}/{len(match_results)}コート, match_id={match_id}")
+        
+#         # フラッシュメッセージでユーザーに通知（オプション）
+#         try:
+#             flash(f"試合が終了しました。{updated_count}人のプレイヤーを待機状態に戻しました。", "success")
+#         except Exception:
+#             pass
+        
+#         # Ajaxリクエストの場合はJSONを返し、それ以外はリダイレクト
+#         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+#             return jsonify({
+#                 "success": True,
+#                 "message": "試合が正常に終了しました",
+#                 "updated_players": updated_count,
+#                 "skill_updates": skill_update_count
+#             })
+        
+#         return redirect(url_for('game.court'))
+
+#     except Exception as e:
+#         current_app.logger.error(f"[試合終了処理エラー] {str(e)}")
+#         import traceback
+#         current_app.logger.error(traceback.format_exc())
+        
+#         # Ajaxリクエストの場合はJSONエラーを返し、それ以外はリダイレクト
+#         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+#             return jsonify({"success": False, "error": str(e)}), 500
+        
+#         flash(f"エラーが発生しました: {str(e)}", "danger")
+#         return redirect(url_for('game.court'))
+    
 @bp_game.route("/finish_current_match", methods=["POST"])
 @login_required
 def finish_current_match():
@@ -1183,6 +1285,9 @@ def finish_current_match():
             FilterExpression=Attr("match_id").eq(match_id) & ~Attr("entry_id").contains("meta")
         )
         playing_players = playing_response.get("Items", [])
+        
+        # プレイヤーの entry_id と user_id のマッピングを保存（後で同期に使用）
+        player_mapping = {player['user_id']: player['entry_id'] for player in playing_players if 'user_id' in player}
         
         updated_count = 0
         for player in playing_players:
@@ -1210,6 +1315,9 @@ def finish_current_match():
         
         current_app.logger.info(f"🎮 試合結果数: {len(match_results)}")
 
+        # TrueSkill評価で更新されるユーザーIDとスキルスコアのマッピング
+        updated_skills = {}
+        
         skill_update_count = 0
         for result in match_results:
             try:
@@ -1217,20 +1325,36 @@ def finish_current_match():
                 team_b = parse_players(result["team_b"])
                 winner = result.get("winner", "A")
 
+                # 結果アイテムにプレイヤーマッピングを追加
+                for player in team_a + team_b:
+                    user_id = player.get("user_id")
+                    if user_id in player_mapping:
+                        player["entry_id"] = player_mapping[user_id]
+
                 result_item = {
                     "team_a": team_a,
                     "team_b": team_b,
-                    "winner": winner
+                    "winner": winner,
+                    "match_id": match_id
                 }
 
                 current_app.logger.info(f"🎯 コート{result.get('court_number')}: {winner}チーム勝利")
-                update_trueskill_for_players(result_item)
+                
+                # TrueSkill更新と同時に更新されたスキルスコアを取得
+                updated_user_skills = update_trueskill_for_players(result_item)
+                # 更新された結果をマージ
+                updated_skills.update(updated_user_skills)
+                
                 skill_update_count += 1
             except Exception as e:
                 court_number = result.get('court_number', 'Unknown')
                 current_app.logger.error(f"⚠️ スキル更新エラー (コート{court_number}): {str(e)}")
 
         current_app.logger.info(f"✅ スキル更新完了: {skill_update_count}/{len(match_results)}コート, match_id={match_id}")
+        
+        # 更新後、エントリーテーブルの同期を実行
+        sync_count = sync_match_entries_with_updated_skills(player_mapping, updated_skills)
+        current_app.logger.info(f"✅ エントリーテーブル同期完了: {sync_count}件のエントリーを更新")
         
         # フラッシュメッセージでユーザーに通知（オプション）
         try:
@@ -1244,7 +1368,8 @@ def finish_current_match():
                 "success": True,
                 "message": "試合が正常に終了しました",
                 "updated_players": updated_count,
-                "skill_updates": skill_update_count
+                "skill_updates": skill_update_count,
+                "synced_entries": sync_count
             })
         
         return redirect(url_for('game.court'))
@@ -1618,14 +1743,23 @@ def submit_score(match_id, court_number):
         
         current_app.logger.info(f"取得したエントリー数: {len(entries)}")
         
+        # エントリーIDとユーザーIDのマッピングを作成
+        entry_mapping = {}
+        for entry in entries:
+            user_id = entry.get("user_id")
+            entry_id = entry.get("entry_id")
+            if user_id and entry_id:
+                entry_mapping[user_id] = entry_id
+        
         # チームごとに分類
         team_a = []
         team_b = []
         
         for entry in entries:
             player_data = {
-                "user_id": str(entry.get("user_id", "")),  # ← これに合わせる
-                "display_name": str(entry.get("display_name", "不明"))
+                "user_id": str(entry.get("user_id", "")),
+                "display_name": str(entry.get("display_name", "不明")),
+                "entry_id": str(entry.get("entry_id", ""))  # entry_idも含める
             }
             
             # team と team_side の両方を確認
@@ -1675,11 +1809,18 @@ def submit_score(match_id, court_number):
             current_app.logger.error(f"❌ 結果保存エラー: {str(e)}")
             return "スコアの保存に失敗しました", 500
 
-        # スキルスコア更新
+        # スキルスコア更新と同期
         try:
-            update_trueskill_for_players(result_item)
+            # スキルスコアを更新して返り値を取得
+            updated_skills = update_trueskill_for_players_and_return_updates(result_item)
+            
+            # エントリーテーブルも同期して更新
+            sync_count = sync_match_entries_with_updated_skills(entry_mapping, updated_skills)
+            current_app.logger.info(f"✅ エントリーテーブル同期完了: {sync_count}件のエントリーを更新")
         except Exception as e:
-            current_app.logger.error(f"[TrueSkill 更新エラー] {str(e)}")
+            current_app.logger.error(f"[TrueSkill 更新/同期エラー] {str(e)}")
+            import traceback
+            current_app.logger.error(traceback.format_exc())
             # エラーがあってもスコア自体は保存されているので、200を返す
             return "スコアは保存されましたが、スキルスコアの更新に失敗しました", 200
 
@@ -1836,10 +1977,141 @@ def api_skill_score():
 
 
 
+# @bp_game.route('/create_test_data')
+# @login_required
+# def create_test_data():
+#     """開発用：テストデータを作成（新設計対応）"""
+#     if not current_user.administrator:        
+#         return redirect(url_for('index'))
+    
+#     test_players = [
+#         {'display_name': 'テスト太郎', 'skill_score': 40},
+#         {'display_name': 'テスト花子', 'skill_score': 60},
+#         {'display_name': 'テスト一郎', 'skill_score': 50},
+#         {'display_name': 'テスト美咲', 'skill_score': 70},
+#         {'display_name': 'テスト健太', 'skill_score': 35},
+#         {'display_name': 'テスト淳二', 'skill_score': 65},
+#         {'display_name': '悟空', 'skill_score': 45},
+#         {'display_name': 'テスト愛', 'skill_score': 55},
+#         {'display_name': 'テスト翔太', 'skill_score': 42},
+#         {'display_name': 'ノーマン', 'skill_score': 58},  
+#         {'display_name': 'ロバート', 'skill_score': 35},  
+#         {'display_name': 'キャメロン', 'skill_score': 100},  
+#     ]
+    
+#     try:
+#         now = datetime.now().isoformat()
+#         for i, player in enumerate(test_players):            
+#             entry_id = str(uuid.uuid4())
+#             user_id = f'test_user_{i}'
+
+#             # 新設計に必要なフィールドを明示的に付与
+#             item = {
+#             'entry_id': entry_id,
+#             'user_id': user_id,
+#             'display_name': player['display_name'],
+#             'joined_at': now,
+#             'created_at': now,
+#             'match_id': "pending",
+#             'entry_status': "pending",
+#             'skill_score': player.get('skill_score', 50),
+#             'rest_count': 0,
+#         }
+#             match_table.put_item(Item=item)        
+
+#     except Exception as e:
+#         current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')        
+
+#     return redirect(url_for('game.court'))
+
+# @bp_game.route('/test_data_status')
+# @login_required
+# def test_data_status():
+#     """開発用：テストデータの状態を確認"""
+#     if not current_user.administrator:
+#         flash('管理者のみ実行可能です', 'danger')
+#         return redirect(url_for('index'))
+    
+#     try:
+#         # test_user_ で始まるuser_idを持つすべてのエントリを検索
+#         response = match_table.scan(
+#             FilterExpression="begins_with(user_id, :prefix)",
+#             ExpressionAttributeValues={":prefix": "test_user_"}
+#         )
+        
+#         items = response.get('Items', [])
+        
+#         # match_idごとにグループ化
+#         groups = {}
+#         for item in items:
+#             match_id = item.get('match_id', 'unknown')
+#             if match_id not in groups:
+#                 groups[match_id] = []
+#             groups[match_id].append(item)
+        
+#         # 結果をHTMLで表示
+#         output = "<h1>テストデータの状態</h1>"
+#         output += f"<p>テストデータの総数: {len(items)}件</p>"
+        
+#         for match_id, group_items in groups.items():
+#             output += f"<h2>マッチID: {match_id} ({len(group_items)}件)</h2>"
+#             output += "<ul>"
+#             for item in group_items:
+#                 output += f"<li>{item.get('display_name')} (ID: {item.get('entry_id')})</li>"
+#             output += "</ul>"
+        
+#         return output
+        
+#     except Exception as e:
+#         return f"エラー: {e}"
+    
+# @bp_game.route('/clear_test_data')
+# @login_required
+# def clear_test_data():
+#     """開発用：test_user_ のテストデータを削除"""
+#     if not current_user.administrator:
+        
+#         return redirect(url_for('index'))
+
+#     deleted_count = 0
+#     last_evaluated_key = None
+
+#     try:
+#         while True:
+#             scan_kwargs = {
+#                 'FilterExpression': Attr('user_id').begins_with("test_user_")
+#             }
+#             if last_evaluated_key:
+#                 scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
+
+#             response = match_table.scan(**scan_kwargs)
+#             items = response.get('Items', [])
+
+#             for item in items:
+#                 try:
+#                     match_table.delete_item(Key={                        
+#                         'entry_id': item['entry_id']
+#                     })
+#                     deleted_count += 1
+#                 except Exception as e:
+#                     current_app.logger.error(f"削除失敗: {e}, item: {item}")
+
+#             last_evaluated_key = response.get('LastEvaluatedKey')
+#             if not last_evaluated_key:
+#                 break
+        
+#     except Exception as e:
+
+#         pass
+
 @bp_game.route('/create_test_data')
 @login_required
 def create_test_data():
-    """開発用：テストデータを作成（新設計対応）"""
+    """開発用：テストデータを作成（新設計対応）- ユーザーテーブルも含む"""
+    from decimal import Decimal  # Decimal型のインポートを追加
+    from datetime import datetime
+    import uuid
+    
     if not current_user.administrator:        
         return redirect(url_for('index'))
     
@@ -1860,76 +2132,72 @@ def create_test_data():
     
     try:
         now = datetime.now().isoformat()
+        
+        # ユーザーテーブルとマッチテーブルの両方に同時にデータを作成
+        user_table = current_app.dynamodb.Table("bad-users")
+        
         for i, player in enumerate(test_players):            
             entry_id = str(uuid.uuid4())
             user_id = f'test_user_{i}'
 
-            # 新設計に必要なフィールドを明示的に付与
-            item = {
-            'entry_id': entry_id,
-            'user_id': user_id,
-            'display_name': player['display_name'],
-            'joined_at': now,
-            'created_at': now,
-            'match_id': "pending",
-            'entry_status': "pending",
-            'skill_score': player.get('skill_score', 50),
-            'rest_count': 0,
-        }
-            match_table.put_item(Item=item)        
+            # マッチテーブルにエントリを作成
+            match_item = {
+                'entry_id': entry_id,
+                'user_id': user_id,
+                'display_name': player['display_name'],
+                'joined_at': now,
+                'created_at': now,
+                'match_id': "pending",
+                'entry_status': "pending",
+                'skill_score': Decimal(str(player.get('skill_score', 50))),
+                'rest_count': 0,
+            }
+            match_table.put_item(Item=match_item)
+            
+            # ユーザーテーブルにもユーザーを作成
+            user_item = {
+                'user#user_id': user_id,  # 正しいパーティションキー
+                'user_id': user_id,       # 検索用に追加
+                'display_name': player['display_name'],
+                'user_name': f"テスト_{player['display_name']}",
+                'email': f"{user_id}@example.com",
+                'skill_score': Decimal(str(player.get('skill_score', 50))),
+                'gender': "unknown",
+                'badminton_experience': "テスト",
+                'organization': "テスト組織",
+                'administrator': False,
+                'wins': Decimal("0"),
+                'losses': Decimal("0"),
+                'match_count': Decimal("0"),
+                'created_at': now,
+                'last_updated': now
+            }
+            
+            # ユーザーテーブルに保存
+            try:
+                user_table.put_item(Item=user_item)
+                current_app.logger.info(f"ユーザー {user_id} ({player['display_name']}) をユーザーテーブルに作成しました")
+            except Exception as e:
+                current_app.logger.error(f"ユーザーテーブル作成エラー: {user_id} {str(e)}")
+        
+        current_app.logger.info(f"テストデータの作成が完了しました。{len(test_players)}件のデータを作成しました。")
+        flash(f"{len(test_players)}件のテストデータを作成しました", "success")
 
     except Exception as e:
-        current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')        
+        current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')
+        flash(f"テストデータ作成エラー: {str(e)}", "danger")
 
     return redirect(url_for('game.court'))
 
-@bp_game.route('/test_data_status')
-@login_required
-def test_data_status():
-    """開発用：テストデータの状態を確認"""
-    if not current_user.administrator:
-        flash('管理者のみ実行可能です', 'danger')
-        return redirect(url_for('index'))
-    
-    try:
-        # test_user_ で始まるuser_idを持つすべてのエントリを検索
-        response = match_table.scan(
-            FilterExpression="begins_with(user_id, :prefix)",
-            ExpressionAttributeValues={":prefix": "test_user_"}
-        )
-        
-        items = response.get('Items', [])
-        
-        # match_idごとにグループ化
-        groups = {}
-        for item in items:
-            match_id = item.get('match_id', 'unknown')
-            if match_id not in groups:
-                groups[match_id] = []
-            groups[match_id].append(item)
-        
-        # 結果をHTMLで表示
-        output = "<h1>テストデータの状態</h1>"
-        output += f"<p>テストデータの総数: {len(items)}件</p>"
-        
-        for match_id, group_items in groups.items():
-            output += f"<h2>マッチID: {match_id} ({len(group_items)}件)</h2>"
-            output += "<ul>"
-            for item in group_items:
-                output += f"<li>{item.get('display_name')} (ID: {item.get('entry_id')})</li>"
-            output += "</ul>"
-        
-        return output
-        
-    except Exception as e:
-        return f"エラー: {e}"
-    
 @bp_game.route('/clear_test_data')
 @login_required
 def clear_test_data():
-    """開発用：test_user_ のテストデータを削除"""
+    """開発用：test_user_ のテストデータを削除（マッチテーブルのみ - 後方互換性のため）"""
+    from decimal import Decimal  # Decimal型のインポートを追加
+    from datetime import datetime
+    from boto3.dynamodb.conditions import Attr
+    
     if not current_user.administrator:
-        
         return redirect(url_for('index'))
 
     deleted_count = 0
@@ -1959,10 +2227,120 @@ def clear_test_data():
             if not last_evaluated_key:
                 break
         
-    except Exception as e:
-
-        pass
+        # ユーザーテーブルも削除する（新機能）
+        # 元のエンドポイントを維持しながら機能を拡張
+        user_table = current_app.dynamodb.Table("bad-users")
+        last_evaluated_key = None
+        deleted_user_count = 0
         
+        while True:
+            # スキャンでtest_user_で始まるユーザーを検索
+            scan_kwargs = {
+                'FilterExpression': 'begins_with(#uid, :prefix)',
+                'ExpressionAttributeNames': {'#uid': 'user_id'},
+                'ExpressionAttributeValues': {':prefix': 'test_user_'}
+            }
+            if last_evaluated_key:
+                scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
+                
+            response = user_table.scan(**scan_kwargs)
+            items = response.get('Items', [])
+            
+            for item in items:
+                try:
+                    user_table.delete_item(Key={
+                        'user#user_id': item['user#user_id']
+                    })
+                    deleted_user_count += 1
+                except Exception as e:
+                    current_app.logger.error(f"ユーザーテーブル削除失敗: {e}, item: {item}")
+            
+            last_evaluated_key = response.get('LastEvaluatedKey')
+            if not last_evaluated_key:
+                break
+                
+        message = f"テストデータを削除しました。マッチテーブル: {deleted_count}件、ユーザーテーブル: {deleted_user_count}件"
+        current_app.logger.info(message)
+        flash(message, "success")
+        
+    except Exception as e:
+        current_app.logger.error(f"テストデータ削除エラー: {str(e)}")
+        flash(f"エラーが発生しました: {str(e)}", "danger")
+        
+    return redirect(url_for('game.court'))
+
+@bp_game.route('/test_data_status')
+@login_required
+def test_data_status():
+    """開発用：テストデータの状態を確認（ユーザーテーブルも含む）"""
+    if not current_user.administrator:
+        flash('管理者のみ実行可能です', 'danger')
+        return redirect(url_for('index'))
+    
+    try:
+        # 1. マッチテーブルのテストデータを取得
+        match_response = match_table.scan(
+            FilterExpression="begins_with(user_id, :prefix)",
+            ExpressionAttributeValues={":prefix": "test_user_"}
+        )
+        
+        match_items = match_response.get('Items', [])
+        
+        # match_idごとにグループ化
+        match_groups = {}
+        for item in match_items:
+            match_id = item.get('match_id', 'unknown')
+            if match_id not in match_groups:
+                match_groups[match_id] = []
+            match_groups[match_id].append(item)
+        
+        # 2. ユーザーテーブルのテストデータを取得
+        user_table = current_app.dynamodb.Table("bad-users")
+        user_response = user_table.scan(
+            FilterExpression='begins_with(#uid, :prefix)',
+            ExpressionAttributeNames={'#uid': 'user_id'},
+            ExpressionAttributeValues={':prefix': 'test_user_'}
+        )
+        
+        user_items = user_response.get('Items', [])
+        
+        # 結果をHTMLで表示
+        output = "<h1>テストデータの状態</h1>"
+        
+        # マッチテーブルの情報
+        output += "<h2>マッチテーブル</h2>"
+        output += f"<p>テストデータの総数: {len(match_items)}件</p>"
+        
+        for match_id, group_items in match_groups.items():
+            output += f"<h3>マッチID: {match_id} ({len(group_items)}件)</h3>"
+            output += "<ul>"
+            for item in group_items:
+                output += f"<li>{item.get('display_name')} (ID: {item.get('user_id')}, スキルスコア: {item.get('skill_score')})</li>"
+            output += "</ul>"
+        
+        # ユーザーテーブルの情報
+        output += "<h2>ユーザーテーブル</h2>"
+        output += f"<p>テストデータの総数: {len(user_items)}件</p>"
+        
+        if user_items:
+            output += "<ul>"
+            for item in user_items:
+                output += f"<li>{item.get('display_name')} (ID: {item.get('user_id')}, スキルスコア: {item.get('skill_score', '不明')})</li>"
+            output += "</ul>"
+        else:
+            output += "<p>ユーザーテーブルにテストデータはありません</p>"
+            
+        # 操作ボタンを追加
+        output += "<div style='margin-top: 20px;'>"
+        output += f"<a href='{url_for('game.create_test_data')}' class='btn btn-primary'>テストデータを作成</a> "
+        output += f"<a href='{url_for('game.clear_test_data')}' class='btn btn-danger'>テストデータを削除</a> "
+        output += f"<a href='{url_for('game.court')}' class='btn btn-secondary'>コート画面に戻る</a>"
+        output += "</div>"
+        
+        return output
+        
+    except Exception as e:
+        return f"エラー: {e}"
 
    
 
