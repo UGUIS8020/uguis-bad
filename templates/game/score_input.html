@@ -82,7 +82,7 @@
                             <div class="d-flex justify-content-center align-items-center mb-3">
                                 <div>
                                     <span class="badge bg-danger me-2 fs-3">A</span>
-                                    <span class="fs-3 fw-bold" style="display: inline-block; width: 350px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    <span class="fs-3 fw-bold" style="display: inline-block; width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                                         {% for player in court.team_a %}
                                             {{ player.display_name }}{% if not loop.last %} & {% endif %}
                                         {% endfor %}
@@ -99,7 +99,7 @@
                        
                             <div>
                                 <span class="badge bg-primary me-2 fs-3">B</span>
-                                <span class="fs-3 fw-bold" style="display: inline-block; width: 350px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                <span class="fs-3 fw-bold" style="display: inline-block; width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                                     {% for player in court.team_b %}
                                         {{ player.display_name }}{% if not loop.last %} & {% endif %}
                                     {% endfor %}
