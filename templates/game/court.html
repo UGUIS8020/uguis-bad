@@ -343,9 +343,9 @@
 
     <div class="container mt-4">
         <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
-            <h5 class="text-success fw-bold mb-0">
+            <h3 class="text-success fw-bold mb-0">
                 🎾 本日の試合（{{ match_courts|length }}面）
-            </h5>
+            </h>
             <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
                 <div class="input-group">
                     <label class="input-group-text" for="score_format">試合点数</label>
@@ -372,23 +372,24 @@
             <form class="score-form" 
                 data-court-number="{{ court.court_number }}"
                 action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
+
+           
                 
-                <div class="d-flex align-items-center mb-3">
+                <div class="d-flex justify-content-center align-items-center mb-3">               
                     <div class="me-2">
-                        <span class="badge bg-danger me-2 fs-5">A</span>
-                        <span class="fs-5 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
-                    </div>
-                    
+                        <span class="badge bg-danger me-2 fs-4">A</span>
+                        <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
+                    </div>                    
                 </div>
 
-                <div class="d-flex align-items-center mb-4">
+                <div class="d-flex justify-content-center align-items-center mb-3">
                     <div class="me-2">
-                        <span class="badge bg-primary me-2 fs-5">B</span>
-                        <span class="fs-5 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                        <span class="badge bg-primary me-2 fs-4">B</span>
+                        <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
                     </div>
-                    
                 </div>
-                
+
+
             </form>
 
         </div>
