@@ -7,7 +7,7 @@ import random
 from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 from flask import session
-from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, BadmintonPairing, Player, generate_balanced_pairs_and_matches, sync_match_entries_with_updated_skills
+from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, Player, generate_balanced_pairs_and_matches, sync_match_entries_with_updated_skills
 import pytz
 import re
 from decimal import Decimal
@@ -27,6 +27,8 @@ user_table = dynamodb.Table("bad-users")
 def court():
     try:
         current_app.logger.info("=== コート入場開始 ===")
+        if "score_format" not in session:
+            session["score_format"] = "21"
 
         # ✅ 参加希望のプレイヤーだけ取得（休憩中など除外）
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
@@ -73,8 +75,7 @@ def court():
         
         if match_id:
             # get_match_players_by_court関数の代わりに共通関数を使用
-            match_courts = get_organized_match_data(match_id)
-            current_app.logger.info(f"🔍 match_courts取得結果: {match_courts}")
+            match_courts = get_organized_match_data(match_id)            
             current_app.logger.info(f"🔍 match_courtsのキー数: {len(match_courts)}")
         else:
             match_courts = {}
@@ -96,50 +97,8 @@ def court():
         current_app.logger.error(f"コート入場エラー詳細: {str(e)}")
         import traceback
         current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-        return f"エラー: {e}"
+        return f"エラー: {e}"    
 
-    
-# def get_latest_match_id():
-#     """最新の試合IDを取得"""
-#     try:
-#         today_prefix = datetime.now().strftime("%Y%m%d")
-#         current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
-        
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-        
-#         # まず全てのアイテムを確認
-#         all_response = match_table.scan()
-#         all_items = all_response.get("Items", [])
-#         current_app.logger.info(f"🔍 全アイテム数: {len(all_items)}")
-        
-#         # match_idを持つアイテムを確認
-#         items_with_match_id = [item for item in all_items if item.get("match_id") and item.get("match_id") != "pending"]
-#         current_app.logger.info(f"🔍 有効なmatch_idを持つアイテム数: {len(items_with_match_id)}")
-        
-#         for item in items_with_match_id[:5]:  # 最初の5件
-#             current_app.logger.info(f"🔍 match_id={item.get('match_id')}, name={item.get('display_name')}, status={item.get('entry_status')}")
-        
-#         # 今日のプレフィックスでフィルタリング
-#         response = match_table.scan(
-#             FilterExpression=Attr("match_id").begins_with(today_prefix)
-#         )
-#         items = response.get("Items", [])
-        
-#         current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
-        
-#         if not items:
-#             current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
-#             return None
-        
-#         latest = max(items, key=lambda x: x.get("match_id", ""))
-#         match_id = latest.get("match_id")
-        
-#         current_app.logger.info(f"🎯 最新の試合ID: {match_id}")
-#         return match_id
-        
-#     except Exception as e:
-#         current_app.logger.error(f"❌ match_id取得エラー: {e}")
-#         return None
     
 def get_latest_match_id():
     """最新の試合IDを取得する関数"""
@@ -285,49 +244,8 @@ def get_match_players_by_court(match_id):
     for court_num, court_info in courts.items():
         current_app.logger.info(f"🔍 コート{court_num}: チームA={len(court_info['team_a'])}人, チームB={len(court_info['team_b'])}人")
     
-    return courts      
-    
-# def get_latest_match_id():
-#     """最新の試合IDを取得"""
-#     try:
-#         today_prefix = datetime.now().strftime("%Y%m%d")
-#         current_app.logger.info(f"🔍 検索する今日のプレフィックス: {today_prefix}")
-        
-#         # 🔥 同じテーブルから検索
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-        
-#         response = match_table.scan(
-#             FilterExpression=Attr("match_id").begins_with(today_prefix)
-#         )
-#         items = response.get("Items", [])
-        
-#         current_app.logger.info(f"🔍 今日のmatch_idを持つアイテム数: {len(items)}")
-        
-#         if not items:
-#             current_app.logger.info("✅ 今日の試合はまだ登録されていません。")
-#             return None
-        
-#         # ユニークなmatch_idを抽出
-#         unique_match_ids = set()
-#         for item in items:
-#             match_id = item.get("match_id")
-#             if match_id and match_id != "pending":
-#                 unique_match_ids.add(match_id)
-        
-#         current_app.logger.info(f"🔍 ユニークなmatch_id: {list(unique_match_ids)}")
-        
-#         if not unique_match_ids:
-#             return None
-        
-#         # 最新のmatch_idを返す
-#         latest_match_id = max(unique_match_ids)
-#         current_app.logger.info(f"🎯 最新の試合ID: {latest_match_id}")
-        
-#         return latest_match_id
-        
-#     except Exception as e:
-#         current_app.logger.error(f"❌ match_id取得エラー: {e}")
-#         return None
+    return courts         
+
 
 @bp_game.route("/api/court_status")
 @login_required
@@ -766,6 +684,7 @@ def update_player_for_rest(entry_id):
     except Exception as e:
         current_app.logger.error(f"❌ 休憩プレイヤー更新エラー: {e}")
 
+
 @bp_game.route('/create_pairings', methods=["POST"])
 @login_required
 def create_pairings():
@@ -786,35 +705,65 @@ def create_pairings():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
-        # ✅ 2. 完全シャッフル（偏り解消）
-        random.shuffle(entries)
-
-        # 3. Player変換
-        name_to_id, players = {}, []
-        for e in entries:
+        # 2. 休憩回数・試合回数に基づく優先順位付け
+        # 休憩回数が多い人ほど優先的に試合に参加させる
+        # 同じ休憩回数の場合は、試合回数が少ない人を優先
+        sorted_entries = sorted(entries, key=lambda e: (
+            -e.get("rest_count", 0),  # 休憩回数の多い順（マイナスをつけて降順に）
+            e.get("match_count", 0),  # 試合回数の少ない順
+            random.random()  # 同じ条件の場合はランダム
+        ))
+        
+        # 3. 必要なプレイヤー数を計算（4の倍数に調整）
+        required_players = min(max_courts * 4, len(sorted_entries) - (len(sorted_entries) % 4))
+        
+        # 4. 優先順位に基づいて試合参加者と待機者を分ける
+        active_entries = sorted_entries[:required_players]
+        waiting_entries = sorted_entries[required_players:]
+        
+        # 5. 参加者をシャッフル（偏り解消）- 優先順位で選んだ後はシャッフルして公平に
+        random.shuffle(active_entries)
+        
+        # 6. Player変換
+        name_to_id, players, waiting_players = {}, [], []
+        
+        # アクティブな参加者をPlayerオブジェクトに変換
+        for e in active_entries:
             name = e["display_name"]
             p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
             p.match_count = e.get("match_count", 0)
             p.rest_count = e.get("rest_count", 0)
             name_to_id[name] = e["entry_id"]
             players.append(p)
+        
+        # 待機者もPlayerオブジェクトに変換（待機者リストに追加）
+        for e in waiting_entries:
+            name = e["display_name"]
+            p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
+            p.match_count = e.get("match_count", 0)
+            p.rest_count = e.get("rest_count", 0)
+            name_to_id[name] = e["entry_id"]
+            waiting_players.append(p)
 
-        # 4. ペア生成 & マッチ生成
+        # 7. ペア生成 & マッチ生成
         match_id = generate_match_id()
-        pairs, matches, waiting_players = generate_balanced_pairs_and_matches(players, max_courts)     
+        pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
+        
+        # 追加の待機者をメインの待機者リストに追加
+        waiting_players.extend(additional_waiting_players)
 
-        # 5. 試合参加プレイヤー更新
-        used_names = {p.name for match in matches for team in match for p in team}
+        # 8. 試合参加プレイヤー更新
         for court_num, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
             for name, team in [(a1.name, "A"), (a2.name, "A"), (b1.name, "B"), (b2.name, "B")]:
                 update_player_for_match(name_to_id[name], match_id, court_num, team)
 
+        # 9. 待機プレイヤーの休憩カウントを増加
         for p in waiting_players:
             entry_id = name_to_id.get(p.name)
             if entry_id:
                 increment_rest_count(entry_id)
 
-        # 6. 待機プレイヤー表示（更新なし）
+        # 10. 待機プレイヤー表示
         pending_names = [p.name for p in waiting_players]
         if pending_names:
             flash(f"{len(matches)}件の試合を作成しました。参加待ち: {', '.join(pending_names)}", "success")
@@ -827,6 +776,7 @@ def create_pairings():
         current_app.logger.error(f"[ペア生成エラー] {str(e)}", exc_info=True)
         flash("試合の作成中にエラーが発生しました。", "danger")
         return redirect(url_for("game.court"))
+
 
 
 # def update_players_to_playing(matches, match_id, match_table):
@@ -1070,61 +1020,61 @@ def perform_pairing(entries, match_id, max_courts=6):
             current_app.logger.error(f"⚠️ 休憩者更新エラー: {p.get('display_name')} - {str(e)}")
 
 
-def perform_pairing_v2(entries, match_id, max_courts=6):
-    """
-    プレイヤーのDB更新を行わない版（データ構造のみ返す）
-    create_pairings関数で一括更新する場合に使用
-    """
-    matches = []
-    rest = []
-    court_number = 1
+# def perform_pairing_v2(entries, match_id, max_courts=6):
+#     """
+#     プレイヤーのDB更新を行わない版（データ構造のみ返す）
+#     create_pairings関数で一括更新する場合に使用
+#     """
+#     matches = []
+#     rest = []
+#     court_number = 1
 
-    print(f"🔍 DEBUG: 総エントリー数 = {len(entries)}")
-    print(f"🔍 DEBUG: 最大コート数 = {max_courts}")
+#     print(f"🔍 DEBUG: 総エントリー数 = {len(entries)}")
+#     print(f"🔍 DEBUG: 最大コート数 = {max_courts}")
 
-    random.shuffle(entries)
+#     random.shuffle(entries)
 
-    # 4人ずつのグループを作成
-    for i in range(0, len(entries), 4):
-        if court_number > max_courts:
-            # コート数を超えた場合、残りは全て休憩
-            remaining_players = entries[i:]
-            print(f"🔍 DEBUG: コート数超過 - 残り{len(remaining_players)}人は休憩")
-            rest.extend(remaining_players)
-            break
+#     # 4人ずつのグループを作成
+#     for i in range(0, len(entries), 4):
+#         if court_number > max_courts:
+#             # コート数を超えた場合、残りは全て休憩
+#             remaining_players = entries[i:]
+#             print(f"🔍 DEBUG: コート数超過 - 残り{len(remaining_players)}人は休憩")
+#             rest.extend(remaining_players)
+#             break
 
-        group = entries[i:i + 4]
-        print(f"🔍 DEBUG: グループ{court_number}: {len(group)}人")
+#         group = entries[i:i + 4]
+#         print(f"🔍 DEBUG: グループ{court_number}: {len(group)}人")
         
-        if len(group) == 4:
-            # 4人なので試合を作成
-            teamA = group[:2]
-            teamB = group[2:]
+#         if len(group) == 4:
+#             # 4人なので試合を作成
+#             teamA = group[:2]
+#             teamB = group[2:]
 
-            print(f"🔍 DEBUG: コート{court_number}で試合作成")
-            for p in teamA:
-                print(f"🔍 DEBUG: チームA: {p.get('display_name')}")
-            for p in teamB:
-                print(f"🔍 DEBUG: チームB: {p.get('display_name')}")
+#             print(f"🔍 DEBUG: コート{court_number}で試合作成")
+#             for p in teamA:
+#                 print(f"🔍 DEBUG: チームA: {p.get('display_name')}")
+#             for p in teamB:
+#                 print(f"🔍 DEBUG: チームB: {p.get('display_name')}")
 
-            # 新しい辞書形式でマッチデータを作成
-            match_data = {
-                f"court_{court_number}": {
-                    "team_a": teamA,
-                    "team_b": teamB
-                }
-            }
+#             # 新しい辞書形式でマッチデータを作成
+#             match_data = {
+#                 f"court_{court_number}": {
+#                     "team_a": teamA,
+#                     "team_b": teamB
+#                 }
+#             }
             
-            matches.append(match_data)
-            court_number += 1
+#             matches.append(match_data)
+#             court_number += 1
 
-        else:
-            # 4人未満なので休憩
-            print(f"🔍 DEBUG: グループ{court_number}は{len(group)}人なので休憩")
-            rest.extend(group)
+#         else:
+#             # 4人未満なので休憩
+#             print(f"🔍 DEBUG: グループ{court_number}は{len(group)}人なので休憩")
+#             rest.extend(group)
 
-    print(f"🎉 DEBUG: ペアリング完了 - 試合数: {len(matches)}, 休憩者数: {len(rest)}")
-    return matches, rest
+#     print(f"🎉 DEBUG: ペアリング完了 - 試合数: {len(matches)}, 休憩者数: {len(rest)}")
+#     return matches, rest
 
 
 # @bp_game.route("/finish_current_match", methods=["POST"])
@@ -1341,7 +1291,7 @@ def finish_current_match():
                 current_app.logger.info(f"🎯 コート{result.get('court_number')}: {winner}チーム勝利")
                 
                 # TrueSkill更新と同時に更新されたスキルスコアを取得
-                updated_user_skills = update_trueskill_for_players(result_item)
+                updated_user_skills = update_trueskill_for_players_and_return_updates(result_item)
                 # 更新された結果をマージ
                 updated_skills.update(updated_user_skills)
                 
