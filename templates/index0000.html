@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{# SEO最適化 #}
+{% block title %}鶯 | 越谷市バドミントンサークル - ホームページ移転のお知らせ{% endblock %}
+{% block description %}埼玉県越谷市で活動しているバドミントンサークル「鶯」のホームページが移転しました。新しいURLをご確認ください。{% endblock %}
+{% block keywords %}埼玉県,越谷市,バドミントン,サークル,移転,引越し,お知らせ{% endblock %}
+
+{% block content %}   
+
+<style>   
+    .redirect-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+        background-color: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        text-align: center;
+    }
+    
+    .redirect-title {
+        color: #28a745;
+        margin-bottom: 1.5rem;
+        font-size: 2rem;
+    }
+    
+    .redirect-message {
+        font-size: 1.2rem;
+        margin-bottom: 2rem;
+    }
+    
+    .new-url-box {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 6px;
+        margin: 1.5rem 0;
+        border: 1px solid #dee2e6;
+    }
+    
+    .new-url {
+        font-weight: bold;
+        font-size: 1.1rem;
+        word-break: break-all;
+    }
+    
+    .redirect-button {
+        display: inline-block;
+        background-color: #28a745;
+        color: white !important;
+        text-decoration: none;
+        padding: 0.8rem 2rem;
+        border-radius: 30px;
+        font-weight: bold;
+        font-size: 1.2rem;
+        margin: 1.5rem 0;
+        transition: all 0.3s ease;
+    }
+    
+    .redirect-button:hover {
+        background-color: #218838;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .redirect-footer {
+        margin-top: 2rem;
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+    
+    .badminton-icon {
+        max-width: 120px;
+        margin-bottom: 1.5rem;
+    }
+    
+    .countdown {
+        font-size: 1rem;
+        margin-top: 1rem;
+        color: #6c757d;
+    }
+    
+    @media (max-width: 768px) {
+        .redirect-container {
+            padding: 1.5rem;
+        }
+        
+        .redirect-title {
+            font-size: 1.7rem;
+        }
+    }
+</style>
+
+<section class="mt-5 mb-5">
+    <div class="redirect-container">
+        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="鶯バドミントン" class="badminton-icon">
+        
+        <h1 class="redirect-title">鶯バドミントンのホームページは引越ししました</h1>
+        
+        <div class="redirect-message">
+            いつも鶯バドミントンをご利用いただき、誠にありがとうございます。<br>
+            より良いサービスをご提供するため、ホームページを新しいアドレスに移転いたしました。
+        </div>
+        
+        <div class="new-url-box">
+            <div class="new-url">
+                新しいURL: <a href="https://uguis-bad.shibuya8020.com/">https://uguis-bad.shibuya8020.com/</a>
+            </div>
+        </div>
+        
+        <p>お手数ですが、ブックマークの更新をお願いいたします。<br>
+        引き続き鶯バドミントンをよろしくお願いいたします。</p>
+        
+        <a href="https://shibuya8020.com/uguis-bad/" class="redirect-button">新しいホームページへ</a>
+        
+        <div class="countdown">
+            <span id="countdown">5</span>秒後に自動的に新しいページへ移動します
+        </div>
+        
+        <div class="redirect-footer">
+            <p>鶯バドミントン運営事務局</p>
+            <p>お問い合わせ: <a href="mailto:shibuyamasahiko@gmail.com">shibuyamasahiko@gmail.com</a></p>
+            <p>電話: <a href="tel:07066330363">070-6633-0363</a></p>
+        </div>
+    </div>
+</section>
+
+<script>
+    // カウントダウンタイマー
+    let seconds = 5;
+    const countdownElement = document.getElementById('countdown');
+    
+    const countdownTimer = setInterval(function() {
+        seconds--;
+        countdownElement.textContent = seconds;
+        
+        if (seconds <= 0) {
+            clearInterval(countdownTimer);
+            window.location.href = 'https://uguis-bad.shibuya8020.com/';
+        }
+    }, 1000);
+</script>
+        
+{% endblock %}
