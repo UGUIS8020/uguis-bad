@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{# SEO最適化 #}
+{% block title %}鶯 | 越谷市バドミントンサークル{% endblock %}
+{% block description %}埼玉県越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。{% endblock %}
+{% block keywords %}埼玉県,越谷市, バドミントン, サークル, 練習, 見学, 体験{% endblock %}
+
+{% block content %}   
+
+<style>   
+.accordion-button::after {
+    display: none !important;  /* アコーディオンの矢印を非表示 */
+}
+.accordion-header{
+    background-color: #ffffff;
+    padding: 100;
+    margin: 5;   
+}
+
+.accordion-button {  
+    background-color: #ffffff;;  
+    padding: 0;
+    margin: 0;
+    font-size: 1.2rem; /* フォントサイズを調整 */
+}
+
+.accordion-item {
+    background-color: #ffffff;;
+    padding: 5px;
+    margin: 5px;
+    border: 1px solid rgba(0,0,0,.125);
+    border-radius: 0.25rem !important;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 768px) {
+    .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }        
+    
+}
+
+.participant-name {
+    z-index: 1000;
+    position: relative;
+    pointer-events: auto;
+}
+
+</style>
+
+<section id="about" class="mt-3 mb-3 text-center">
+    <h1>鶯バドミントン 越谷市</h1> 
+    <img src="{{ url_for('static', filename=selected_image) }}" alt="バドミントンの画像" class="img-fluid">
+    <h2 class="mb-3">バドミントンメンバー募集</h2>
+    <p>初級者～上級者レベルが違っても楽しくゲームできる方<br>
+    小中学生、未経験者はご相談ください<br>
+                </p>
+    
+                <div class="row justify-content-center">  
+                    <div class="col-12 col-md-8 text-center">  
+                        <div>
+                            <h3>参加費</h3>
+                            <p>初回1000円、2回目以降 男性700円 女性600円<br>
+                            未経験から15回は 鶯 Boot Camp15 1回1000円</p>
+                        </div>
+                        <h3>練習場所</h3>
+                        <div class="mb-3">            
+                            <p><b>北越谷体育館 越谷市立地域スポーツセンター</b><br>
+                            〒343-0025 埼玉県越谷市大沢二丁目10番21号<br>
+                            北越谷駅東口 徒歩7分</p>
+                        </div>
+                        <div>            
+                            <p><b>越谷市立総合体育館 第一体育室または第二体育室</b><br>
+                            〒343-0011埼玉県越谷市増林ニ丁目33番地<br></p>
+                        </div>
+                    </div>
+                </div>
+
+
+<div class="container">                
+
+
+</section>
+
+<div class="container">       
+    <section id="schedule" class="mb-5">                        
+        <div class="schedule text-center">
+                      
+            {% if not current_user.is_authenticated %}
+            <div class="mt-3">
+                <p>練習に参加するには仮登録しログインして、参加ボタンを押してください。
+                <a href="{{ url_for('temp_register') }}" class="btn btn-warning">仮登録へ</a></p>
+                <p>募集中であれば参加できます。初参加の方はmailかLINEでご連絡いただけると助かります</p>
+            </div>
+            {% endif %} 
+           
+            
+            
+        <div class="d-flex flex-column align-items-center gap-3 mb-4" >
+            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
+        </div>
+
+        <a class="question-link" href="https://bad-manager.shibuya8020.com/" target="_blank" rel="noopener noreferrer">
+            <h2>ご質問はこちら。</h2>
+        </a>
+
+            <div class="schedule-title">
+                <h2>練習予定</h2>           
+            </div>
+
+            <!-- アコーディオン -->
+<div class="accordion" id="scheduleAccordion">
+    {% for schedule in schedules %}
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
+            <div class="d-flex align-items-center justify-content-between">
+                <!-- 日付と会場情報 -->
+                <div class="d-flex align-items-center m-0 w-100">
+                    
+
+                    {% if current_user.is_authenticated and current_user.administrator %}
+                    <button class="accordion-button collapsed p-2 w-100" 
+                            type="button" 
+                            style="width: auto; box-shadow: none;"
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#collapse{{ schedule.schedule_id }}"
+                            aria-expanded="false"
+                            aria-controls="collapse{{ schedule.schedule_id }}">
+                        {% else %}
+                        <!-- 一般ユーザー：見た目は同じ、クリック不可 -->
+                        <div class="accordion-button collapsed p-2 w-100"
+                                style="width: auto; box-shadow: none; cursor: default;">
+                        {% endif %}
+                            
+                        <div class="d-flex align-items-center flex-nowrap w-100">
+                            <div class="d-flex align-items-center flex-grow-1">
+                                <span class="me-2">{{ schedule.date | format_date }}({{ schedule.day_of_week }})
+                                {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
+                               
+                                {{ schedule.venue }}{{ schedule.court }}
+                                </span>
+                                
+                            </div>
+                            
+                            <div>
+                                募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}
+                                <!-- 募集状態 -->
+                                {% if schedule.participants_count >= schedule.max_participants %}
+                                    <div class="badge bg-warning text-dark">満員御礼</div>
+                                {% else %}
+                                    <div class="badge bg-success">募集中</div>
+                                {% endif %}
+                            </div>
+                       
+                            
+                            <!-- 時間と参加ボタン -->
+                            
+                                <button
+                                class="btn btn-sm join-button m-1 text-nowrap                                          
+                                {% if not current_user.is_authenticated %}
+                                    btn-secondary disabled
+                                {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                    btn-secondary disabled
+                                {% elif current_user.id in schedule.participants %}
+                                    btn-danger
+                                {% else %}
+                                    btn-primary
+                                {% endif %}"
+                                data-schedule-id="{{ schedule.schedule_id }}" 
+                                data-schedule-date="{{ schedule.date }}" 
+                                onclick="joinSchedule(this)"
+                                {% if not current_user.is_authenticated or 
+                                    (schedule.participants_count >= schedule.max_participants and 
+                                    current_user.id not in schedule.participants) %}disabled{% endif %}>
+                                
+                                {% if not current_user.is_authenticated %}
+                                    参加
+                                {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                    満員御礼
+                                {% elif current_user.id in schedule.participants %}
+                                    参加済
+                                {% else %}
+                                    参加
+                                {% endif %}
+                            </button>                         
+                    </h2>
+                    
+                    {% if current_user.is_authenticated and current_user.administrator %}
+                    <div id="collapse{{ schedule.schedule_id }}" 
+                        class="accordion-collapse collapse" 
+                        aria-labelledby="heading{{ schedule.schedule_id }}"
+                        data-bs-parent="#scheduleAccordion">
+                    <div class="accordion-body">
+                        <!-- 参加者一覧 -->
+                        <div class="text-start">
+                            <h5 class="mb-3">
+                                <i class="bi bi-people-fill text-primary"></i>
+                                <a href="{{ url_for('day_of_participants', date=schedule.date) }}" class="text-decoration-none text-dark">
+                                    参加者一覧
+                                </a>
+                            </h5>
+                        {% if schedule.participants_info %}                                             
+
+
+                            <div class="row">
+                            {% for participant in schedule.participants_info %}
+                                <div class="col-md-3 col-sm-4 mb-1">
+                                <div class="card">
+                                    <div class="card-body py-2">
+                                        
+                                        <span class="participant-name">
+                                            {{ participant.display_name }}
+
+                                    </div>
+                                </div>
+                                </div>
+                            {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted">まだ参加者がいません</p>
+                        {% endif %}
+                        </div>
+                    </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</div>
+
+      <section id="contact" class="mb-5 text-center">        
+
+        <section class="mb-2 text-center">
+        渋谷: <a href="tel:07066330363">070-6633-0363</a><br>
+        e-mail: <a href="mailto:shibuyamasahiko@gmail.com">shibuyamasahiko@gmail.com</a>       
+      </section>
+        <section class="text-center">
+          <a href="https://x.com/rbn17pjAfz41575" target="_blank" rel="noopener noreferrer" class="btn btn-primary me-2">X（旧Twitter）</a>
+          <a href="https://www.instagram.com/kosigayabadminton/" target="_blank" rel="noopener noreferrer" class="btn btn-info">Instagram</a>
+        </section>
+    
+        
+      </section>         
+        
+    </div>   
+</div>
+
+
+<script>
+    async function joinSchedule(button) {
+        const scheduleId = button.getAttribute('data-schedule-id');
+        const scheduleDate = button.getAttribute('data-schedule-date');
+
+        if (!scheduleId || !scheduleDate) {
+            alert('スケジュール情報が不足しています。');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/schedule/${scheduleId}/join`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ date: scheduleDate })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                alert(errorData.message || 'エラーが発生しました');
+                return;
+            }
+
+            const data = await response.json();
+
+            if (data.message) {
+                alert(data.message);
+            }
+
+            // ページをリロードして変更を反映
+            location.reload();
+
+        } catch (error) {
+            console.error('Fetch error:', error);
+            alert('通信エラーが発生しました');
+        }
+    }
+</script>
+
+        
+{% endblock %}
