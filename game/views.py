@@ -705,29 +705,43 @@ def create_pairings():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
+        # 🔍 スキルスコア最下位2名を選定
+        skill_sorted = sorted(
+            [(e["display_name"], e["entry_id"], Decimal(e.get("skill_score", 50))) for e in entries],
+            key=lambda x: x[2]
+        )
+        lowest_players = skill_sorted[:2]
+        current_app.logger.info(f"🧠 スキル最下位2名: {lowest_players}")
+
+        # 🎲 10%の確率で最下位2名を待機させる
+        forced_wait_ids = []
+        for name, entry_id, _ in lowest_players:
+            if random.random() < 0.10:
+                forced_wait_ids.append(entry_id)
+        current_app.logger.info(f"⏸ 実際の待機者（{len(forced_wait_ids)}名）: {[(n, s) for n, i, s in skill_sorted if i in forced_wait_ids]}")
+
         # 2. 休憩回数・試合回数に基づく優先順位付け
-        # 休憩回数が多い人ほど優先的に試合に参加させる
-        # 同じ休憩回数の場合は、試合回数が少ない人を優先
         sorted_entries = sorted(entries, key=lambda e: (
-            -e.get("rest_count", 0),  # 休憩回数の多い順（マイナスをつけて降順に）
-            e.get("match_count", 0),  # 試合回数の少ない順
-            random.random()  # 同じ条件の場合はランダム
+            -e.get("rest_count", 0),
+            e.get("match_count", 0),
+            random.random()
         ))
-        
-        # 3. 必要なプレイヤー数を計算（4の倍数に調整）
+
+        # 3. 強制待機者を除外
+        sorted_entries = [e for e in sorted_entries if e["entry_id"] not in forced_wait_ids]
+
+        # 4. 必要なプレイヤー数を計算（4の倍数に調整）
         required_players = min(max_courts * 4, len(sorted_entries) - (len(sorted_entries) % 4))
-        
-        # 4. 優先順位に基づいて試合参加者と待機者を分ける
         active_entries = sorted_entries[:required_players]
         waiting_entries = sorted_entries[required_players:]
-        
-        # 5. 参加者をシャッフル（偏り解消）- 優先順位で選んだ後はシャッフルして公平に
+        # 強制待機者を追加
+        waiting_entries.extend([e for e in entries if e["entry_id"] in forced_wait_ids])
+
+        # 5. シャッフル
         random.shuffle(active_entries)
-        
+
         # 6. Player変換
         name_to_id, players, waiting_players = {}, [], []
-        
-        # アクティブな参加者をPlayerオブジェクトに変換
         for e in active_entries:
             name = e["display_name"]
             p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
@@ -735,8 +749,6 @@ def create_pairings():
             p.rest_count = e.get("rest_count", 0)
             name_to_id[name] = e["entry_id"]
             players.append(p)
-        
-        # 待機者もPlayerオブジェクトに変換（待機者リストに追加）
         for e in waiting_entries:
             name = e["display_name"]
             p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
@@ -748,8 +760,6 @@ def create_pairings():
         # 7. ペア生成 & マッチ生成
         match_id = generate_match_id()
         pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
-        
-        # 追加の待機者をメインの待機者リストに追加
         waiting_players.extend(additional_waiting_players)
 
         # 8. 試合参加プレイヤー更新
@@ -757,13 +767,13 @@ def create_pairings():
             for name, team in [(a1.name, "A"), (a2.name, "A"), (b1.name, "B"), (b2.name, "B")]:
                 update_player_for_match(name_to_id[name], match_id, court_num, team)
 
-        # 9. 待機プレイヤーの休憩カウントを増加
+        # 9. 待機プレイヤーの休憩カウント増加
         for p in waiting_players:
             entry_id = name_to_id.get(p.name)
             if entry_id:
                 increment_rest_count(entry_id)
 
-        # 10. 待機プレイヤー表示
+        # 10. 結果表示
         pending_names = [p.name for p in waiting_players]
         if pending_names:
             flash(f"{len(matches)}件の試合を作成しました。参加待ち: {', '.join(pending_names)}", "success")
