@@ -484,7 +484,7 @@
                 <tr>
                     <td>${new Date(item.timestamp).toLocaleString('ja-JP')}</td>
                     <td class="question-cell">${item.user_question}</td>
-                    <td class="response-cell">${item.bot_response.substring(0, 100)}${item.bot_response.length > 100 ? '...' : ''}</td>
+                    <td class="response-cell">${item.bot_response}</td>
                     <td>
                         ${item.is_cached_response ? 
                             '<span class="cached-badge">キャッシュ</span>' : 

@@ -17,15 +17,11 @@ def create_app():
         'dynamodb',
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_REGION", "ap-northeast-1")
-    )
+        region_name=os.getenv("AWS_REGION", "ap-northeast-1")    )
 
        
 
-    # 掲示板テーブル名の設定 (デフォルトを"bad-board-table"に変更)
-    board_table_name = os.getenv("TABLE_NAME_BOARD", "bad-board-table")
-    app.board_table_name = board_table_name
-
+    
         
     # 掲示板テーブルの初期化
     try:

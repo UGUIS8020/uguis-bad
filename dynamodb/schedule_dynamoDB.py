@@ -10,7 +10,7 @@ load_dotenv()
 aws_credentials = {
     'aws_access_key_id': os.getenv("AWS_ACCESS_KEY_ID"),
     'aws_secret_access_key': os.getenv("AWS_SECRET_ACCESS_KEY"),
-    'region_name': os.getenv("AWS_REGION", "us-east-1")  # デフォルト値を設定
+    'region_name': os.getenv("AWS_REGION", "ap-northeast-1")  # デフォルト値を設定
 }
 
 def create_bad_schedules_table_with_gsi():

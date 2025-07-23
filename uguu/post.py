@@ -1,10 +1,11 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, g
 from flask_login import current_user, login_required
 from .dynamo import db
 from utils.s3 import upload_image_to_s3
 import uuid
 from datetime import datetime
 from boto3.dynamodb.conditions import Key
+
 
 
 post = Blueprint('post', __name__)

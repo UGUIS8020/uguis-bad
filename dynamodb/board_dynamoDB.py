@@ -24,11 +24,7 @@ def create_app():
     user_table_name = os.getenv("TABLE_NAME_USER")
     if not user_table_name:
         raise ValueError("TABLE_NAME_USER is not set.")
-    app.user_table_name = user_table_name
-
-    # 掲示板テーブル名の設定 (デフォルトを"bad-board-table"に変更)
-    board_table_name = os.getenv("TABLE_NAME_BOARD", "bad-board-table")
-    app.board_table_name = board_table_name
+    app.user_table_name = user_table_name 
 
     # ユーザーテーブルの初期化
     try:

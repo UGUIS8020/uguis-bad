@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 # .envファイルを読み込む
 load_dotenv()
 
-# テーブル名の定義
-POSTS_TABLE_NAME = 'posts'
-FOLLOWS_TABLE_NAME = 'follows'
+# テーブル名の定義（環境変数から取得、デフォルト値を設定）
+POSTS_TABLE_NAME = os.getenv("POSTS_TABLE_NAME", "posts")
+FOLLOWS_TABLE_NAME = os.getenv("FOLLOWS_TABLE_NAME", "follows")
 
 def init_dynamodb():
     """

@@ -74,11 +74,11 @@ def create_app():
         aws_credentials = {
             'aws_access_key_id': os.getenv("AWS_ACCESS_KEY_ID"),
             'aws_secret_access_key': os.getenv("AWS_SECRET_ACCESS_KEY"),
-            'region_name': os.getenv("AWS_REGION", "us-east-1")
+            'region_name': os.getenv("AWS_REGION", "ap-northeast-1")
         }
 
         # 必須環境変数のチェック
-        required_env_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET", "TABLE_NAME_USER", "TABLE_NAME_SCHEDULE","TABLE_NAME_BOARD"]
+        required_env_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET", "TABLE_NAME_USER", "TABLE_NAME_SCHEDULE"]
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
@@ -99,12 +99,11 @@ def create_app():
         app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
 
         # DynamoDBテーブルの設定
-        app.table_name = os.getenv("TABLE_NAME_USER")
-        app.table_name_board = os.getenv("TABLE_NAME_BOARD")
+        app.table_name = os.getenv("TABLE_NAME_USER")        
         app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
         app.table_name_users = app.table_name
         app.table = app.dynamodb.Table(app.table_name)           # dynamodb_resource → dynamodb
-        app.table_board = app.dynamodb.Table(app.table_name_board)     # dynamodb_resource → dynamodb
+        
         app.table_schedule = app.dynamodb.Table(app.table_name_schedule) # dynamodb_resource → dynamodb
 
         # Flask-Loginの設定
