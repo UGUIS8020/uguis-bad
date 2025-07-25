@@ -115,7 +115,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:10]
+        )[:12]
         
         formatted_schedules = []
         for schedule in schedules:
