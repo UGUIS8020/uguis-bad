@@ -52,7 +52,11 @@
 
 <section id="about" class="mt-3 mb-3 text-center">
     <h1>鶯バドミントン 越谷市</h1> 
-    <img src="{{ url_for('static', filename=selected_image) }}" alt="バドミントンの画像" class="img-fluid">
+    <img src="{{ url_for('static', filename=selected_image) }}" 
+     alt="バドミントンの画像" 
+     width="400" 
+     height="300" 
+     style="object-fit: cover;">
     <h2 class="mb-3">バドミントンメンバー募集</h2>
     <p>初級者～上級者レベルが違っても楽しくゲームできる方<br>
     小中学生、未経験者はご相談ください<br>
