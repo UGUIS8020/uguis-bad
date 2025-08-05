@@ -12,6 +12,7 @@ from boto3.dynamodb.conditions import Key, Attr
 from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime, date, timedelta, timezone
+import calendar
 import io
 from PIL import Image, ExifTags
 from botocore.exceptions import ClientError
@@ -19,11 +20,10 @@ import logging
 import time
 import random
 from urllib.parse import urlparse, urljoin
-from utils.db import get_schedule_table, get_schedules_with_formatting 
+from utils.db import get_schedule_table, get_schedules_with_formatting, get_schedules_with_formatting_all 
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
 from decimal import Decimal
-
 
 from dotenv import load_dotenv
 
@@ -771,6 +771,139 @@ def index():
         logger.error(f"[index] スケジュール取得エラー: {e}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return render_template("index.html", schedules=[], selected_image='images/default.jpg')
+    
+@app.route("/schedule_koyomi", methods=['GET'])
+@app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
+def schedule_koyomi(year=None, month=None):
+    try:
+        # 年月が指定されていない場合は現在の年月を使用
+        if year is None or month is None:
+            today = date.today()
+            year = today.year
+            month = today.month
+        
+        # 前月と翌月の計算
+        if month == 1:
+            prev_month = 12
+            prev_year = year - 1
+        else:
+            prev_month = month - 1
+            prev_year = year
+        
+        if month == 12:
+            next_month = 1
+            next_year = year + 1
+        else:
+            next_month = month + 1
+            next_year = year
+        
+        # カレンダー情報の生成 - cal_module を使用 
+        calendar.setfirstweekday(calendar.SUNDAY)       
+        cal = calendar.monthcalendar(year, month)
+        
+        # 軽量なスケジュール情報のみ取得
+        schedules = get_schedules_with_formatting_all()
+
+        # 参加者詳細情報の取得を追加
+        user_table = current_app.dynamodb.Table("bad-users")  # 適宜変更
+
+        for schedule in schedules:
+            participants_info = []
+            raw_participants = schedule.get("participants", [])
+            user_ids = []
+
+            # [{"S": "uuid"}] 形式にも対応
+            for item in raw_participants:
+                if isinstance(item, dict) and "S" in item:
+                    user_ids.append(item["S"])
+                elif isinstance(item, str):
+                    user_ids.append(item)
+
+            for user_id in user_ids:
+                try:
+                    res = user_table.get_item(Key={"user#user_id": user_id})
+                    user = res.get("Item")
+                    if user:
+                        participants_info.append({
+                            "user_id": user["user#user_id"],
+                            "display_name": user.get("display_name", "不明")
+                        })
+                except Exception:
+                    # ログ出力を削除
+                    pass
+
+            schedule["participants_info"] = participants_info
+        
+        # カレンダーデータの作成（簡易版）
+        calendar_data = []
+        today_date = date.today()
+        
+        for week in cal:
+            week_data = []
+            for day_num in week:
+                if day_num == 0:
+                    # 月外の日
+                    week_data.append({
+                        'day': 0,
+                        'is_today': False,
+                        'is_other_month': True,
+                        'schedules': []
+                    })
+                else:
+                    # その月の日
+                    day_date = date(year, month, day_num)
+                    date_str = day_date.strftime('%Y-%m-%d')
+                    
+                    # その日のスケジュール
+                    day_schedules = [s for s in schedules if s.get("date") == date_str]
+                    
+                    week_data.append({
+                        'day': day_num,
+                        'is_today': day_date == today_date,
+                        'is_other_month': False,
+                        'schedules': day_schedules,
+                        'has_schedule': len(day_schedules) > 0,
+                        'has_full_schedule': any(s.get("participants_count", 0) >= s.get("max_participants", 0) for s in day_schedules)
+                    })
+            calendar_data.append(week_data)
+
+        image_files = [
+            'images/top001.jpg',
+            'images/top002.jpg',
+            'images/top003.jpg',
+            'images/top004.jpg',
+            'images/top005.jpg'
+        ]
+
+        selected_image = random.choice(image_files)
+
+        # 月の日本語表記
+        month_name = ["１月", "２月", "３月", "４月", "５月", "６月", 
+                     "７月", "８月", "９月", "１０月", "１１月", "１２月"][month-1]
+
+        # テンプレート名は schedule_koyomi.html
+        return render_template("schedule_koyomi.html", 
+                               schedules=schedules,
+                               selected_image=selected_image,
+                               canonical=url_for('schedule_koyomi', _external=True),
+                               year=year,
+                               month=month,
+                               month_name=month_name,
+                               prev_year=prev_year,
+                               prev_month=prev_month,
+                               next_year=next_year,
+                               next_month=next_month,
+                               calendar_data=calendar_data)
+        
+    except Exception as e:
+        # 重要なエラーのみログ出力を残す
+        logger.error(f"[schedule_koyomi] スケジュール取得エラー: {e}")
+        flash('スケジュールの取得中にエラーが発生しました', 'error')
+        return render_template("schedule_koyomi.html", 
+                               schedules=[], 
+                               selected_image='images/default.jpg',
+                               year=date.today().year,
+                               month=date.today().month)
     
     
 @app.route("/day_of_participants", methods=["GET"])

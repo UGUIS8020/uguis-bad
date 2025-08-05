@@ -115,7 +115,7 @@ def get_schedules_with_formatting():
             active_schedules,
             key=lambda x: x.get('date', ''),
             reverse=False
-        )[:12]
+        )[:10]
         
         formatted_schedules = []
         for schedule in schedules:
@@ -154,6 +154,48 @@ def get_schedules_with_formatting():
         
     except Exception as e:
         logger.error(f"Error in get_schedules_with_formatting: {str(e)}")
+        return []
+    
+def get_schedules_with_formatting_all():
+    """すべてのスケジュールを取得（制限なし）"""
+    try:
+        schedule_table = get_schedule_table()
+        response = schedule_table.scan()
+
+        active_schedules = [
+            schedule for schedule in response.get('Items', [])
+            if schedule.get('status', 'active') == 'active'
+        ]
+
+        # dateで昇順ソート
+        schedules = sorted(active_schedules, key=lambda x: x.get('date', ''))
+
+        formatted_schedules = []
+        for schedule in schedules:
+            date_obj = parser.parse(schedule['date'])
+            formatted_date = f"{date_obj.month:02d}/{date_obj.day:02d}({schedule['day_of_week']})"
+
+            formatted_schedules.append({
+                'schedule_id': schedule.get('schedule_id'),
+                'title': schedule.get('title'),
+                'date': schedule.get('date'),
+                'day_of_week': schedule.get('day_of_week'),
+                'formatted_date': formatted_date,
+                'start_time': schedule.get('start_time', ''),  
+                'end_time': schedule.get('end_time', ''),      
+                'venue': schedule.get('venue', ''),            
+                'court': schedule.get('court', ''),          
+                'max_participants': int(schedule.get('max_participants', 10)),
+                'participants_count': len(schedule.get('participants', [])),
+                'participants': schedule.get('participants', []),
+                'status': schedule.get('status', 'active'),
+                'description': schedule.get('description', '')
+            })
+
+        return formatted_schedules
+
+    except Exception as e:
+        logger.error(f"[get_all_schedules] スケジュール取得失敗: {e}")
         return []
 
 def get_users_batch(user_ids):
