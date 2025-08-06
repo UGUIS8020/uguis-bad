@@ -1,31 +1,58 @@
-from flask_caching import Cache
-from flask_wtf import FlaskForm
-from flask import Flask, render_template, request, redirect, url_for, flash, abort, session, jsonify, current_app, json
-from flask_login import UserMixin, LoginManager, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
-from wtforms import ValidationError, StringField, PasswordField, SubmitField, SelectField, DateField, BooleanField, IntegerField
-from wtforms.validators import DataRequired, Email, EqualTo, Length, Optional, NumberRange
-import pytz
+# --- 標準ライブラリ ---
 import os
-import boto3
-from boto3.dynamodb.conditions import Key, Attr
-from werkzeug.utils import secure_filename
 import uuid
-from datetime import datetime, date, timedelta, timezone
-import calendar
-import io
-from PIL import Image, ExifTags
-from botocore.exceptions import ClientError
-import logging
 import time
 import random
+import calendar
+import logging
+import io
+from io import BytesIO
+from datetime import datetime, date, timedelta, timezone
+from decimal import Decimal
 from urllib.parse import urlparse, urljoin
-from utils.db import get_schedule_table, get_schedules_with_formatting, get_schedules_with_formatting_all 
+
+# --- サードパーティライブラリ ---
+from dotenv import load_dotenv
+import pytz
+import requests
+from PIL import Image, ExifTags
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+# --- Flask関連 ---
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash,
+    abort, session, jsonify, current_app, json
+)
+from flask_login import (
+    UserMixin, LoginManager, login_user, logout_user,
+    login_required, current_user
+)
+from flask_caching import Cache
+from flask_wtf import FlaskForm
+from flask_wtf.file import FileField, FileAllowed
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+# --- WTForms ---
+from wtforms import (
+    StringField, PasswordField, SubmitField, SelectField,
+    DateField, BooleanField, IntegerField
+)
+from wtforms.validators import (
+    DataRequired, Email, EqualTo, Length,
+    Optional, NumberRange, ValidationError
+)
+
+# --- アプリ内モジュール ---
+from utils.db import (
+    get_schedule_table,
+    get_schedules_with_formatting,
+    get_schedules_with_formatting_all 
+)
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
-from decimal import Decimal
-
-from dotenv import load_dotenv
 
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.WARNING)
@@ -257,6 +284,9 @@ class UpdateUserForm(FlaskForm):
             DataRequired(message='バドミントン歴を選択してください')
         ]
     )
+    profile_image = FileField('プロフィール画像', validators=[
+        FileAllowed(['jpg', 'png', 'jpeg', 'gif'], '画像ファイルのみ許可されます。')
+    ])
 
     submit = SubmitField('更新')
 
@@ -1376,14 +1406,21 @@ def account(user_id):
 
         form = UpdateUserForm(user_id=user_id, dynamodb_table=app.table)
 
+        # ✅ デフォルト画像URLを設定（GET/POST 両方で使える）
+        default_image_url = f"{app.config['S3_LOCATION']}profile-images/default.jpg"
+        app.logger.debug(f"default_image_url = {default_image_url}")
+
+        # ✅ プロフィール画像がない場合は None に設定
+        user['profile_image_url'] = user.get('profile_image_url', None)
+
         if request.method == 'GET':
             app.logger.debug("Initializing form with GET request.")
             form.display_name.data = user['display_name']
-            form.user_name.data = user['user_name']            
+            form.user_name.data = user['user_name']
             form.furigana.data = user.get('furigana', None)
-            form.email.data = user['email']            
-            form.phone.data = user.get('phone', None)            
-            form.post_code.data = user.get('post_code', None)            
+            form.email.data = user['email']
+            form.phone.data = user.get('phone', None)
+            form.post_code.data = user.get('post_code', None)
             form.address.data = user.get('address', None)
             form.badminton_experience.data = user.get('badminton_experience', None)
             form.gender.data = user['gender']
@@ -1395,7 +1432,13 @@ def account(user_id):
             form.organization.data = user.get('organization', '')
             form.guardian_name.data = user.get('guardian_name', '')
             form.emergency_phone.data = user.get('emergency_phone', '')
-            return render_template('account.html', form=form, user=user)
+
+            return render_template(
+                'account.html',
+                form=form,
+                user=user,
+                default_image_url=default_image_url  # ← デフォルト画像URLを渡す
+            )
 
         if request.method == 'POST' and form.validate_on_submit():            
             current_time = datetime.now(timezone.utc).isoformat()
@@ -1438,6 +1481,44 @@ def account(user_id):
             update_expression_parts.append("updated_at = :updated_at")
             expression_values[':updated_at'] = current_time
 
+            if form.profile_image.data:
+                image_file = form.profile_image.data
+                filename = secure_filename(image_file.filename)
+                s3_key = f"profile-images/{user_id}/{filename}"
+
+                try:
+                    # Pillow で画像を開く
+                    img = Image.open(image_file)
+
+                    # 最大サイズ指定（アスペクト比保持で縮小）
+                    max_size = (300, 300)
+                    img.thumbnail(max_size)
+
+                    # バッファにJPEG形式で保存
+                    buffer = BytesIO()
+                    img.save(buffer, format='JPEG', quality=85)  # PNGにしたいなら format='PNG'
+                    buffer.seek(0)
+
+                    # S3にアップロード
+                    app.s3.upload_fileobj(
+                        buffer,
+                        app.config["S3_BUCKET"],
+                        s3_key,                        
+                    )
+
+                    # URLをDynamoDBに保存
+                    image_url = f"{app.config['S3_LOCATION']}{s3_key}"
+                    update_expression_parts.append("profile_image_url = :profile_image_url")
+                    expression_values[":profile_image_url"] = image_url
+
+                except ClientError as e:
+                    app.logger.error(f"S3 upload failed: {e}", exc_info=True)
+                    flash("画像のアップロードに失敗しました。", "danger")
+
+                except Exception as e:
+                    app.logger.error(f"Image processing failed: {e}", exc_info=True)
+                    flash("画像の処理に失敗しました。", "danger")
+
             try:
                 if update_expression_parts:
                     update_expression = "SET " + ", ".join(update_expression_parts)
@@ -1465,12 +1546,20 @@ def account(user_id):
                 app.logger.error(f"Unexpected error in account route for user {user_id}: {e}", exc_info=True)
                 flash('予期せぬエラーが発生しました。', 'error')
                 return redirect(url_for('index'))
-
     except Exception as e:        
         app.logger.error(f"Unexpected error in account route for user {user_id}: {e}", exc_info=True)
         flash('予期せぬエラーが発生しました。', 'error')
         return redirect(url_for('index'))
-                
+    
+    app.logger.warning(f"Fallthrough reached in account view for user {user_id}")
+    return redirect(url_for('account', user_id=user_id))
+
+def is_image_accessible(url):
+    try:
+        response = requests.head(url)
+        return response.status_code == 200
+    except:
+        return False                
 
 @app.route("/delete_user/<string:user_id>")
 def delete_user(user_id):

@@ -21,6 +21,57 @@
         </div>
     </div>
 </div>   
+
+<form method="POST" enctype="multipart/form-data">
+    <div class="mb-3 text-center">
+        <label for="profile_image" class="form-label d-block">プロフィール画像</label>
+
+        <!-- 現在のプロフィール画像（クリックで選択） -->
+        <label for="profile_image_input" style="cursor: pointer;">
+            <img src="{% if user.profile_image_url and user.profile_image_url|length > 0 and not user.profile_image_url.isspace() %}
+                         {{ user.profile_image_url }}
+                     {% else %}
+                         {{ default_image_url }}
+                     {% endif %}"
+                 class="img-thumbnail mb-2"
+                 alt="プロフィール画像"
+                 width="150"
+                 id="current-profile-image">
+        </label>
+
+        <!-- 非表示のファイル入力 -->
+        <input type="file" id="profile_image_input" name="profile_image"
+               accept="image/*" style="display: none;" onchange="previewImage(event)">
+
+        <!-- プレビュー画像 -->
+        <img id="preview"
+             class="d-block mx-auto"
+             style="display:none; margin-top:10px; max-width:200px; border-radius:8px;"
+             alt="">
+
+        <!-- 変更ボタン（最初は非表示） -->
+        <div class="text-center mt-2">
+            <button type="submit" id="upload-button" class="btn btn-primary" style="display: none;">
+                画像を変更
+            </button>
+        </div>
+    </div>
+</form>
+
+<script>
+document.getElementById('profile_image').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const preview = document.getElementById('preview');
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+});
+</script>
     
 
     <section id="user_update">
@@ -304,6 +355,44 @@
             }
         });
 
+    </script>   
+    <script>
+    function previewImage(event) {
+        const input = event.target;
+        const preview = document.getElementById('preview');
+
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+    </script>
+    <script>
+    function previewImage(event) {
+        const input = event.target;
+        const preview = document.getElementById('preview');
+        const uploadButton = document.getElementById('upload-button');
+
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.alt = "新しい画像のプレビュー";
+                preview.style.display = 'block';
+                uploadButton.style.display = 'inline-block';  // ボタンを表示
+            };
+            reader.readAsDataURL(input.files[0]);
+        } else {
+            preview.src = "";
+            preview.alt = "";
+            preview.style.display = 'none';
+            uploadButton.style.display = 'none';  // ボタンを非表示
+        }
+    }
     </script>
  
 

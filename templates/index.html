@@ -109,15 +109,17 @@
 
         <a class="question-link" href="https://bad-manager.shibuya8020.com/" target="_blank" rel="noopener noreferrer">
             <h2>ご質問はこちら。</h2>
-        </a>
+        </a>               
 
-            <div class="schedule-title position-relative text-center">
+
+            <div class="schedule-title d-flex flex-column flex-md-row align-items-center justify-content-center text-center gap-2 mb-3">
                 <h2 class="m-0">練習予定</h2>
-                <a href="{{ url_for('schedule_koyomi') }}" 
-                class="btn btn-warning position-absolute end-0 top-50 translate-middle-y me-2">
+                <a href="{{ url_for('schedule_koyomi') }}"
+                class="btn btn-warning mx-2">
                     全ての予定＆カレンダー
                 </a>
             </div>
+           
 
             <!-- アコーディオン -->
     <div class="accordion" id="scheduleAccordion">

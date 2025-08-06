@@ -54,45 +54,45 @@
         }
     }
     
-    /* スケジュール一覧テーブルのスタイル */
-    .table thead th {
-        background-color: #8fbc13;
-        color: white;
-    }
+    .accordion-button::after {
+    display: none !important;  /* アコーディオンの矢印を非表示 */
+}
+.accordion-header{
+    background-color: #ffffff;
+    padding: 100;
+    margin: 5;   
+}
+
+.accordion-button {  
+    background-color: #ffffff;;  
+    padding: 0;
+    margin: 0;
+    font-size: 1.2rem; /* フォントサイズを調整 */
+}
+
+.accordion-item {
+    background-color: #ffffff;;
+    padding: 5px;
+    margin: 5px;
+    border: 1px solid rgba(0,0,0,.125);
+    border-radius: 0.25rem !important;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 768px) {
+    .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }        
     
-    .badge.bg-warning {
-        color: #000 !important;
-    }
+}
 
-    .accordion .accordion-item .accordion-header .accordion-button::after {
-    display: none !important;
-    }
-
-    .accordion-button {
-        background-color: #f8f9fa;
-        color: #333;
-        border: 1px solid #dee2e6;
-        box-shadow: none;
-    }
-
-    .accordion-button:not(.collapsed) {
-        background-color: #e9ecef;
-        color: #000;
-    }
-
-    .join-button {
-        width: 80px;
-    }
-
-    .join-button.btn-primary {
-        background-color: #007bff;
-        border-color: #007bff;
-    }
-
-    .join-button.btn-danger {
-        background-color: #dc3545;
-        border-color: #dc3545;
-    }
+.participant-name {
+    z-index: 1000;
+    position: relative;
+    pointer-events: auto;
+}
 </style>
 
 <div class="container">       
