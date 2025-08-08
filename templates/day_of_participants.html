@@ -10,12 +10,30 @@
     {% if participants %}
         <div class="row">
             {% for participant in participants %}
-                <div class="col-md-2 col-sm-3 mb-2">
-                    <div class="card h-100">
-                        <div class="card-body text-center">  <!-- ★ 中央寄せ -->
-                            <h5 class="card-title">{{ participant.display_name }}</h5>
+                <div class="col-md-2 col-sm-3 mb-2" id="participant-card-{{ participant.user_id }}">
+                    <div class="card h-100 {% if participant.get('is_deleted') %}border-warning{% endif %}{% if participant.get('is_error') %}border-danger{% endif %}">
+                        <div class="card-body text-center">
+                            <!-- 管理者のみ削除ボタンを表示 -->
+                            {% if current_user.is_authenticated and current_user.administrator %}
+                            <div class="d-flex justify-content-end mb-2">
+                                <button class="btn btn-sm btn-outline-danger" 
+                                        onclick="removeParticipant('{{ participant.user_id }}', '{{ participant.display_name }}')"
+                                        title="参加を取り消す">
+                                    ×
+                                </button>
+                            </div>
+                            {% endif %}
+                            
+                            <h5 class="card-title 
+                                {% if participant.get('is_deleted') %}text-muted{% endif %}
+                                {% if participant.get('is_error') %}text-danger{% endif %}">
+                                {{ participant.display_name }}
+                                {% if participant.get('is_deleted') %}<small class="d-block">(削除済ユーザー)</small>{% endif %}
+                                {% if participant.get('is_error') %}<small class="d-block">(データエラー)</small>{% endif %}
+                            </h5>
                     
                             <p class="card-text mt-3">
+                                {% if participant.get('is_valid', True) %}
                                 <strong class="d-block">戦闘力</strong>
                                 <span id="skill-badge-{{ participant.user_id }}"
                                     class="badge {% if participant.skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge fs-4 fw-bold"
@@ -35,20 +53,29 @@
                                     <button class="btn btn-sm btn-secondary"
                                             onclick="cancelEdit('{{ participant.user_id }}')">キャンセル</button>
                                 </div>
+                                {% else %}
+                                <span class="text-muted">データ取得不可</span>
+                                {% endif %}
                             </p>
                     
                             <p class="card-text mt-2">
+                                {% if participant.get('is_valid', True) %}
                                 <strong class="d-block">参加回数</strong>
                                 {% if participant.join_count is defined %}
                                     <span class="badge bg-success fs-5 fw-bold">{{ participant.join_count }} 回</span>
                                 {% else %}
                                     <span class="badge bg-secondary fs-5 fw-bold">未集計</span>
                                 {% endif %}
+                                {% endif %}
                             </p>
                     
+                            {% if participant.get('is_valid', True) %}
                             <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" class="btn btn-sm btn-outline-primary mt-2">
                                 プロフィール
                             </a>
+                            {% else %}
+                            <span class="text-muted small">プロフィール利用不可</span>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -90,6 +117,81 @@
 <!-- 戦闘力編集用のJavaScript -->
 <script>
 let editingStates = {}; // 複数の編集状態を管理
+
+// 参加者削除機能（管理者用）
+async function removeParticipant(userId, displayName) {
+    console.log('removeParticipant called with:', userId, displayName);
+    
+    if (!confirm(`${displayName}さんの参加を取り消しますか？`)) {
+        console.log('User cancelled the operation');
+        return;
+    }
+    
+    try {
+        // 現在のURLから日付を取得
+        const currentPath = window.location.pathname;
+        console.log('Current path:', currentPath);
+        
+        // URLパターンを修正 - day_of_participants?date=2025-08-11 形式に対応
+        const urlParams = new URLSearchParams(window.location.search);
+        const scheduleDate = urlParams.get('date');
+        
+        console.log('Schedule date:', scheduleDate);
+        
+        if (!scheduleDate) {
+            alert('日付情報の取得に失敗しました');
+            return;
+        }
+        
+        console.log('Sending request to remove participant...');
+        console.log('Request data:', { user_id: userId, date: scheduleDate });
+        
+        const response = await fetch('/remove_participant_from_date', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                user_id: userId,
+                date: scheduleDate
+            })
+        });
+        
+        console.log('Response status:', response.status);
+        
+        const data = await response.json();
+        console.log('Response data:', data);
+        
+        if (data.success) {
+            // 成功時は該当の参加者カードを削除
+            const participantCard = document.getElementById(`participant-card-${userId}`);
+            if (participantCard) {
+                participantCard.style.transition = 'opacity 0.3s';
+                participantCard.style.opacity = '0';
+                setTimeout(() => {
+                    participantCard.remove();
+                    showMessage(data.message || '参加者を削除しました', 'success');
+                }, 300);
+            }
+            
+            // 参加者がいなくなった場合のメッセージ表示
+            const remainingCards = document.querySelectorAll('[id^="participant-card-"]');
+            if (remainingCards.length === 0) {
+                const container = document.querySelector('.row');
+                if (container) {
+                    container.innerHTML = '<p class="text-muted">この日の参加者はいません。</p>';
+                }
+            }
+        } else {
+            alert(data.message || 'エラーが発生しました');
+        }
+        
+    } catch (error) {
+        console.error('削除エラー:', error);
+        alert('通信エラーが発生しました: ' + error.message);
+    }
+}
 
 function editSkillScore(participantId, userId) {
     if (editingStates[participantId]) return;
@@ -170,9 +272,10 @@ function saveSkillScore(participantId, userId) {
                     const updatedScore = user.skill_score ?? '未設定';
                     badge.innerHTML = updatedScore;
                     badge.className = updatedScore !== '未設定'
-                        ? 'badge bg-primary editable-badge'
-                        : 'badge bg-secondary editable-badge';
+                        ? 'badge bg-primary editable-badge fs-4 fw-bold'
+                        : 'badge bg-secondary editable-badge fs-4 fw-bold';
                     badge.setAttribute('onclick', `editSkillScore('${participantId}', '${userId}')`);
+                    badge.setAttribute('style', 'cursor: pointer; padding: 0.6em 1em;');
     
                     controls.style.display = 'none';
                     delete editingStates[participantId];
@@ -186,6 +289,10 @@ function saveSkillScore(participantId, userId) {
         } else {
             throw new Error(data.error || '保存に失敗しました');
         }
+    })
+    .catch(error => {
+        console.error('保存エラー:', error);
+        alert('保存中にエラーが発生しました');
     });
 }
 

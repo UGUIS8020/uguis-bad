@@ -51,6 +51,7 @@ from utils.db import (
     get_schedules_with_formatting,
     get_schedules_with_formatting_all 
 )
+
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
 
@@ -639,6 +640,52 @@ class User(UserMixin):
 
 
 # 緊急修正版: scanをget_itemに変更
+# @cache.memoize(timeout=600)
+# def get_participants_info(schedule):     
+#     participants_info = []
+
+#     try:
+#         user_table = app.dynamodb.Table(app.table_name)
+
+#         if 'participants' in schedule and schedule['participants']:            
+#             for participant_id in schedule['participants']:
+#                 try:
+#                     # scanを削除してget_itemに変更
+#                     response = user_table.get_item(
+#                         Key={'user#user_id': participant_id}
+#                     )
+                    
+#                     if 'Item' in response:
+#                         user = response['Item']                        
+                        
+#                         raw_score = user.get('skill_score')
+#                         if isinstance(raw_score, Decimal):
+#                             skill_score = int(raw_score)
+#                         elif isinstance(raw_score, (int, float)):
+#                             skill_score = int(raw_score)
+#                         else:
+#                             skill_score = None
+
+#                         # ✅ 参加回数（practice_count）を取得
+#                         raw_practice = user.get('practice_count')
+#                         join_count = int(raw_practice) if isinstance(raw_practice, (Decimal, int, float)) else None
+
+#                         participants_info.append({                            
+#                             'user_id': user.get('user#user_id'),
+#                             'display_name': user.get('display_name', '名前なし'),
+#                             'skill_score': skill_score,
+#                             'join_count': join_count
+#                         })
+#                     else:
+#                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
+#                 except Exception as e:
+#                     app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
+
+#     except Exception as e:
+#         app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
+
+#     return participants_info
+
 @cache.memoize(timeout=600)
 def get_participants_info(schedule):     
     participants_info = []
@@ -673,15 +720,48 @@ def get_participants_info(schedule):
                             'user_id': user.get('user#user_id'),
                             'display_name': user.get('display_name', '名前なし'),
                             'skill_score': skill_score,
-                            'join_count': join_count
+                            'join_count': join_count,
+                            'is_valid': True  # 正常なユーザー
                         })
                     else:
+                        # ユーザーが見つからない場合
                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
+                        participants_info.append({
+                            'user_id': participant_id,
+                            'display_name': '削除されたユーザー',
+                            'skill_score': None,
+                            'join_count': None,
+                            'is_deleted': True,
+                            'is_valid': False
+                        })
+                        
+                except ClientError as e:
+                    # DynamoDBの特定エラー
+                    error_code = e.response['Error']['Code']
+                    logger.error(f"[参加者ID: {participant_id}] DynamoDBエラー({error_code}): {e}")
+                    participants_info.append({
+                        'user_id': participant_id,
+                        'display_name': f'エラー（{error_code}）',
+                        'skill_score': None,
+                        'join_count': None,
+                        'is_error': True,
+                        'is_valid': False
+                    })
+                    
                 except Exception as e:
-                    app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
+                    # その他のエラー
+                    logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
+                    participants_info.append({
+                        'user_id': participant_id,
+                        'display_name': 'エラー（要確認）',
+                        'skill_score': None,
+                        'join_count': None,
+                        'is_error': True,
+                        'is_valid': False
+                    })
 
     except Exception as e:
-        app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
+        logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
 
     return participants_info
 
@@ -1518,6 +1598,7 @@ def account(user_id):
                 except Exception as e:
                     app.logger.error(f"Image processing failed: {e}", exc_info=True)
                     flash("画像の処理に失敗しました。", "danger")
+                    
 
             try:
                 if update_expression_parts:
@@ -1713,7 +1794,91 @@ def user_profile(user_id):
         app.logger.error(f"Error loading profile: {str(e)}")
         flash('プロフィールの読み込み中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
-
+    
+@app.route("/remove_participant_from_date", methods=['POST'])
+@login_required
+def remove_participant_from_date():
+    print("=== remove_participant_from_date エンドポイントが呼ばれました ===")
+    
+    if not current_user.administrator:
+        return jsonify({"success": False, "message": "権限がありません"}), 403
+    
+    try:
+        data = request.get_json()
+        user_id_to_remove = data.get('user_id')
+        date = data.get('date')
+        
+        print(f"削除リクエスト: user_id={user_id_to_remove}, date={date}")
+        
+        if not user_id_to_remove or not date:
+            return jsonify({"success": False, "message": "必要な情報が不足しています"}), 400
+        
+        # スケジュールを取得
+        schedules = get_schedules_with_formatting()
+        target_schedule = next((s for s in schedules if s.get("date") == date), None)
+        
+        if not target_schedule:
+            return jsonify({
+                "success": False, 
+                "message": f"日付 {date} のスケジュールが見つかりません"
+            }), 404
+        
+        schedule_id = target_schedule.get('schedule_id')
+        participants = target_schedule.get('participants', [])
+        
+        print(f"対象スケジュール: {schedule_id}")
+        print(f"対象日付: {date}")
+        print(f"現在の参加者数: {len(participants)}")
+        print(f"削除対象: {user_id_to_remove}")
+        
+        if user_id_to_remove not in participants:
+            return jsonify({
+                "success": False, 
+                "message": "指定されたユーザーは参加していません"
+            })
+        
+        # 参加者リストから削除
+        updated_participants = [p for p in participants if p != user_id_to_remove]
+        
+        print(f"更新後の参加者数: {len(updated_participants)}")
+        
+        schedule_table = get_schedule_table()
+        
+        # 複合主キーを使用（schedule_id + date）
+        composite_key = {
+            "schedule_id": schedule_id,
+            "date": date
+        }
+        
+        print(f"使用する複合キー: {composite_key}")
+        
+        update_response = schedule_table.update_item(
+            Key=composite_key,
+            UpdateExpression="SET participants = :participants, participants_count = :count",
+            ExpressionAttributeValues={
+                ":participants": updated_participants,
+                ":count": len(updated_participants)
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+        
+        print(f"DynamoDB更新完了: {update_response}")
+        print(f"削除成功: {user_id_to_remove} を {schedule_id} から削除")
+        
+        return jsonify({
+            "success": True, 
+            "message": "参加者を削除しました"
+        })
+        
+    except Exception as e:
+        print(f"参加者削除エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False, 
+            "message": f"削除処理中にエラーが発生しました: {str(e)}"
+        }), 500
+    
     
 @app.route("/uguis2024_tournament")
 def uguis2024_tournament():
