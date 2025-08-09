@@ -178,7 +178,7 @@ def edit_schedule(schedule_id):
                     if len(current_participants) > form.max_participants.data:
                         flash('参加人数制限は現在の参加者数より少なく設定できません。', 'error')
                         return render_template(
-                            'edit_schedule.html',
+                            'schedule/edit_schedule.html',
                             form=form,
                             schedule=schedule,
                             schedule_id=schedule_id
