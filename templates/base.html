@@ -18,14 +18,14 @@
     <!-- SEO基本設定 -->
     <title>{% block title %}{% endblock %}</title>
     <meta name="description" content="{% block description %}{% endblock %}">
-    <meta name="keywords" content="埼玉県,越谷市,鶯バドミントン,社会人サークル">
+    <meta name="keywords" content="埼玉県,越谷市,バドミントン,社会人サークル,大会,ミックスダブルス,男子ダブルス,女子ダブルス">
     <meta name="robots" content="index, follow">
     <meta http-equiv="content-language" content="ja">
-    <link rel="canonical" href="https://uguis-bad.onrender.com/">
+    <link rel="canonical" href="{{ request.url }}">
     
     <!-- OGP設定 -->
-    <meta property="og:title" content="{% block og_title %}{% endblock %}">
-    <meta property="og:description" content="{% block og_description %}{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}{{ self.title()|striptags|trim }}{% endblock %}">  
+    <meta property="og:description" content="{% block og_description %}{{ self.description()|striptags|trim }}{% endblock %}">
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:url" content="{{ request.url }}">
     <meta property="og:site_name" content="鶯 | 越谷市バドミントンサークル">

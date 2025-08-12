@@ -1,4 +1,9 @@
 {% extends "base.html" %}
+
+{# SEO最適化 #}
+{% block title %}バドミントン大会2025.10.12{% endblock %}
+{% block description %}2025年10月12日(日) 越谷市立西体育館にてバドミントン大会『鶯杯其の弐』を開催します。年齢・性別・レベル不問、男子・女子・ミックス全種目参加可能。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。事前登録制、参加費1人1800円。1日中バドミントンを満喫したい方はぜひご参加ください。{% endblock %}
+{% block keywords %}埼玉県,越谷市, バドミントン, サークル, 大会{% endblock %}
 {% block content %}
 <style>
 
@@ -6,33 +11,24 @@ body{
     background-color: #beaa73;  
     
 }
-
-
 h1{    
     text-align: center;
     margin: 10px;      
 
 }
-
 h2{
     margin: 0;
     padding: 3px;
 }
-
-
 h3{
     margin: 3px;
     padding: 0;
 
 }
-
-
 img{
     margin: 5px;
 
 }
-
-
 .boxtop{   
     margin: 0;
     background-color: #beaa73;
@@ -178,8 +174,10 @@ img{
             
                 
                 <div class="container02">
-                  <img src="{{ url_for('static', filename='images/2025/tournament2025_03.jpg') }}" 
-                      class="tournament-image">
+                  <img src="{{ url_for('static', filename='images/2025/tournament2025_03.jpg') }}"
+                  class="tournament-image"
+                  alt="鶯杯其の弐 バドミントン大会の告知ポスター"
+                  width="1200" height="630" loading="eager" fetchpriority="high">
                 </div>               
                      
 
