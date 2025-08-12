@@ -1877,12 +1877,19 @@ def remove_participant_from_date():
         return jsonify({
             "success": False, 
             "message": f"削除処理中にエラーが発生しました: {str(e)}"
-        }), 500
+        }), 500    
     
-    
-@app.route("/uguis2024_tournament")
+@app.route("/tournament/tournament_first")
+def tournament_first():
+    return render_template("tournament/tournament_first.html")
+
+@app.route("/tournament/uguis2024_tournament")
 def uguis2024_tournament():
-    return render_template("uguis2024_tournament.html")
+    return render_template("tournament/uguis2024_tournament.html")
+
+@app.route("/tournament/uguis2025_tournament")
+def uguis2025_tournament():
+    return render_template("tournament/uguis2025_tournament.html")
 
 @app.route("/bad_manager")
 def bad_manager():

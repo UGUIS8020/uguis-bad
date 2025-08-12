@@ -102,6 +102,10 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('video_link') }}">動画集</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('uguis2024_tournament') }}">鶯杯2024</a>
+                </li>
+
                 {% if current_user.is_authenticated and current_user.administrator %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('user_maintenance') }}">登録者</a>
