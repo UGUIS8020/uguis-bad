@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 
+<style>
+.card-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.5;
+}
+</style>
+
 {% block content %}
 <div class="container py-4">
     <!-- プロフィールヘッダー -->
@@ -21,33 +29,36 @@
     <!-- 投稿一覧 -->
     <div class="mb-4">
         <h4 class="mb-3">投稿一覧</h4>
-        {% for post in posts %}
-        <div class="card mb-3">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <div>
-                        <strong>{{ post.display_name }}</strong>
+        {% if posts %}
+            {% for post in posts %}
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <strong>{{ post.display_name }}</strong>
+                            </div>
+                            <small class="text-muted">
+                                {{ post.created_at.split('T')[0] }}
+                            </small>
+                        </div>
+                        <!-- Windows改行（\r\n）に対応 -->
+                        <p class="card-text" style="white-space: pre-wrap; word-wrap: break-word;">{{ post.content }}</p>
+                        {% if post.image_url %}
+                        <div class="mt-2">
+                            <img src="{{ post.image_url }}" 
+                                class="img-fluid rounded" 
+                                alt="投稿画像"
+                                style="max-height: 400px; object-fit: contain;">
+                        </div>
+                        {% endif %}
                     </div>
-                    <small class="text-muted">
-                        {{ post.created_at.split('T')[0] }}
-                    </small>
                 </div>
-                <p class="card-text">{{ post.content }}</p>
-                {% if post.image_url %}
-                <div class="mt-2">
-                    <img src="{{ post.image_url }}" 
-                         class="img-fluid rounded" 
-                         alt="投稿画像"
-                         style="max-height: 400px; object-fit: contain;">
-                </div>
-                {% endif %}
-            </div>
-        </div>
+            {% endfor %}
         {% else %}
-        <div class="text-center text-muted py-5">
-            <p>投稿はありません</p>
-        </div>
-        {% endfor %}
+            <div class="text-center text-muted py-5">
+                <p>投稿はありません</p>
+            </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

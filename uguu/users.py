@@ -6,7 +6,7 @@ from .dynamo import db
 users = Blueprint('users', __name__)
 
 @users.route('/user/<user_id>')
-@login_required
+
 def user_profile(user_id):
     try:
         print(f"[DEBUG] Start loading profile for user_id: {user_id}")

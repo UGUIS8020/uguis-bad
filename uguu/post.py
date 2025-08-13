@@ -11,27 +11,50 @@ from boto3.dynamodb.conditions import Key
 post = Blueprint('post', __name__)
 
 @post.route('/post', methods=['GET', 'POST'])
-@login_required
+@login_required 
 def create_post():
     if request.method == 'POST':       
-        content = request.form.get('content')
-        image = request.files.get('image')  # 画像ファイルを取得        
+        content = request.form.get('content', '').strip()  # stripを追加
+        image = request.files.get('image')
+        print(f"投稿内容: {repr(content)}")      
+        
+        # バリデーションを追加
+        if not content:
+            flash('投稿内容を入力してください', 'warning')
+            return render_template('uguu/create_post.html')
+        
+        if len(content) > 1000:  # 文字数制限
+            flash('投稿内容は1000文字以内で入力してください', 'warning')
+            return render_template('uguu/create_post.html')
         
         try:
             # 画像がアップロードされた場合、S3にアップロード
             image_url = None
-            if image:
-                image_url = upload_image_to_s3(image)                
+            if image and image.filename:  # ファイル名チェックを追加
+                # 画像ファイル形式チェック
+                allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+                file_ext = image.filename.lower().split('.')[-1]
+                
+                if file_ext not in allowed_extensions:
+                    flash('サポートされていない画像形式です', 'warning')
+                    return render_template('uguu/create_post.html')
+                
+                image_url = upload_image_to_s3(image)
+                print(f"画像アップロード成功: {image_url}")
             
-            # DynamoDBに保存（画像URLも含める）
-            db.create_post(current_user.id, content, image_url)            
+            # DynamoDBに保存
+            db.create_post(current_user.id, content, image_url)
+            print("投稿作成成功")
             
             flash('投稿が完了しました', 'success')
             return redirect(url_for('uguu.show_timeline'))
             
-        except Exception as e:            
+        except Exception as e:
+            print(f"投稿作成エラー: {str(e)}")
+            import traceback
+            print(traceback.format_exc())  # デバッグ用
             flash('投稿の作成に失敗しました', 'error')
-            return redirect(url_for('post.create_post'))
+            return render_template('uguu/create_post.html')  # リダイレクトではなく直接レンダリング
     
     return render_template('uguu/create_post.html')
 
@@ -67,7 +90,6 @@ def edit_post(post_id):
     return render_template('uguu/edit_post.html', post=post)
 
 @post.route('/like/<post_id>', methods=['POST'])
-@login_required
 def like_post(post_id):
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         try:
@@ -91,7 +113,6 @@ def like_post(post_id):
             return redirect(url_for('uguu.show_timeline'))
         
 @post.route('/reply/<post_id>', methods=['POST'])  # intの型指定を削除
-@login_required
 def create_reply(post_id):
     """返信を作成する"""
     if request.method == 'POST':

@@ -6,25 +6,35 @@ from flask_login import current_user, login_required
 uguu = Blueprint('uguu', __name__)
 
 @uguu.route('/')
-@login_required
 def show_timeline():
     """タイムラインを表示"""
     try:
         print("Starting timeline display process")
-        print(f"Current user ID: {current_user.id}")
+        
+        # ログイン状態をチェック
+        if current_user.is_authenticated:
+            print(f"Current user ID: {current_user.id}")
+            user_id = current_user.id
+        else:
+            print("Anonymous user accessing timeline")
+            user_id = None
         
         posts = db.get_posts()
         print(f"Retrieved {len(posts) if posts else 0} posts")
         
         if posts:
-            # いいね状態の確認
+            # いいね状態の確認（ログインユーザーのみ）
             for post in posts:
                 try:
-                    post['is_liked_by_user'] = db.check_if_liked(
-                        post['post_id'], 
-                        current_user.id
-                    )
-                    print(f"Like status checked for post {post['post_id']}")
+                    if user_id:  # ログインユーザーの場合のみいいね状態をチェック
+                        post['is_liked_by_user'] = db.check_if_liked(
+                            post['post_id'], 
+                            user_id
+                        )
+                        print(f"Like status checked for post {post['post_id']}")
+                    else:  # 匿名ユーザーの場合はFalse
+                        post['is_liked_by_user'] = False
+                        
                 except Exception as e:
                     print(f"Error checking like status: {str(e)}")
                     post['is_liked_by_user'] = False
@@ -37,7 +47,18 @@ def show_timeline():
             )
             print("Posts sorted successfully")
             
-        return render_template('uguu/timeline.html', posts=posts)
+        return render_template('uguu/timeline.html', 
+                             posts=posts,
+                             is_authenticated=current_user.is_authenticated)
+        
+    except Exception as e:
+        print(f"Timeline Error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        flash('タイムラインの取得中にエラーが発生しました。', 'danger')
+        return render_template('uguu/timeline.html', 
+                             posts=[],
+                             is_authenticated=current_user.is_authenticated)
         
     except Exception as e:
         print(f"Timeline Error: {str(e)}")
@@ -47,7 +68,7 @@ def show_timeline():
         return render_template('uguu/timeline.html', posts=[])
 
 @uguu.route('/my_posts')
-@login_required
+
 def show_my_posts():
     """自分の投稿のみを表示"""
     try:
