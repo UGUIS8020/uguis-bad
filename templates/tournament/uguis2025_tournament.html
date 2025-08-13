@@ -1,29 +1,102 @@
 {% extends "base.html" %}
 
 {# SEO最適化 #}
-{% block title %}バドミントン大会2025.10.12{% endblock %}
+{% block title %}第2回鶯バドミントン大会2025.10.12{% endblock %}
 {% block description %}2025年10月12日(日) 越谷市立西体育館にてバドミントン大会『鶯杯其の弐』を開催します。年齢・性別・レベル不問、男子・女子・ミックス全種目参加可能。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。事前登録制、参加費1人1800円。1日中バドミントンを満喫したい方はぜひご参加ください。{% endblock %}
 {% block keywords %}埼玉県,越谷市, バドミントン, サークル, 大会{% endblock %}
+
+{% block extra_meta %}
+  {# 可能なら本ページの正規URLを入れてください #}
+  <link rel="canonical" href="https://uguis-bad.shibuya8020.com/tournament/uguis2025_tournament.html">
+
+  {# 検索エンジン向けのメタタグ #}
+
+  {# 検索許可（デフォルトでOKなら不要） #}
+  <meta name="robots" content="index, follow">
+
+  {# Open Graph #}
+  <meta property="og:type" content="event">
+  <meta property="og:title" content="鶯杯其の弐｜第2回 鶯バドミントン大会（2025/10/12）">
+  <meta property="og:description" content="2025年10月12日(日) 越谷市立西体育館で開催。年齢・性別・レベル不問、男子・女子・ミックス参加OK。リーグ戦→上位/下位トーナメントで最後まで楽しめます。事前登録・参加費1,800円。">
+  <meta property="og:url" content="https://uguis-bad.shibuya8020.com/tournament/uguis2025_tournament.html">
+  <meta property="og:image" content="https://uguis8020.com/static/images/2025/tournament2025_03.jpg">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:site_name" content="Uguis Badminton">
+
+  {# Twitter Card #}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="鶯杯其の弐｜第2回 鶯バドミントン大会（2025/10/12）">
+  <meta name="twitter:description" content="越谷市立西体育館で開催。年齢・性別・レベル不問／男子・女子・ミックスOK。リーグ戦→トーナメントで最後まで楽しめる形式。">
+  <meta name="twitter:image" content="https://uguis8020.com/static/images/2025/tournament2025_03.jpg">
+
+{% endblock %} 
+
+{% block jsonld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SportsEvent",
+  "name": "鶯杯其の弐（第2回 鶯バドミントン大会）",
+  "description": "年齢・性別・レベル不問。男子・女子・ミックス参加OK。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。事前登録・参加費1人1800円。",
+  "startDate": "2025-10-12T09:00:00+09:00",
+  "endDate": "2025-10-12T18:00:00+09:00",
+  "eventStatus": "https://schema.org/EventScheduled",
+  "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+  "image": ["https://uguis8020.com/static/images/2025/tournament2025_03.jpg"],
+  "location": {
+    "@type": "Place",
+    "name": "越谷市立西体育館",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "七左町四丁目223番地",
+      "addressLocality": "越谷市",
+      "addressRegion": "埼玉県",
+      "postalCode": "343-0851",
+      "addressCountry": "JP"
+    },
+    "sameAs": "https://www.city.koshigaya.saitama.jp/toiawase/shisetsu/sportskouen/taiikukan/taiikukan-nishi.html"
+  },
+  "offers": {
+    "@type": "Offer",
+    "price": "1800",
+    "priceCurrency": "JPY",
+    "url": "https://uguis-bad.shibuya8020.com/tournament/uguis2025_tournament.html",
+    "availability": "https://schema.org/InStock"
+  },
+  "organizer": {
+    "@type": "Person",
+    "name": "渋谷 正彦",
+    "telephone": "+81-70-6633-0363",
+    "email": "shibuyamasahiko@gmail.com"
+  }
+}
+</script>
+{% endblock %}
+
 {% block content %}
+
 <style>
 
 body{
     background-color: #beaa73;  
     
 }
-h1{    
+h1 {    
     text-align: center;
-    margin: 10px;      
+    margin: 10px 5px;
+    font-size: 2.2em; /* 約35px */
+}
 
-}
-h2{
+h2 {
     margin: 0;
-    padding: 3px;
+    margin: 15px 0px 5px;
+    font-size: 1.6em; /* 約26px */
 }
-h3{
+
+h3 {
     margin: 3px;
     padding: 0;
-
+    font-size: 1.2em; /* 約19px */
 }
 img{
     margin: 5px;
@@ -98,7 +171,7 @@ img{
     font-weight: normal;
     color: #000000;
     background-color: #beaa73;         
-    width: 600px; 
+    width: 650px; 
     height: 50px;        
 }
 
@@ -108,7 +181,7 @@ img{
     font-weight: normal;
     color: #000000;
     background-color: #beaa73;         
-    width: 700px;    
+    width: 600px;    
     margin:0 auto;
     padding: 0;            
 }
@@ -165,10 +238,9 @@ img{
     height: auto;
 }
 </style>
-
   
     <h1>バドミントン大会</h1>
-    <div class="boxtop">2025.10.12 日曜日 9時開始~終わるまで</div>
+    <div class="boxtop">2025.10.12 日曜日 9時開始~終わるまで(18時終了を目標)</div>
        <div class="boxtop">鶯杯其の弐 参加者募集中！</div>
         
             
@@ -178,8 +250,11 @@ img{
                   class="tournament-image"
                   alt="鶯杯其の弐 バドミントン大会の告知ポスター"
                   width="1200" height="630" loading="eager" fetchpriority="high">
-                </div>               
-                     
+                </div>     
+                
+                <div class="container05">                 
+                <a href="{{ url_for('uguis2024_tournament') }}" class="btn btn-secondary my-3">前回、鶯杯2024大会のページはこちら</a>
+                </div>
 
  
   
@@ -189,39 +264,53 @@ img{
   
       <div class="container04">
         <h3>開催日時: 2025年10月12日(日) 9時～終わるまで</h3>
+        <h3>申し込み期日: ギリギリまで受け付けますが、ペア数が24になった時点で締め切ります</h3>
         <h3>会場: 越谷市立西体育館</h3>
         <h3>〒343-0851 埼玉県越谷市七左町四丁目223番地</h3>
         <h3>体育館詳細:<a href="https://www.city.koshigaya.saitama.jp/toiawase/shisetsu/sportskouen/taiikukan/taiikukan-nishi.html" target="_blank">越谷市立西体育館</a></h3>
       
   
           <h3>参加資格</h3>
-          <h3>年齢性別レベル不問バドミントンのルールがわかればどなたでも参加可能です</h3>
-          <h3>男子ダブルス、女子ダブルス、ミックスダブルス全て参加できます。</h3>
+          <h3>年齢性別レベル不問バドミントンのルールがわかればどなたでも参加可能</h3>
+          <h3>男子ダブルス、女子ダブルス、ミックスダブルス全て参加OK</h3>
           <h3>参加費:1人1800円(ペアで3600円です)</h3>          
 
       </div>
 
       <div class="container05"> 
-        <h3>レベルが違っても楽しめるようにリーグ戦後に上位、下位に分かれてトーナメントを行います</h3><h3>
-          のでリーグ戦で下位になっても試合ができるようにします</h3>
-        <h3>個人で開催する大会ですので至らないことも多々あると思います</h3>
-         <h3>お手伝いをお願いすることもありますがご了承ください</h3>       
-          <h2>1日中バドミントンを楽しみたい方是非ご参加ください</h2>
+        <h2>試合形式</h2>
+        </div>
+        <div class="container04">
+    <ul>
+        <li><h3>予選：リーグ戦</h3></li>
+        <li><h3>決勝：上位・下位に分かれてトーナメント</h3></li>
+        <li><h3>※リーグ戦で下位でも、必ず試合ができる形式です</h3></li>
+        <li><h3>勝敗やレベルに関わらず、リーグ後のトーナメントでは、実力が近い相手と対戦できます</h3></li>
+    </ul>
+
+    
+
+        
+        <h3>個人主催の大会のため、不手際があるかもしれません。</h3>
+        <h3>運営のお手伝いをお願いする場合がありますので、ご了承ください。</h3>
+        <h2>1日中バドミントンを楽しみたい方は、ぜひご参加ください！</h2>
           
           <h2>事前登録必要</h2>
           <h3>主催者:渋谷 正彦 連絡先: <a href="tel:07066330363">070-6633-0363</a></h3>
           <h3>e-mail: <a href="mailto:shibuyamasahiko@gmail.com">shibuyamasahiko@gmail.com</a></h3>
       </div>
 
-
-
-
       
 <div class=container_main02>
   <div class="box003">
     <h3>質問、エントリーはLINEでお願いします</h3>
      <div class="d-flex flex-column align-items-center gap-3 mb-4" >
-            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
+           <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer"
+   class="btn"
+   aria-label="LINEで問い合わせる"
+   style="background-color:#00B900; color:#fff; font-size:1.5rem; width:100%; max-width:100%;">
+  <b>LINEで連絡 ココをクリック</b>
+</a>
         </div>   
   </div>
   
