@@ -4,6 +4,7 @@ import uuid
 import os
 from PIL import Image
 from io import BytesIO
+from urllib.parse import urlparse
 
 def resize_image(image_file, max_size=(800, 800)):
     """画像を指定されたサイズに縮小"""
@@ -73,3 +74,36 @@ def upload_image_to_s3(file):
     except Exception as e:
         print(f"Error uploading to S3: {e}")
         return None
+
+def delete_image_from_s3(image_url):
+    """S3から画像を削除"""
+    if not image_url:
+        return
+    
+    try:
+        # URLから S3のキー（パス）を抽出
+        parsed_url = urlparse(image_url)
+        s3_key = parsed_url.path.lstrip('/')  # 先頭の'/'を除去
+        
+        # S3クライアントを初期化
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION', 'ap-northeast-1')
+        )
+        
+        bucket_name = os.getenv('S3_BUCKET_NAME')
+        
+        # S3から画像を削除
+        s3_client.delete_object(
+            Bucket=bucket_name,
+            Key=s3_key
+        )
+        
+        print(f"S3画像削除成功: {s3_key}")
+        return True
+        
+    except Exception as e:
+        print(f"S3画像削除エラー: {str(e)}")
+        raise

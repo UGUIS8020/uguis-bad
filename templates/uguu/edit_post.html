@@ -1,31 +1,148 @@
 {% extends "base.html" %}
 
+{% block title %}投稿編集 - うぐすたぐらむ{% endblock %}
+
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <div class="max-w-2xl mx-auto">
-        <h1 class="text-2xl font-bold mb-6">投稿を編集</h1>
-        
-        <form method="POST" class="bg-white rounded-lg shadow p-6">
-            <div class="mb-4">
-                <label for="content" class="block text-gray-700 text-sm font-bold mb-2">
-                    投稿内容
-                </label>
-                <textarea name="content" id="content" rows="6" 
-                          class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                          required>{{ post.content }}</textarea>
-            </div>
-            
-            <div class="flex items-center justify-between">
-                <button type="submit" 
-                        class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600">
-                    更新する
-                </button>
-                <a href="{{ url_for('timeline.show_timeline') }}" 
-                   class="text-gray-600 hover:text-gray-800">
-                    キャンセル
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-md-10">
+            <!-- ヘッダー -->
+            <div class="d-flex align-items-center mb-4">
+                <a href="{{ url_for('uguu.show_timeline') }}" class="btn btn-outline-secondary me-3">
+                    <i class="fas fa-arrow-left"></i> 戻る
                 </a>
+                <h2 class="mb-0">📝 投稿を編集</h2>
             </div>
-        </form>
+
+            <!-- 編集フォーム -->
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <form method="POST">
+                        <!-- 投稿内容入力 -->
+                        <div class="mb-4">
+                            <label for="content" class="form-label fw-bold text-dark">
+                                投稿内容
+                            </label>
+                            <textarea class="form-control form-control-lg" 
+                                    id="content" 
+                                    name="content" 
+                                    rows="8" 
+                                    maxlength="1000" 
+                                    placeholder="何を共有しますか？"
+                                    style="resize: vertical; white-space: pre-line;"
+                                    required>{{ post.content }}</textarea>
+                            
+                            <!-- 文字数カウンター -->
+                            <div class="form-text d-flex justify-content-between">
+                                <span>改行も含めて入力できます</span>
+                                <span id="charCount" class="text-muted">0 / 1000文字</span>
+                            </div>
+                        </div>
+
+                        <!-- 現在の画像表示 -->
+                        {% if post.image_url %}
+                        <div class="mb-4">
+                            <label class="form-label fw-bold text-dark">添付画像</label>
+                            <div class="border rounded p-3 bg-light">
+                                <img src="{{ post.image_url }}" 
+                                     alt="投稿画像" 
+                                     class="img-fluid rounded shadow-sm" 
+                                     style="max-height: 300px; object-fit: contain;">
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> 
+                                        画像の変更はできません。新しい画像を投稿したい場合は新規投稿をご利用ください。
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- 投稿情報 -->
+                        <div class="mb-4 p-3 bg-light rounded">
+                            <small class="text-muted">
+                                <i class="fas fa-clock"></i> 
+                                作成日時: {{ post.created_at.split('T')[0] }} {{ post.created_at.split('T')[1].split('.')[0] }}
+                                {% if post.updated_at != post.created_at %}
+                                <br>
+                                <i class="fas fa-edit"></i> 
+                                最終更新: {{ post.updated_at.split('T')[0] }} {{ post.updated_at.split('T')[1].split('.')[0] }}
+                                {% endif %}
+                            </small>
+                        </div>
+
+                        <!-- アクションボタン -->
+                        <div class="d-flex gap-3 justify-content-end">
+                            <a href="{{ url_for('uguu.show_timeline') }}" 
+                               class="btn btn-outline-secondary btn-lg px-4">
+                                <i class="fas fa-times"></i> キャンセル
+                            </a>
+                            <button type="submit" 
+                                    class="btn btn-primary btn-lg px-4"
+                                    id="submitBtn">
+                                <i class="fas fa-save"></i> 更新する
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- ヘルプメッセージ -->
+            <div class="mt-3">
+                <div class="alert alert-info">
+                    <i class="fas fa-lightbulb"></i>
+                    <strong>編集のヒント:</strong>
+                    <ul class="mb-0 mt-2">
+                        <li>Enter キーで改行できます</li>
+                        <li>文字数は1000文字以内で入力してください</li>
+                        <li>編集内容は即座に反映されます</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+
+<!-- 文字数カウンターのJavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const contentTextarea = document.getElementById('content');
+    const charCountSpan = document.getElementById('charCount');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    function updateCharCount() {
+        const currentLength = contentTextarea.value.length;
+        charCountSpan.textContent = `${currentLength} / 1000文字`;
+        
+        // 文字数に応じて色を変更
+        if (currentLength > 900) {
+            charCountSpan.className = 'text-danger fw-bold';
+        } else if (currentLength > 700) {
+            charCountSpan.className = 'text-warning';
+        } else {
+            charCountSpan.className = 'text-muted';
+        }
+        
+        // 文字数制限チェック
+        if (currentLength > 1000) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 文字数オーバー';
+            submitBtn.className = 'btn btn-danger btn-lg px-4';
+        } else if (currentLength === 0) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-save"></i> 内容を入力してください';
+            submitBtn.className = 'btn btn-secondary btn-lg px-4';
+        } else {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-save"></i> 更新する';
+            submitBtn.className = 'btn btn-primary btn-lg px-4';
+        }
+    }
+    
+    // 初期表示時とテキスト変更時に文字数を更新
+    updateCharCount();
+    contentTextarea.addEventListener('input', updateCharCount);
+    contentTextarea.addEventListener('keyup', updateCharCount);
+});
+</script>
 {% endblock %}

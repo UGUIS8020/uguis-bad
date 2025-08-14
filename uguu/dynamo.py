@@ -3,9 +3,9 @@ import os
 from datetime import datetime
 import uuid
 from dotenv import load_dotenv
+from boto3.dynamodb.conditions import Key, Attr
 
 load_dotenv()
-
 
 class DynamoDB:
     def __init__(self):
@@ -19,32 +19,18 @@ class DynamoDB:
         self.users_table = self.dynamodb.Table('bad-users')
         print("DynamoDB tables initialized")
 
-
-    def initialize_tables(self):
-        """テーブル構造を確認・表示する"""
-        try:
-            # Usersテーブルの構造を確認
-            users_desc = self.users_table.meta.client.describe_table(
-                TableName=self.users_table.name
-            )
-            print("Users table structure:")
-            print(f"Key Schema: {users_desc['Table']['KeySchema']}")
-            
-            # Postsテーブルの構造を確認
-            posts_desc = self.posts_table.meta.client.describe_table(
-                TableName=self.posts_table.name
-            )
-            print("Posts table structure:")
-            print(f"Key Schema: {posts_desc['Table']['KeySchema']}")
-            
-        except Exception as e:
-            print(f"Error checking table structure: {e}")
-
     def get_posts(self, limit=20):
+        """投稿一覧を取得（PK/SK構造対応版）"""
         try:
             print("Starting to fetch posts...")
             
-            response = self.posts_table.scan()
+            # PK/SK構造に対応したクエリ
+            response = self.posts_table.scan(
+                FilterExpression="begins_with(SK, :metadata)",
+                ExpressionAttributeValues={
+                    ':metadata': 'METADATA#'
+                }
+            )
             posts = response.get('Items', [])
             print(f"Found {len(posts)} posts")
             
@@ -56,15 +42,12 @@ class DynamoDB:
                         print(f"Processing post for user: {user_id}")
                         
                         try:
-                            # user#user_id 形式で検索
                             user_response = self.users_table.get_item(
                                 Key={
-                                    'user#user_id': user_id  # このキーで直接検索
+                                    'user#user_id': user_id
                                 }
                             )
                             user = user_response.get('Item', {})
-                            
-                            print(f"Found user data: {user}")  # デバッグ用
                             
                             enriched_post = {
                                 'post_id': post.get('post_id'),
@@ -105,69 +88,73 @@ class DynamoDB:
             import traceback
             print(traceback.format_exc())
             return []
-        
-    def inspect_tables(self):
-        """テーブル構造を確認するヘルパー関数"""
-        try:
-            # usersテーブルの構造確認
-            users_desc = self.users_table.meta.client.describe_table(
-                TableName=self.users_table.name
-            )
-            print("Users table structure:")
-            print(users_desc['Table']['KeySchema'])
 
-            # postsテーブルの構造確認
-            posts_desc = self.posts_table.meta.client.describe_table(
-                TableName=self.posts_table.name
-            )
-            print("Posts table structure:")
-            print(posts_desc['Table']['KeySchema'])
-            
-        except Exception as e:
-            print(f"Error inspecting tables: {e}")
-        
-    def check_user_table_schema(self):
-        """ユーザーテーブルのスキーマを確認"""
+    def get_post(self, post_id):
+        """特定の投稿を取得（PK/SK構造対応）"""
         try:
-            table_description = self.users_table.meta.client.describe_table(
-                TableName=self.users_table.name
-            )
-            print("User table schema:")
-            print(table_description)
+            print(f"Fetching post: {post_id}")
             
-            # テストユーザーで取得を試みる
-            test_response = self.users_table.get_item(
-                Key={'id': '8ffbb8ef-5870-47f5-a91d-296b464ee005'}
-            )
-            print("Test user response:")
-            print(test_response)
-            
-        except Exception as e:
-            print(f"Error checking user table schema: {str(e)}")
-
-    def get_user_by_id(self, user_id):
-        """ユーザー情報を取得する補助メソッド"""
-        try:
-            print(f"Attempting to fetch user with user#user_id: {user_id}")  # デバッグ追加
-            
-            response = self.users_table.get_item(
-                Key={'user#user_id': user_id}
+            # PK/SK構造に合わせて投稿を取得
+            response = self.posts_table.get_item(
+                Key={
+                    'PK': f"POST#{post_id}",
+                    'SK': f"METADATA#{post_id}"
+                }
             )
             
-            print(f"DynamoDB response: {response}")  # デバッグ追加
+            print(f"DynamoDB response: {response}")
             
-            if 'Item' in response:
-                user = response['Item']
-                print(f"Found user data: {user}")  # デバッグ追加
-                return user
+            if 'Item' not in response:
+                print(f"Post not found: {post_id}")
+                return None
+                
+            post = response['Item']
+            print(f"Raw post data: {post}")
             
-            print(f"User not found with ID: {user_id}")  # デバッグ追加
-            return None
+            # ユーザー情報を取得して投稿を充実させる
+            user_id = post.get('user_id')
+            if user_id:
+                try:
+                    user_response = self.users_table.get_item(
+                        Key={'user#user_id': user_id}
+                    )
+                    user = user_response.get('Item', {})
+                    
+                    enriched_post = {
+                        'post_id': post.get('post_id', post_id),
+                        'content': post.get('content'),
+                        'image_url': post.get('image_url'),
+                        'created_at': post.get('created_at'),
+                        'updated_at': post.get('updated_at', post.get('created_at')),
+                        'user_id': user_id,
+                        'display_name': user.get('display_name', 'Unknown User'),
+                        'user_name': user.get('user_name', 'Unknown')
+                    }
+                    return enriched_post
+                    
+                except Exception as e:
+                    print(f"Error fetching user: {str(e)}")
+                    # ユーザー情報取得失敗時のフォールバック
+                    fallback_post = {
+                        'post_id': post.get('post_id', post_id),
+                        'content': post.get('content'),
+                        'image_url': post.get('image_url'),
+                        'created_at': post.get('created_at'),
+                        'updated_at': post.get('updated_at', post.get('created_at')),
+                        'user_id': user_id,
+                        'display_name': '不明なユーザー',
+                        'user_name': 'Unknown'
+                    }
+                    return fallback_post
+            
+            # user_idがない場合
+            post['post_id'] = post.get('post_id', post_id)
+            return post
                 
         except Exception as e:
-            print(f"Error in get_user_by_id: {str(e)}")
+            print(f"投稿取得エラー: {str(e)}")
             import traceback
-            print(traceback.format_exc())  # スタックトレース出力
+            print(traceback.format_exc())
             return None
 
     def create_post(self, user_id, content, image_url=None):
@@ -177,8 +164,8 @@ class DynamoDB:
             timestamp = datetime.now().isoformat()
             
             post = {
-                'PK': f"POST#{post_id}",  # パーティションキー
-                'SK': f"METADATA#{post_id}",  # ソートキー
+                'PK': f"POST#{post_id}",
+                'SK': f"METADATA#{post_id}",
                 'post_id': post_id,
                 'user_id': user_id,
                 'content': content,
@@ -186,7 +173,7 @@ class DynamoDB:
                 'created_at': timestamp,
                 'updated_at': timestamp
             }
-            print(f"Post data: {post}")  # デバッグログ
+            print(f"Post data: {post}")
             
             self.posts_table.put_item(Item=post)
             print("Post created successfully in DynamoDB")
@@ -201,7 +188,10 @@ class DynamoDB:
         try:
             timestamp = datetime.now().isoformat()
             self.posts_table.update_item(
-                Key={'post_id': post_id},
+                Key={
+                    'PK': f"POST#{post_id}",
+                    'SK': f"METADATA#{post_id}"
+                },
                 UpdateExpression='SET content = :content, updated_at = :updated_at',
                 ExpressionAttributeValues={
                     ':content': content,
@@ -213,59 +203,94 @@ class DynamoDB:
             print(f"Error updating post: {e}")
             raise
 
-    def create_posts_table(self):
-        """postsテーブルが存在しない場合は作成"""
+    def delete_post(self, post_id):
+        """投稿を削除"""
         try:
-            existing_tables = self.dynamodb.meta.client.list_tables()['TableNames']
-            if 'post' not in existing_tables:
-                table = self.dynamodb.create_table(
-                    TableName='post',
-                    KeySchema=[
-                        {
-                            'AttributeName': 'PK',
-                            'KeyType': 'HASH'
-                        },
-                        {
-                            'AttributeName': 'SK',
-                            'KeyType': 'RANGE'
-                        }
-                    ],
-                    AttributeDefinitions=[
-                        {
-                            'AttributeName': 'PK',
-                            'AttributeType': 'S'
-                        },
-                        {
-                            'AttributeName': 'SK',
-                            'AttributeType': 'S'
-                        },
-                        {
-                            'AttributeName': 'GSI1PK',
-                            'AttributeType': 'S'
-                        },
-                        {
-                            'AttributeName': 'GSI1SK',
-                            'AttributeType': 'S'
-                        }
-                    ],
-                    GlobalSecondaryIndexes=[
-                        {
-                            'IndexName': 'GSI1',
-                            'KeySchema': [
-                                {'AttributeName': 'GSI1PK', 'KeyType': 'HASH'},
-                                {'AttributeName': 'GSI1SK', 'KeyType': 'RANGE'}
-                            ],
-                            'Projection': {'ProjectionType': 'ALL'}
-                        }
-                    ],
-                    BillingMode='PAY_PER_REQUEST'
-                )
-                table.meta.client.get_waiter('table_exists').wait(TableName='posts')
-                print("posts table created successfully")
-                return True
+            # 投稿を検索して実際のキー構造を確認
+            response = self.posts_table.scan()
+            posts = response.get('Items', [])
+            
+            target_post = None
+            for post in posts:
+                if str(post.get('post_id')) == str(post_id):
+                    target_post = post
+                    break
+            
+            if not target_post:
+                raise Exception(f"Post {post_id} not found")
+            
+            # 実際のキー構造に基づいて削除
+            if 'PK' in target_post and 'SK' in target_post:
+                # PK/SK構造の場合
+                delete_key = {
+                    'PK': target_post['PK'],
+                    'SK': target_post['SK']
+                }
+            else:
+                # post_id直接の場合
+                delete_key = {
+                    'post_id': post_id
+                }
+            
+            response = self.posts_table.delete_item(Key=delete_key)
+            return response
+            
         except Exception as e:
-            print(f"Error creating posts table: {e}")
-            raise
+            raise Exception(f"投稿削除エラー: {str(e)}")
+
+    def delete_post_likes(self, post_id):
+        """投稿に関連するいいねを削除"""
+        try:
+            print(f"Deleting likes for post: {post_id}")
+            
+            response = self.posts_table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :like)",
+                ExpressionAttributeValues={
+                    ':pk': f"POST#{post_id}",
+                    ':like': 'LIKE#'
+                }
+            )
+            
+            for like in response.get('Items', []):
+                self.posts_table.delete_item(
+                    Key={
+                        'PK': like['PK'],
+                        'SK': like['SK']
+                    }
+                )
+            
+            print(f"Deleted {len(response.get('Items', []))} likes")
+            return True
+        except Exception as e:
+            print(f"いいね削除エラー: {str(e)}")
+            return False
+
+    def delete_post_replies(self, post_id):
+        """投稿に関連する返信を削除"""
+        try:
+            print(f"Deleting replies for post: {post_id}")
+            
+            response = self.posts_table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :reply)",
+                ExpressionAttributeValues={
+                    ':pk': f"POST#{post_id}",
+                    ':reply': 'REPLY#'
+                }
+            )
+            
+            for reply in response.get('Items', []):
+                self.posts_table.delete_item(
+                    Key={
+                        'PK': reply['PK'],
+                        'SK': reply['SK']
+                    }
+                )
+            
+            print(f"Deleted {len(response.get('Items', []))} replies")
+            return True
+        except Exception as e:
+            print(f"返信削除エラー: {str(e)}")
+            return False
 
     def like_post(self, post_id, user_id):
         """投稿にいいねを追加/削除"""
@@ -344,5 +369,5 @@ class DynamoDB:
             print(f"Error checking like status: {e}")
             return False
 
-# インスタンスを作成
+# 重要: インスタンスを作成
 db = DynamoDB()

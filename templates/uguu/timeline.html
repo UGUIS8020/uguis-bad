@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
+{# SEO最適化 #}
+{% block title %}うぐすたぐらむ{% endblock %}
+{% block description %}鶯バドミントンクラブの公式コミュニティ「うぐすたぐらむ」。練習情報、試合結果、メンバー交流など最新情報をお届けします。{% endblock %}
+{% block keywords %}鶯バドミントン,バドミントンクラブ,うぐすたぐらむ,練習,試合,コミュニティ,掲示板{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
     <div class="row">
@@ -11,17 +16,16 @@
         <!-- メインコンテンツエリア (8) -->
         <div class="col-10">
             <div class="d-flex my-3">
-                <a href="#" class="nav-link text-dark me-3">
-                    <i class="fas fa-home"></i> ホーム
-                </a>
                 <a href="{{ url_for('post.create_post') }}" class="nav-link text-dark">
                     <i class="fas fa-pencil-alt"></i> 新規投稿
                 </a>
             </div>
+            
             <!-- 投稿一覧 -->
             <div class="posts">
                 {% for post in posts %}
                 <div class="card mb-4 mt-2 shadow-sm">
+                    <!-- カードヘッダー -->
                     <div class="card-header bg-white">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -32,14 +36,47 @@
                                     </a>                                    
                                 </h5>
                             </div>
-                            <small class="text-muted">
-                                {{ post.created_at.split('T')[0] }}
-                                {{ post.created_at.split('T')[1].split('.')[0] }}
-                            </small>
+                            <div class="d-flex align-items-center gap-2">
+                                <small class="text-muted">
+                                    {{ post.created_at.split('T')[0] }}
+                                    {{ post.created_at.split('T')[1].split('.')[0] }}
+                                </small>
+                                
+                                <!-- 投稿者本人のみ編集・削除ボタンを表示 -->
+                                {% if current_user.is_authenticated and current_user.id == post.user_id %}
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" 
+                                            type="button" 
+                                            data-bs-toggle="dropdown" 
+                                            aria-expanded="false">
+                                        <i class="fas fa-ellipsis-h"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li>
+                                            <a class="dropdown-item" href="{{ url_for('post.edit_post', post_id=post.post_id) }}">
+                                                <i class="fas fa-edit"></i> 編集
+                                            </a>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <form method="POST" action="{{ url_for('post.delete_post', post_id=post.post_id) }}" 
+                                                class="d-inline" 
+                                                onsubmit="return confirm('この投稿を削除しますか？')">
+                                                <button type="submit" class="dropdown-item text-danger">
+                                                    <i class="fas fa-trash"></i> 削除
+                                                </button>
+                                            </form>
+                                        </li>
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
+                    
+                    <!-- カードボディ -->
                     <div class="card-body">
-                        <p class="card-text">{{ post.content }}</p>
+                        <p class="card-text" style="white-space: pre-line;">{{ post.content }}</p>
                         {% if post.image_url %}
                         <div class="mt-2">
                             <img src="{{ post.image_url }}" 
@@ -49,6 +86,7 @@
                         </div>
                         {% endif %}
 
+                        <!-- アクションボタン（いいね・返信） -->
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <div class="btn-group">
                                 <!-- いいねボタン -->
@@ -73,7 +111,7 @@
                                         </button>
                                     </div>
                                 </div>
-                                {% endif %}
+                                {% endif %}          
 
                                 <!-- 返信ボタン -->
                                 {% if post.post_id %}
