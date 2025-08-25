@@ -141,7 +141,9 @@ def get_schedules_with_formatting():
                     'participants': participants,  # IDのみ保持
                     'status': schedule.get('status', 'active'),
                     'description': schedule.get('description', ''),
-                    'comment': schedule.get('comment', '')
+                    'comment': schedule.get('comment', ''),
+                    'tara_participants': schedule.get('tara_participants', []),
+                    'tara_count': len(schedule.get('tara_participants', []))
                 }
                 
                 formatted_schedules.append(formatted_schedule)

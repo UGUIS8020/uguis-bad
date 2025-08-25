@@ -220,27 +220,25 @@
                                     {% else %}
                                         参加
                                     {% endif %}
+                                </button> 
+                                 
+                                <!-- 「たら」ボタン -->
+                                <button class="btn btn-sm text-nowrap
+                                    {% if current_user.id in schedule.get('tara_participants', []) %}
+                                        btn-warning
+                                    {% else %}
+                                        btn-outline-warning
+                                    {% endif %}"
+                                    data-schedule-id="{{ schedule.schedule_id }}"
+                                    data-schedule-date="{{ schedule.date }}"
+                                    onclick="taraSchedule(this)">
+                                    
+                                    {% if current_user.id in schedule.get('tara_participants', []) %}
+                                        たら済 ✓
+                                    {% else %}
+                                        たら
+                                    {% endif %}
                                 </button>
-                                
-                                 <!-- 「たら」ボタン（条件付き参加希望） -->
-                                {% if current_user.is_authenticated %}
-                                    <button
-                                        class="btn btn-sm btn-outline-warning text-nowrap tara-button
-                                        {% if current_user.id in schedule.get('tara_participants', []) %}
-                                            active
-                                        {% endif %}"
-                                        data-schedule-id="{{ schedule.schedule_id }}" 
-                                        data-schedule-date="{{ schedule.date }}" 
-                                        onclick="taraSchedule(this)"
-                                        title="いけたらいく">
-                                        
-                                        {% if current_user.id in schedule.get('tara_participants', []) %}
-                                            たら済
-                                        {% else %}
-                                            たら
-                                        {% endif %}
-                                    </button>
-                                {% endif %}
                         </h2>
                         
                         {% if current_user.is_authenticated and current_user.administrator %}
