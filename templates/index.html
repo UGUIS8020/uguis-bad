@@ -220,9 +220,10 @@
                                     {% else %}
                                         参加
                                     {% endif %}
-                                </button> 
-                                 
+                                </button>                                  
+                                
                                 <!-- 「たら」ボタン -->
+                            {% if current_user.is_authenticated %}
                                 <button class="btn btn-sm text-nowrap
                                     {% if current_user.id in schedule.get('tara_participants', []) %}
                                         btn-warning
@@ -239,6 +240,12 @@
                                         たら
                                     {% endif %}
                                 </button>
+                            {% else %}
+                                <!-- ログインしていない場合は無効なボタンを表示 -->
+                                <button class="btn btn-sm text-nowrap btn-secondary disabled" disabled>
+                                    たら
+                                </button>
+                            {% endif %}
                         </h2>
                         
                         {% if current_user.is_authenticated and current_user.administrator %}
@@ -252,36 +259,59 @@
                                 <h5 class="mb-3">
                                     <i class="bi bi-people-fill text-primary"></i>
                                     <a href="{{ url_for('day_of_participants', date=schedule.date) }}" class="text-decoration-none text-dark">
-                                        参加者一覧
+                                        参加者一覧 ({{ schedule.participants_count }}人)
                                     </a>
                                 </h5>
-                            {% if schedule.participants_info %}                                             
-
-
-                                <div class="row">
-                                {% for participant in schedule.participants_info %}
-                                    <div class="col-md-3 col-sm-4 mb-1">
-                                    <div class="card">
-                                        <div class="card-body py-2">
-                                            
-                                            <span class="participant-name">
-                                                {{ participant.display_name }}
-
+                                {% if schedule.participants_info %}                                             
+                                    <div class="row">
+                                    {% for participant in schedule.participants_info %}
+                                        <div class="col-md-3 col-sm-4 mb-1">
+                                        <div class="card">
+                                            <div class="card-body py-2">
+                                                <span class="participant-name">
+                                                    {{ participant.display_name }}
+                                                </span>
+                                            </div>
                                         </div>
+                                        </div>
+                                    {% endfor %}
                                     </div>
+                                {% else %}
+                                    <p class="text-muted">まだ参加者がいません</p>
+                                {% endif %}
+                                
+                                <!-- 「たら」参加者一覧を追加 -->
+                                {% if schedule.tara_participants_info %}
+                                    <h5 class="mb-3 mt-4">
+                                        <i class="bi bi-question-circle text-warning"></i>
+                                        たら ({{ schedule.tara_count }}人)
+                                    </h5>
+                                    <div class="row">
+                                    {% for tara_participant in schedule.tara_participants_info %}
+                                        <div class="col-md-3 col-sm-4 mb-1">
+                                        <div class="card border-warning">
+                                            <div class="card-body py-2">
+                                                <span class="participant-name text-warning">
+                                                    {{ tara_participant.display_name }}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        </div>
+                                    {% endfor %}
                                     </div>
-                                {% endfor %}
-                                </div>
-                            {% else %}
-                                <p class="text-muted">まだ参加者がいません</p>
-                            {% endif %}
+                                {% else %}
+                                    <h5 class="mb-2 mt-4">
+                                        <i class="bi bi-question-circle text-warning"></i>
+                                        たら (0人)
+                                    </h5>
+                                    <p class="text-muted">たらはいません</p>
+                                {% endif %}
                             </div>
                         </div>
                         </div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
+                    {% endif %}
                 </div>
+                {% endfor %}
             </div>
         </section>
     </div>
