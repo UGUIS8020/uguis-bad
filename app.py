@@ -821,8 +821,7 @@ def format_date(value):
 @app.route('/schedules')
 def get_schedules():
     schedules = get_schedules_with_formatting()
-    return jsonify(schedules) 
-    
+    return jsonify(schedules)     
 
 @app.route("/", methods=['GET'])
 @app.route("/index", methods=['GET'])
@@ -860,6 +859,36 @@ def index():
                     pass
 
             schedule["participants_info"] = participants_info
+
+            # ★ 「たら」参加者情報処理を追加
+            tara_participants_info = []
+            raw_tara_participants = schedule.get("tara_participants", [])
+            tara_user_ids = []
+
+            # 「たら」参加者のuser_id抽出
+            for item in raw_tara_participants:
+                if isinstance(item, dict) and "S" in item:
+                    tara_user_ids.append(item["S"])
+                elif isinstance(item, str):
+                    tara_user_ids.append(item)
+
+            # 「たら」参加者の詳細情報取得
+            for user_id in tara_user_ids:
+                try:
+                    res = user_table.get_item(Key={"user#user_id": user_id})
+                    user = res.get("Item")
+                    if user:
+                        tara_participants_info.append({
+                            "user_id": user["user#user_id"],
+                            "display_name": user.get("display_name", "不明")
+                        })
+                except Exception:
+                    pass
+
+            # スケジュールに「たら」参加者情報を追加
+            schedule["tara_participants_info"] = tara_participants_info
+            schedule["tara_participants"] = tara_user_ids  # フロントエンド用
+            schedule["tara_count"] = len(tara_user_ids)  # 「たら」参加者数
 
         image_files = [
             'images/top001.jpg',
@@ -1124,6 +1153,92 @@ def join_schedule(schedule_id):
     except Exception as e:
         app.logger.error(f"Unexpected error in join_schedule: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': '予期しないエラーが発生しました。'}), 500
+    
+@app.route('/tara_join', methods=['POST'])
+@login_required
+def tara_join():
+    """「たら」参加（条件付き参加希望）の登録・解除"""
+    try:
+        data = request.get_json()
+        schedule_id = data.get('schedule_id')
+        schedule_date = data.get('schedule_date')
+        
+        if not schedule_id or not schedule_date:
+            return jsonify({'status': 'error', 'message': '必要なデータが不足しています'}), 400
+        
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        user_id = current_user.id
+        
+        # 現在のスケジュール情報を取得
+        response = schedule_table.get_item(
+            Key={
+                'schedule_id': schedule_id,
+                'date': schedule_date
+            }
+        )
+        
+        if 'Item' not in response:
+            return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません'}), 404
+            
+        schedule = response['Item']
+        
+        # 現在のたら参加者を取得
+        tara_participants = schedule.get('tara_participants', [])
+        
+        # 「たら」参加の切り替え
+        is_tara_joined = user_id in tara_participants
+        
+        if is_tara_joined:
+            # 「たら」参加解除
+            tara_participants.remove(user_id)
+            message = '「たら」参加を解除しました'
+        else:
+            # 「たら」参加追加
+            tara_participants.append(user_id)
+            message = '「たら」参加しました'
+            
+            # 履歴保存
+            try:
+                history_table = app.dynamodb.Table("bad-users-history")
+                history_table.put_item(
+                    Item={
+                        "user_id": user_id,
+                        "joined_at": datetime.utcnow().isoformat(),
+                        "schedule_id": schedule_id,
+                        "date": schedule_date,
+                        "action": "tara_join",
+                        "location": schedule.get("venue", "未設定")
+                    }
+                )
+            except Exception as e:
+                app.logger.error(f"[たら履歴保存エラー]: {e}")
+        
+        # DynamoDBを更新（シンプルにたら参加者のみ）
+        schedule_table.update_item(
+            Key={
+                'schedule_id': schedule_id,
+                'date': schedule_date
+            },
+            UpdateExpression="SET tara_participants = :tp, updated_at = :ua",
+            ExpressionAttributeValues={
+                ':tp': tara_participants,
+                ':ua': datetime.utcnow().isoformat()
+            }
+        )
+        
+        # キャッシュのリセット
+        cache.delete_memoized(get_schedules_with_formatting)
+        
+        return jsonify({
+            'status': 'success',
+            'message': message,
+            'tara_count': len(tara_participants),
+            'is_tara_joined': not is_tara_joined  # 切り替わった後の状態
+        })
+        
+    except Exception as e:
+        app.logger.error(f"「たら」参加処理エラー: {e}")
+        return jsonify({'status': 'error', 'message': '処理中にエラーが発生しました'}), 500
 
 def previously_joined(schedule_id, user_id):
     """

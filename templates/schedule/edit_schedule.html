@@ -53,6 +53,19 @@
             {{ form.end_time(class="form-control", required=true) }}
         </div>
 
+        <!-- ★ コメント入力欄を追加 -->
+        <div class="mb-3">
+            <label for="comment" class="form-label">コメント・注意書き</label>
+            <input type="text" 
+                   class="form-control" 
+                   id="comment" 
+                   name="comment" 
+                   maxlength="100" 
+                   placeholder="持ち物、注意事項など（100文字以内）"
+                   value="{{ schedule.get('comment', '') }}">
+            <div class="form-text">参加者への連絡事項があれば入力してください</div>
+        </div>
+
         <!-- ステータス選択を追加 -->
         <div class="mb-3">
             <label for="status">ステータス</label>

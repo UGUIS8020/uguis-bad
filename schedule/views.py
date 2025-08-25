@@ -75,6 +75,7 @@ def admin_schedules():
             else:
                 # court フィールドがない場合のフォールバック
                 court_value = request.form.get('court', 'unknown')
+            comment_value = request.form.get('comment', '').strip()
 
             schedule_data = {
                 'schedule_id': schedule_id,
@@ -85,6 +86,7 @@ def admin_schedules():
                 'start_time': form.start_time.data,
                 'end_time': form.end_time.data,
                 'max_participants': form.max_participants.data,
+                'comment': comment_value,
                 'created_at': datetime.now().isoformat(),
                 'participants_count': 0,
                 'status': form.status.data
@@ -169,8 +171,17 @@ def edit_schedule(schedule_id):
             form.end_time.data = schedule['end_time']
             form.status.data = schedule.get('status', 'active')
             form.max_participants.data = schedule.get('max_participants', 10)
+            # ★ コメントの初期値設定を追加
+            if hasattr(form, 'comment'):
+                form.comment.data = schedule.get('comment', '')
             
         elif request.method == 'POST':
+            print("=" * 60)  # デバッグ用
+            print("🚨 編集画面POSTリクエスト受信")
+            print(f"📋 フォームデータ: {dict(request.form)}")
+            print(f"🔍 comment フィールド: '{request.form.get('comment')}'")
+            print("=" * 60)
+            
             if form.validate_on_submit():
                 try:
                     # 参加者数のチェック
@@ -184,7 +195,15 @@ def edit_schedule(schedule_id):
                             schedule_id=schedule_id
                         )
 
-                    # UpdateItemを使用して特定のフィールドを更新
+                    # ★ コメントの取得
+                    comment_value = ''
+                    if hasattr(form, 'comment') and form.comment.data:
+                        comment_value = form.comment.data.strip()
+                    else:
+                        # フォームにcommentフィールドがない場合の安全な取得
+                        comment_value = request.form.get('comment', '').strip()
+
+                    # UpdateItemを使用して特定のフィールドを更新（コメントを追加）
                     table.update_item(
                         Key={
                             'schedule_id': schedule_id,
@@ -192,7 +211,7 @@ def edit_schedule(schedule_id):
                         },
                         UpdateExpression="SET day_of_week = :dow, venue = :v, start_time = :st, "
                                        "end_time = :et, max_participants = :mp, "
-                                       "updated_at = :ua, #status = :s",
+                                       "updated_at = :ua, #status = :s, #comment = :c",  # ★ commentを追加
                         ExpressionAttributeValues={
                             ':dow': form.day_of_week.data,
                             ':v': form.venue.data,
@@ -200,25 +219,35 @@ def edit_schedule(schedule_id):
                             ':et': form.end_time.data,
                             ':mp': form.max_participants.data,
                             ':ua': datetime.now().isoformat(),
-                            ':s': form.status.data
+                            ':s': form.status.data,
+                            ':c': comment_value  # ★ コメント値を追加
                         },
                         ExpressionAttributeNames={
-                            '#status': 'status'  # statusは予約語なので別名を使用
+                            '#status': 'status',  # statusは予約語なので別名を使用
+                            '#comment': 'comment'  # ★ commentも予約語なので別名を追加
                         }
                     )                    
                     
+                    print(f"✅ スケジュール更新成功（ID: {schedule_id}）")
                     flash('スケジュールを更新しました', 'success')
                     return redirect(url_for('index'))
                     
-                except ClientError as e:                    
+                except ClientError as e:
+                    print(f"❌ DynamoDB更新エラー: {e}")
                     flash('スケジュールの更新中にエラーが発生しました', 'error')
             else:
+                print("⚠️ 編集フォームバリデーション失敗")
+                print(f"❌ フォームエラー: {form.errors}")
                 logging.error(f"Form validation errors: {form.errors}")
                 flash('入力内容に問題があります', 'error')
             
     except ClientError as e:        
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
+    
+    # ★ テンプレートに渡すscheduleデータにcommentが含まれていることを確認
+    if 'comment' not in schedule:
+        schedule['comment'] = ''
     
     return render_template(
         'schedule/edit_schedule.html', 

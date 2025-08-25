@@ -137,8 +137,19 @@
     <div class="accordion" id="scheduleAccordion">
         {% for schedule in schedules %}
         <div class="accordion-item">
+                                    
+                    <!-- イベント個別コメント・注意書き（中央揃え・暖色） -->
+                    {% if schedule.comment %}
+                        <div class="mb-2 text-center">
+                            <div class="fw-bold text-warning">
+                                <i class="fas fa-info-circle me-1"></i>
+                                {{ schedule.comment }}
+                            </div>
+                        </div>
+                    {% endif %}
+                                   
             <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
-                <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center justify-content-between">                    
                     <!-- 日付と会場情報 -->
                     <div class="d-flex align-items-center m-0 w-100">
                         
@@ -167,14 +178,16 @@
                                     
                                 </div>
                                 
-                                <div>
+                                
+                                <div>                                
+
                                     募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}
                                     <!-- 募集状態 -->
                                     {% if schedule.participants_count >= schedule.max_participants %}
                                         <div class="badge bg-warning text-dark">満員御礼</div>
                                     {% else %}
                                         <div class="badge bg-success">募集中</div>
-                                    {% endif %}
+                                    {% endif %}                                    
                                 </div>
                         
                                 
@@ -207,7 +220,27 @@
                                     {% else %}
                                         参加
                                     {% endif %}
-                                </button>                         
+                                </button>
+                                
+                                 <!-- 「たら」ボタン（条件付き参加希望） -->
+                                {% if current_user.is_authenticated %}
+                                    <button
+                                        class="btn btn-sm btn-outline-warning text-nowrap tara-button
+                                        {% if current_user.id in schedule.get('tara_participants', []) %}
+                                            active
+                                        {% endif %}"
+                                        data-schedule-id="{{ schedule.schedule_id }}" 
+                                        data-schedule-date="{{ schedule.date }}" 
+                                        onclick="taraSchedule(this)"
+                                        title="いけたらいく">
+                                        
+                                        {% if current_user.id in schedule.get('tara_participants', []) %}
+                                            たら済
+                                        {% else %}
+                                            たら
+                                        {% endif %}
+                                    </button>
+                                {% endif %}
                         </h2>
                         
                         {% if current_user.is_authenticated and current_user.administrator %}
@@ -272,7 +305,6 @@
     </div>   
 </div>
 
-
 <script>
     async function joinSchedule(button) {
         const scheduleId = button.getAttribute('data-schedule-id');
@@ -314,6 +346,49 @@
         }
     }
 
+    // ★ 「たら」参加機能を追加
+    async function taraSchedule(button) {
+        const scheduleId = button.getAttribute('data-schedule-id');
+        const scheduleDate = button.getAttribute('data-schedule-date');
+
+        if (!scheduleId || !scheduleDate) {
+            alert('スケジュール情報が不足しています。');
+            return;
+        }
+
+        try {
+            const response = await fetch('/tara_join', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ 
+                    schedule_id: scheduleId,
+                    schedule_date: scheduleDate 
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                alert(errorData.message || 'エラーが発生しました');
+                return;
+            }
+
+            const data = await response.json();
+
+            if (data.message) {
+                alert(data.message);
+            }
+
+            // ページをリロードして変更を反映
+            location.reload();
+
+        } catch (error) {
+            console.error('「たら」参加処理エラー:', error);
+            alert('通信エラーが発生しました');
+        }
+    }
 </script>
 
         

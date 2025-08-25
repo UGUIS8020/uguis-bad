@@ -140,7 +140,8 @@ def get_schedules_with_formatting():
                     'participants_count': len(participants),
                     'participants': participants,  # IDのみ保持
                     'status': schedule.get('status', 'active'),
-                    'description': schedule.get('description', '')
+                    'description': schedule.get('description', ''),
+                    'comment': schedule.get('comment', '')
                 }
                 
                 formatted_schedules.append(formatted_schedule)
