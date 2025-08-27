@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -5,20 +6,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">    
     
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-7L7EF7JGCD"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-7L7EF7JGCD');
-</script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-7L7EF7JGCD"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-7L7EF7JGCD');
+    </script>
     
     <!-- SEO基本設定 -->
-    <title>{% block title %}{% endblock %}</title>
-    <meta name="description" content="{% block description %}{% endblock %}">
-    <meta name="keywords" content="埼玉県,越谷市,バドミントン,社会人サークル,大会,ミックスダブルス,男子ダブルス,女子ダブルス">
+    <title>{% block title %}鶯 | 越谷市バドミントンサークル{% endblock %}</title>
+    <meta name="description" content="{% block description %}埼玉県越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。{% endblock %}">
+    <meta name="keywords" content="{% block keywords %}埼玉県,越谷市,バドミントン,社会人サークル,大会,ミックスダブルス,男子ダブルス,女子ダブルス{% endblock %}">
     <meta name="robots" content="index, follow">
     <meta http-equiv="content-language" content="ja">
     <link rel="canonical" href="{{ request.url }}">
@@ -29,41 +29,41 @@
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:url" content="{{ request.url }}">
     <meta property="og:site_name" content="鶯 | 越谷市バドミントンサークル">
-    <meta property="og:image" content="https://uguis-bad.onrender.com/images/001.jpg">
+    <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="鶯バドミントンサークルのイメージ画像">
+    <meta property="og:locale" content="ja_JP">
     
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@rbn17pjAfz41575">
-    <meta name="twitter:image" content="https://uguis-bad.onrender.com/images/001.jpg">
+    <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
+    <meta name="twitter:image:alt" content="鶯バドミントンサークルのイメージ画像">
 
     <!-- Bootstrap CSS（プリロード＋onloadで読み込み） -->
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous">
-<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous"></noscript>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous">
+    <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous"></noscript>
 
-<!-- 自作CSS -->
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- 自作CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
-<!-- Font Awesome（遅延読み込み） -->
-<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" media="print" onload="this.onload=null;this.media='all'">
-<noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"></noscript>
+    <!-- Font Awesome（遅延読み込み） -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" media="print" onload="this.onload=null;this.media='all'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"></noscript>
 
-<!-- Bootstrap JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous" defer></script>
-
-    <!-- CSS -->
-    <!-- <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">    
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM" crossorigin="anonymous">
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous" defer></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"> -->
 
+    <!-- 基本構造化データ -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SportsClub",
       "name": "鶯 | 越谷市バドミントンサークル",
-      "description": "埼玉県越谷市のバドミントンサークル",
+      "description": "埼玉県越谷市のバドミントンサークル。経験者から初心者まで楽しく活動中。",
       "address": {
         "@type": "PostalAddress",
         "addressLocality": "越谷市",
@@ -71,10 +71,14 @@
         "addressCountry": "JP"
       },
       "sport": "Badminton",
-      "url": "https://uguis-bad.onrender.com/",
-      "image": "https://uguis-bad.onrender.com/images/001.jpg"
+      "url": "https://uguis-bad.shibuya8020.com/",
+      "image": "https://uguis-bad.shibuya8020.com/static/images/001.jpg",
+      "logo": "https://uguis-bad.shibuya8020.com/static/images/001.jpg"
     }
     </script>
+
+    <!-- 追加のメタタグ（ページ固有の設定） -->
+    {% block extra_meta %}{% endblock %}
       
 </head>
 
@@ -86,7 +90,7 @@
         <a class="navbar-brand fst-italic" href="{{ url_for('index') }}"><h1 class="navbar-title">鶯 badminton</h1></a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
-        </button>
+        </button>        
         
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto">
@@ -122,22 +126,11 @@
             </ul>
 
             {% if current_user.is_authenticated and current_user.administrator %}
-                <li class="nav-item">
-                    <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}" target="_blank" rel="noopener noreferrer">
-                        データ作成
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="btn btn-outline-secondary ms-2" href="{{ url_for('game.clear_test_data') }}">
-                        データ削除
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="btn btn-outline-info ms-2" href="{{ url_for('badminton_chat_logs_page') }}">
-                        ログ
-                    </a>
-                </li>
-                
+            <div class="d-flex">
+            <a class="btn btn-outline-warning ms-2" href="{{ url_for('game.create_test_data') }}" target="_blank" rel="noopener noreferrer">データ作成</a>
+            <a class="btn btn-outline-secondary ms-2" href="{{ url_for('game.clear_test_data') }}">データ削除</a>
+            <a class="btn btn-outline-info ms-2" href="{{ url_for('badminton_chat_logs_page') }}">ログ</a>
+            </div>
             {% endif %}
             
             <ul class="navbar-nav ms-auto">
@@ -173,10 +166,20 @@
     </nav>      
   </header>
 
-  {% from "_formhelpers.html" import render_field %}
-  {% for message in get_flashed_messages() %}
-  <div class="alert alert-info">{{ message }}</div>
-  {% endfor %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="container mt-3">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category in ['error','danger'] else category|default('info') }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+                </div>
+            {% endif %}
+            {% endwith %}
+
+  {% from "_formhelpers.html" import render_field %} 
 
   {% block content %}
   {% endblock %}
