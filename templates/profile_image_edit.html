@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>プロフィールアイコン設定</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .profile-image-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .profile-image {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid #28a745;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .profile-image:hover {
+            opacity: 0.8;
+            transform: scale(1.05);
+        }
+        
+        .image-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .profile-image-container:hover .image-overlay {
+            opacity: 1;
+        }
+        
+        .crop-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 3px solid #28a745;
+            background: #f8f9fa;
+        }
+        
+        .crop-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            cursor: move;
+            transition: transform 0.1s ease;
+        }
+        
+        .crop-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+        }
+        
+        .crop-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .zoom-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .zoom-slider {
+            width: 150px;
+        }
+        
+        .crop-section {
+            display: none;
+            animation: slideIn 0.5s ease;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .image-guidelines {
+            background: #f8f9fa;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .preview-section {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .btn-success-custom {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            border: none;
+            padding: 12px 30px;
+            font-weight: bold;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-success-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <!-- ヘッダー -->
+                <div class="text-center mb-5">                  
+                    
+                </div>
+
+                <div class="card shadow-lg border-0">
+                    <div class="card-body p-5">
+                        <!-- 現在のプロフィール画像 -->
+                        <div class="text-center mb-4">
+                            <h4 class="mb-3">現在のプロフィール画像</h4>
+                            <div class="profile-image-container">
+                                <img src="https://via.placeholder.com/200x200/28a745/ffffff?text=No+Image" 
+                                     class="profile-image" 
+                                     id="currentProfileImage" 
+                                     alt="現在のプロフィール画像">
+                                <div class="image-overlay" onclick="triggerFileInput()">
+                                    <i class="bi bi-camera-fill text-white" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 画像アップロードフォーム -->
+                        <form id="profileImageForm" enctype="multipart/form-data">
+                            <!-- 画像選択ボタン -->
+                            <div class="text-center mb-4">
+                                <button type="button" class="btn btn-success btn-lg px-5 py-3" onclick="triggerFileInput()">
+                                    <i class="bi bi-camera-fill me-2"></i>
+                                    画像を選択
+                                </button>
+                                <p class="text-muted mt-2 mb-0">タップして写真を選択してください</p>
+                            </div>
+
+                            <!-- 隠しファイル入力 -->
+                            <input type="file" 
+                                   id="profileImageInput" 
+                                   name="profile_image" 
+                                   accept="image/*" 
+                                   style="display: none;">
+
+                            <!-- 画像ガイドライン -->
+                            <div class="image-guidelines">
+                                <h6 class="fw-bold mb-2">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    画像のガイドライン
+                                </h6>
+                                <ul class="mb-0 small">
+                                    <li>推奨サイズ: 400x400px以上の正方形</li>
+                                    <li>ファイル形式: JPG, PNG, GIF</li>
+                                    <li>ファイルサイズ: 20MB以下</li>
+                                    <li>顔がはっきり見える明るい画像がおすすめ</li>
+                                </ul>
+                            </div>
+
+                            <!-- トリミングセクション -->
+                            <div id="cropSection" class="crop-section">
+                                <hr class="my-4">
+                                <h5 class="mb-3 text-center">
+                                    <i class="bi bi-crop me-2"></i>
+                                    画像をトリミング
+                                </h5>
+                                <p class="text-center text-muted mb-4">画像をドラッグして位置を調整し、スライダーでサイズを変更してください</p>
+                                
+                                <div class="crop-container" id="cropContainer">
+                                    <img id="cropImage" class="crop-image" alt="トリミング用画像">
+                                    <div class="crop-overlay"></div>
+                                </div>
+                                
+                                <div class="crop-controls">
+                                    <div class="zoom-control">
+                                        <i class="bi bi-zoom-out"></i>
+                                        <input type="range" class="form-range zoom-slider" id="zoomSlider" 
+                                               min="0.5" max="3" step="0.1" value="1">
+                                        <i class="bi bi-zoom-in"></i>
+                                    </div>
+                                </div>
+                                
+                                <div class="text-center mt-4">
+                                    <button type="button" class="btn btn-outline-secondary me-2" onclick="cancelCrop()">
+                                        <i class="bi bi-x-circle me-1"></i>
+                                        キャンセル
+                                    </button>
+                                    <button type="button" class="btn btn-success" onclick="applyCrop()">
+                                        <i class="bi bi-check-circle me-1"></i>
+                                        トリミングを適用
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- プレビューセクション -->
+                            <div id="previewSection" class="preview-section">
+                                <hr class="my-4">
+                                <h5 class="mb-3 text-center">最終プレビュー</h5>
+                                <div class="text-center">
+                                    <div class="mb-3">
+                                        <img id="finalPreview" 
+                                             class="img-thumbnail" 
+                                             style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%;"
+                                             alt="最終プレビュー">
+                                    </div>
+                                    <p class="text-muted small">この画像がプロフィールに設定されます</p>
+                                </div>
+                                
+                                <!-- ボタン群 -->
+                                <div class="text-center mt-4">
+                                    <button type="button" class="btn btn-outline-secondary me-2" onclick="resetForm()">
+                                        <i class="bi bi-arrow-clockwise me-1"></i>
+                                        やり直し
+                                    </button>
+                                    <button type="submit" class="btn btn-success-custom">
+                                        <i class="bi bi-check-circle me-1"></i>
+                                        画像を更新
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 戻るボタン -->
+                <div class="text-center mt-4">
+                    <a href="#" class="btn btn-outline-success">
+                        <i class="bi bi-arrow-left me-1"></i>
+                        プロフィール設定に戻る
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 成功・エラーメッセージのトースト -->
+    <div class="toast-container position-fixed top-0 end-0 p-3">
+        <div id="successToast" class="toast" role="alert">
+            <div class="toast-header bg-success text-white">
+                <i class="bi bi-check-circle-fill me-2"></i>
+                <strong class="me-auto">成功</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body">
+                プロフィール画像が正常に更新されました！
+            </div>
+        </div>
+
+        <div id="errorToast" class="toast" role="alert">
+            <div class="toast-header bg-danger text-white">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong class="me-auto">エラー</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="errorMessage">
+                エラーが発生しました。
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const fileInput = document.getElementById('profileImageInput');
+        const cropSection = document.getElementById('cropSection');
+        const previewSection = document.getElementById('previewSection');
+        const cropImage = document.getElementById('cropImage');
+        const finalPreview = document.getElementById('finalPreview');
+        const currentProfileImage = document.getElementById('currentProfileImage');
+        const zoomSlider = document.getElementById('zoomSlider');
+        
+        let imageState = {
+            originalImage: null,
+            scale: 1,
+            translateX: 0,
+            translateY: 0,
+            isDragging: false,
+            startX: 0,
+            startY: 0
+        };
+
+        // ファイル選択をトリガー
+        function triggerFileInput() {
+            fileInput.click();
+        }
+
+        // ファイル選択時の処理
+        fileInput.addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                validateAndPreviewImage(file);
+            }
+        }
+
+        // 画像の検証とトリミング画面表示
+        function validateAndPreviewImage(file) {
+            // ファイルタイプチェック
+            if (!file.type.match(/^image\/(jpeg|png|gif)$/)) {
+                showError('JPG、PNG、GIFファイルのみアップロード可能です。');
+                return;
+            }
+
+            // ファイルサイズチェック (20MB)
+            if (file.size > 20 * 1024 * 1024) {
+                showError('ファイルサイズは20MB以下にしてください。');
+                return;
+            }
+
+            // 画像をトリミング画面に表示
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imageState.originalImage = e.target.result;
+                cropImage.src = e.target.result;
+                cropSection.style.display = 'block';
+                previewSection.style.display = 'none';
+                
+                // 初期状態をリセット
+                imageState.scale = 1;
+                imageState.translateX = 0;
+                imageState.translateY = 0;
+                zoomSlider.value = 1;
+                updateImageTransform();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 画像の変形を更新
+        function updateImageTransform() {
+            const transform = `translate(${imageState.translateX}px, ${imageState.translateY}px) scale(${imageState.scale})`;
+            cropImage.style.transform = transform;
+        }
+
+        // ズームスライダーのイベント
+        zoomSlider.addEventListener('input', function() {
+            imageState.scale = parseFloat(this.value);
+            updateImageTransform();
+        });
+
+        // ドラッグ機能（タッチ対応）
+        cropImage.addEventListener('mousedown', startDrag);
+        cropImage.addEventListener('touchstart', startDrag, { passive: false });
+        
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('touchmove', drag, { passive: false });
+        
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchend', endDrag);
+
+        function startDrag(e) {
+            e.preventDefault();
+            imageState.isDragging = true;
+            
+            const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+            
+            imageState.startX = clientX - imageState.translateX;
+            imageState.startY = clientY - imageState.translateY;
+            
+            cropImage.style.cursor = 'grabbing';
+        }
+
+        function drag(e) {
+            if (!imageState.isDragging) return;
+            e.preventDefault();
+            
+            const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+            
+            imageState.translateX = clientX - imageState.startX;
+            imageState.translateY = clientY - imageState.startY;
+            
+            updateImageTransform();
+        }
+
+        function endDrag() {
+            imageState.isDragging = false;
+            cropImage.style.cursor = 'move';
+        }
+
+        // トリミングを適用
+        function applyCrop() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const size = 400; // 最終的な画像サイズ
+            
+            canvas.width = size;
+            canvas.height = size;
+            
+            // 円形にクリップ
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+            ctx.clip();
+            
+            // 元画像を読み込んで描画
+            const img = new Image();
+            img.onload = function() {
+                const cropContainer = document.getElementById('cropContainer');
+                const containerRect = cropContainer.getBoundingClientRect();
+                const containerSize = 300; // CSSで設定したサイズ
+                
+                // 変形を適用して描画
+                const drawSize = containerSize * imageState.scale;
+                const drawX = (size / 2) + (imageState.translateX * size / containerSize) - (drawSize / 2);
+                const drawY = (size / 2) + (imageState.translateY * size / containerSize) - (drawSize / 2);
+                
+                ctx.drawImage(img, drawX, drawY, drawSize, drawSize);
+                
+                // 結果を表示
+                const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                finalPreview.src = croppedDataUrl;
+                currentProfileImage.src = croppedDataUrl;
+                
+                // セクション切り替え
+                cropSection.style.display = 'none';
+                previewSection.style.display = 'block';
+            };
+            img.src = imageState.originalImage;
+        }
+
+        // トリミングをキャンセル
+        function cancelCrop() {
+            cropSection.style.display = 'none';
+            fileInput.value = '';
+        }
+
+        // フォーム送信処理
+        document.getElementById('profileImageForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            if (!finalPreview.src || finalPreview.src.includes('placeholder')) {
+                showError('画像を選択してトリミングしてください。');
+                return;
+            }
+
+            // 実際のフォーム送信処理をここに実装
+            // トリミング済みの画像データ（finalPreview.src）をサーバーに送信
+            const formData = new FormData();
+            
+            // Canvas から Blob を作成してフォームデータに追加
+            fetch(finalPreview.src)
+                .then(res => res.blob())
+                .then(blob => {
+                    formData.append('profile_image', blob, 'profile.jpg');
+                    
+                    // シミュレーション（実際はサーバーエンドポイントに送信）
+                    setTimeout(() => {
+                        showSuccess();
+                    }, 1000);
+                });
+        });
+
+        // フォームリセット
+        function resetForm() {
+            fileInput.value = '';
+            cropSection.style.display = 'none';
+            previewSection.style.display = 'none';
+            currentProfileImage.src = 'https://via.placeholder.com/200x200/28a745/ffffff?text=No+Image';
+            
+            // 状態をリセット
+            imageState = {
+                originalImage: null,
+                scale: 1,
+                translateX: 0,
+                translateY: 0,
+                isDragging: false,
+                startX: 0,
+                startY: 0
+            };
+        }
+
+        // 成功メッセージ表示
+        function showSuccess() {
+            const successToast = new bootstrap.Toast(document.getElementById('successToast'));
+            successToast.show();
+        }
+
+        // エラーメッセージ表示
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
+            errorToast.show();
+        }
+
+        // 警告メッセージ表示
+        function showWarning(message) {
+            document.getElementById('errorMessage').textContent = message;
+            const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
+            errorToast.show();
+        }
+    </script>
+</body>
+</html>
