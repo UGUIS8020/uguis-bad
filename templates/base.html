@@ -76,11 +76,50 @@
       "logo": "https://uguis-bad.shibuya8020.com/static/images/001.jpg"
     }
     </script>
+    
 
     <!-- 追加のメタタグ（ページ固有の設定） -->
     {% block extra_meta %}{% endblock %}
       
 </head>
+
+<style>
+body {
+    padding-bottom: 80px !important;
+}
+
+.fixed-footer {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    z-index: 1020 !important;
+    background-color: #f8f9fa !important;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* タイトルの色を統一 */
+.navbar-title {
+    margin: 0 !important;
+    font-size: 1.5rem !important;
+    color: #2c3e50 !important;
+}
+
+/* text-warningクラスの色を上書き */
+.fixed-footer .text-warning {
+    color: #2c3e50 !important;
+}
+
+/* または、ヘッダーと同じ色に統一する場合 */
+.navbar-light .navbar-nav .nav-link.text-warning {
+    color: #ffc107 !important; /* 元のwarning色 */
+}
+
+.fixed-footer .navbar {
+    padding: 0.5rem 0;
+}
+</style>
 
 <body>
 
@@ -133,41 +172,7 @@
             </div>
             {% endif %}
             
-            <ul class="navbar-nav ms-auto">
-                {% if current_user.is_authenticated %}
-                <li class="nav-item">
-                    <a class="btn btn-outline-danger ms-2" 
-                       href="{{ url_for('game.court') }}" 
-                       target="_blank" 
-                       rel="noopener noreferrer"
-                       title="新しいタブで待機画面を開きます">                        
-                        <i class="fas fa-external-link-alt me-1"></i>
-                        コートに入る                        
-                    </a>
-                </li>
-                
-                <li class="nav-item">
-                    <a class="nav-link fw-bold text-warning d-flex align-items-center" href="{{ url_for('account', user_id=current_user.id) }}">
-                        {% if current_user.profile_image %}
-                        <img src="{{ current_user.profile_image }}" 
-                            alt="プロフィール画像" 
-                            class="rounded-circle me-2" 
-                            style="width: 30px; height: 30px; object-fit: cover;">
-                        {% else %}
-                        <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2" 
-                            style="width: 30px; height: 30px; font-size: 12px; color: white;">
-                            {{ current_user.display_name[0] | upper }}
-                        </div>
-                        {% endif %}
-                        {{ current_user.display_name | truncate(10) }}
-                    </a>  
-                </li>
-                {% else %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
-                </li>
-                {% endif %}
-            </ul>
+            
         </div>
       </div>
     </nav>      
@@ -191,11 +196,52 @@
   {% block content %}
   {% endblock %}
 
-  <footer class="bg-dark text-white py-3 mt-5">
-    <div class="container text-center">
-        <p>&copy; 2024 鶯 Badminton Club. All Rights Reserved.</p>
-    </div>
-  </footer> 
+<!-- 固定フッター（間隔調整版） -->
+<footer class="fixed-footer">
+    <nav class="navbar navbar-light bg-light">
+        <div class="container d-flex justify-content-between align-items-center">          
+            <a class="navbar-brand fst-italic" href="{{ url_for('index') }}">
+                <h1 class="navbar-title">鶯 badminton</h1>
+            </a>
+            
+            <ul class="navbar-nav d-flex flex-row">
+                {% if current_user.is_authenticated %}
+                <li class="nav-item">
+                    <a class="btn btn-outline-danger ms-2" 
+                       href="{{ url_for('game.court') }}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       title="新しいタブで待機画面を開きます">                        
+                        <i class="fas fa-external-link-alt me-1"></i>
+                        コートに入る                        
+                    </a>
+                </li>
+                
+                <li class="nav-item ms-4">  <!-- ms-4 で間隔を広げる -->
+                    <a class="nav-link fw-bold text-warning d-flex align-items-center" href="{{ url_for('account', user_id=current_user.id) }}">
+                        {% if current_user.profile_image %}
+                        <img src="{{ current_user.profile_image }}" 
+                            alt="プロフィール画像" 
+                            class="rounded-circle me-2" 
+                            style="width: 30px; height: 30px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2" 
+                            style="width: 30px; height: 30px; font-size: 12px; color: white;">
+                            {{ current_user.display_name[0] | upper }}
+                        </div>
+                        {% endif %}
+                        {{ current_user.display_name | truncate(10) }}
+                    </a>  
+                </li>
+                {% else %}
+                <li class="nav-item ms-4">  <!-- ログイン時も同じ間隔 -->
+                    <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </nav>      
+</footer>
   
   <script>
     document.addEventListener('DOMContentLoaded', function () {
