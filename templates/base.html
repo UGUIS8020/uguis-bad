@@ -217,19 +217,17 @@ body {
                     </a>
                 </li>
                 
-                <li class="nav-item ms-4">  <!-- ms-4 で間隔を広げる -->
-                    <a class="nav-link fw-bold text-warning d-flex align-items-center" href="{{ url_for('account', user_id=current_user.id) }}">
-                        {% if current_user.profile_image %}
-                        <img src="{{ current_user.profile_image }}" 
+                <li class="nav-item ms-4">
+                    <a class="nav-link fw-bold text-warning d-flex align-items-center" 
+                    href="{{ url_for('account', user_id=current_user.id) }}">
+                        <img src="{% if current_user.profile_image and current_user.profile_image|length > 0 and not current_user.profile_image.isspace() %}
+                                    {{ current_user.profile_image }}
+                                {% else %}
+                                    {{ url_for('static', filename='images/default.jpg') }}
+                                {% endif %}" 
                             alt="プロフィール画像" 
-                            class="rounded-circle me-2" 
+                            class="rounded-circle me-1" 
                             style="width: 30px; height: 30px; object-fit: cover;">
-                        {% else %}
-                        <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2" 
-                            style="width: 30px; height: 30px; font-size: 12px; color: white;">
-                            {{ current_user.display_name[0] | upper }}
-                        </div>
-                        {% endif %}
                         {{ current_user.display_name | truncate(10) }}
                     </a>  
                 </li>
