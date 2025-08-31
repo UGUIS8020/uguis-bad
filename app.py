@@ -67,89 +67,79 @@ cache = Cache()
 
 def create_app():
     """アプリケーションの初期化と設定"""
-    try:        
+    try:
         load_dotenv()
-        
-        # Flaskアプリケーションの作成
-        app = Flask(__name__)               
-        
-        # Secret Keyの設定
-        app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", os.urandom(24))
-        
-          # セッションの永続化設定を追加
+        app = Flask(__name__)
+
+        # --- 環境判定 ---
+        APP_ENV = os.getenv("APP_ENV", "development").lower()
+        IS_PROD = APP_ENV in ("production", "prod")
+        IS_LOCAL_HTTP = not IS_PROD  # ローカルはHTTP前提に
+
+        # --- Secret Key（本番は必須。未設定なら起動失敗にする） ---
+        secret_key = os.getenv("SECRET_KEY")
+        if IS_PROD and not secret_key:
+            raise RuntimeError("SECRET_KEY is required in production")
+        app.config["SECRET_KEY"] = secret_key or "dev-only-insecure-key"  # 開発用の固定キー
+
+        # --- セッション設定（環境で切り替え） ---
         app.config.update(
-            PERMANENT_SESSION_LIFETIME = timedelta(days=30),  # セッション有効期限
-            SESSION_PERMANENT = True,  # セッションを永続化
-            SESSION_TYPE = 'filesystem',  # セッションの保存方式
-            SESSION_COOKIE_SECURE = True,  # HTTPS接続のみ
-            SESSION_COOKIE_HTTPONLY = True,  # JavaScriptからのアクセスを防止
-            SESSION_COOKIE_SAMESITE = 'Lax'  # クロスサイトリクエスト制限
+            PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+            SESSION_PERMANENT=True,
+            # Flask-Session を使わないなら SESSION_TYPE は不要。使うなら 'filesystem' と Session(app) を有効化。
+            # SESSION_TYPE='filesystem',
+            SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,   # ← ローカルHTTPでは False、本番HTTPSで True
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE="Lax",             # サブドメイン跨ぎや外部POSTが必要なら 'None' + Secure=True
+            # 必要に応じてサブドメイン運用時:
+            # SESSION_COOKIE_DOMAIN=".shibuya8020.com" if IS_PROD else None,
         )
-        
-        # キャッシュの設定と初期化
+
+        # --- Flask-Session を使う場合（任意） ---
+        # from flask_session import Session
+        # Session(app)
+
+        # --- Cache 設定 ---
         app.config['CACHE_TYPE'] = 'SimpleCache'
         app.config['CACHE_DEFAULT_TIMEOUT'] = 600
         app.config['CACHE_THRESHOLD'] = 900
         app.config['CACHE_KEY_PREFIX'] = 'uguis_'
-
-        # 既存のcacheオブジェクトを初期化
         cache.init_app(app)
-    
-        logger.info("Cache initialized with SimpleCache")                 
-       
 
-        # AWS認証情報の設定
+        # --- AWS 認証 ---
         aws_credentials = {
             'aws_access_key_id': os.getenv("AWS_ACCESS_KEY_ID"),
             'aws_secret_access_key': os.getenv("AWS_SECRET_ACCESS_KEY"),
-            'region_name': os.getenv("AWS_REGION", "ap-northeast-1")
+            'region_name': os.getenv("AWS_REGION", "ap-northeast-1"),
         }
-
-        # 必須環境変数のチェック
         required_env_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET", "TABLE_NAME_USER", "TABLE_NAME_SCHEDULE"]
-        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-        if missing_vars:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        missing = [v for v in required_env_vars if not os.getenv(v)]
+        if IS_PROD and missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-         # 必須環境変数をFlaskの設定に追加
         app.config["S3_BUCKET"] = os.getenv("S3_BUCKET", "default-bucket-name")
-        app.config["AWS_REGION"] = os.getenv("AWS_REGION")
-        app.config['S3_LOCATION'] = f"https://{app.config['S3_BUCKET']}.s3.{os.getenv('AWS_REGION')}.amazonaws.com/"
-        print(f"S3_BUCKET: {app.config['S3_BUCKET']}")  # デバッグ用
+        app.config["AWS_REGION"] = os.getenv("AWS_REGION", "ap-northeast-1")
+        app.config['S3_LOCATION'] = f"https://{app.config['S3_BUCKET']}.s3.{app.config['AWS_REGION']}.amazonaws.com/"
 
-         # AWSクライアントの初期化
-        # app.s3 = boto3.client('s3', **aws_credentials)
-        # app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-        # app.dynamodb_resource = boto3.resource('dynamodb', **aws_credentials)
-
-        # AWSクライアントの初期化
         app.s3 = boto3.client('s3', **aws_credentials)
         app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-
-        # DynamoDBテーブルの設定
-        app.table_name = os.getenv("TABLE_NAME_USER")        
+        app.table_name = os.getenv("TABLE_NAME_USER")
+        app.table_name_users = os.getenv("TABLE_NAME_USER")
         app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
-        app.table_name_users = app.table_name
-        app.table = app.dynamodb.Table(app.table_name)           # dynamodb_resource → dynamodb
-        
-        app.table_schedule = app.dynamodb.Table(app.table_name_schedule) # dynamodb_resource → dynamodb
+        app.table = app.dynamodb.Table(app.table_name)
+        app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
 
-        # Flask-Loginの設定
+        # --- Flask-Login ---
         login_manager.init_app(app)
         login_manager.session_protection = "strong"
-        login_manager.login_view = 'login'
+        # ブループリント使用時は 'auth.login' など正しい endpoint 名に直す
+        login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "auth.login")
         login_manager.login_message = 'このページにアクセスするにはログインが必要です。'
 
-        # DynamoDBテーブルの初期化（init_tablesの実装が必要）
-        # init_tables()
-
-        logger.info("Application initialized successfully")
         return app
-
     except Exception as e:
         logger.error(f"Failed to initialize application: {str(e)}")
         raise
-
 
 # アプリケーションの初期化
 app = create_app()
@@ -797,16 +787,6 @@ def get_all_users_dict():
     except Exception as e:
         app.logger.error(f"ユーザー一括取得エラー: {str(e)}")
         return {}
-
-
-
-
-
-
-
-
-
-
 
 @app.template_filter('format_date')
 def format_date(value):
@@ -2096,6 +2076,116 @@ def get_user_info(user_id):
     except Exception as e:
         app.logger.error(f"/api/user_info エラー: {e}")
         return jsonify({'error': 'サーバーエラー'}), 500
+    
+
+@app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
+@login_required
+def profile_image_edit(user_id):
+    """プロフィール画像編集ページ"""
+    
+    # デバッグ用ログ追加
+    session_user_id = session.get('user_id')
+    app.logger.debug(f"Session user_id: {session_user_id}")
+    app.logger.debug(f"URL user_id: {user_id}")
+    app.logger.debug(f"Match: {session_user_id == user_id}")
+    
+    try:
+        # 既存のアカウントルートと同じ方法でユーザー情報を取得
+        table = app.dynamodb.Table(app.table_name)
+        response = table.get_item(Key={'user#user_id': user_id})
+        user = response.get('Item')
+
+        if not user:
+            flash('ユーザーが見つかりません。', 'error')
+            return redirect(url_for('index'))
+        
+        # user_id キーを調整（既存コードと同じ処理）
+        user['user_id'] = user.pop('user#user_id')
+        
+        # 現在のユーザーが編集権限を持っているかチェック
+        if session.get('user_id') != user_id:
+            flash('アクセス権限がありません。', 'error')
+            return redirect(url_for('index'))
+        
+        if request.method == 'POST':
+            # 画像アップロード処理
+            if 'profile_image' not in request.files:
+                flash('ファイルが選択されていません。', 'error')
+                return redirect(request.url)
+            
+            file = request.files['profile_image']
+            if file.filename == '':
+                flash('ファイルが選択されていません。', 'error')
+                return redirect(request.url)
+            
+            if file and allowed_file(file.filename):
+                try:
+                    # 既存のアカウントルートと同じ画像処理方法を使用
+                    filename = secure_filename(file.filename)
+                    s3_key = f"profile-images/{user_id}/{filename}"
+
+                    # Pillow で画像を開く
+                    img = Image.open(file)
+                    max_size = (300, 300)
+                    img.thumbnail(max_size)
+
+                    # バッファにJPEG形式で保存
+                    buffer = BytesIO()
+                    img.save(buffer, format='JPEG', quality=85)
+                    buffer.seek(0)
+
+                    # S3にアップロード
+                    app.s3.upload_fileobj(
+                        buffer,
+                        app.config["S3_BUCKET"],
+                        s3_key,
+                    )
+
+                    # URLをDynamoDBに保存
+                    image_url = f"{app.config['S3_LOCATION']}{s3_key}"
+                    current_time = datetime.now(timezone.utc).isoformat()
+                    
+                    table.update_item(
+                        Key={'user#user_id': user_id},
+                        UpdateExpression="SET profile_image_url = :profile_image_url, updated_at = :updated_at",
+                        ExpressionAttributeValues={
+                            ":profile_image_url": image_url,
+                            ":updated_at": current_time
+                        },
+                        ReturnValues="ALL_NEW"
+                    )
+                    
+                    flash('プロフィール画像を更新しました。', 'success')
+                    return redirect(url_for('account', user_id=user_id))
+                    
+                except ClientError as e:
+                    app.logger.error(f"S3 upload failed for user {user_id}: {e}")
+                    flash('画像のアップロードに失敗しました。', 'error')
+                except Exception as e:
+                    app.logger.error(f"Profile image upload error for user {user_id}: {str(e)}")
+                    flash('画像のアップロード中にエラーが発生しました。', 'error')
+            else:
+                flash('サポートされていないファイル形式です。', 'error')
+        
+        # GET リクエストまたはエラー時の表示
+        default_image_url = f"{app.config['S3_LOCATION']}profile-images/default.jpg"
+        user['profile_image_url'] = user.get('profile_image_url', None)
+        
+        return render_template('profile_image_edit.html', 
+                             user=user, 
+                             default_image_url=default_image_url)
+    
+    except Exception as e:
+        app.logger.error(f"Unexpected error in profile_image_edit route for user {user_id}: {str(e)}")
+        flash('予期しないエラーが発生しました。', 'error')
+        return redirect(url_for('index'))
+
+
+def allowed_file(filename):
+    """許可されたファイル拡張子かチェック"""
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 match_table = dynamodb.Table("bad-game-match_entries")
