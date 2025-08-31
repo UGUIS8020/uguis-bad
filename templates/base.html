@@ -147,11 +147,18 @@
                 </li>
                 
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('logout') }}">ログアウト</a>
-                </li>                   
-            
-                <li class="nav-item">
-                    <a class="nav-link fw-bold text-warning" href="{{ url_for('account', user_id=current_user.id) }}">
+                    <a class="nav-link fw-bold text-warning d-flex align-items-center" href="{{ url_for('account', user_id=current_user.id) }}">
+                        {% if current_user.profile_image %}
+                        <img src="{{ current_user.profile_image }}" 
+                            alt="プロフィール画像" 
+                            class="rounded-circle me-2" 
+                            style="width: 30px; height: 30px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2" 
+                            style="width: 30px; height: 30px; font-size: 12px; color: white;">
+                            {{ current_user.display_name[0] | upper }}
+                        </div>
+                        {% endif %}
                         {{ current_user.display_name | truncate(10) }}
                     </a>  
                 </li>
