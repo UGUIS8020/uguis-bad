@@ -36,8 +36,7 @@
 
 /* レスポンシブ調整：#schedule 配下に限定（フッターの .d-flex には当たらない） */
 @media (max-width: 768px) {
-  #schedule .d-flex {
-    flex-direction: column;
+  #schedule .d-flex {    
     align-items: flex-start !important;
     gap: 0.5rem;
   }
@@ -149,9 +148,8 @@
                     {% endif %}
 
                     <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
-                    <div class="d-flex align-items-start justify-content-between gap-2 px-2 pt-2">
-
-                    <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
+                    <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
                         {% if current_user.is_authenticated and current_user.administrator %}
                         <button class="accordion-button collapsed py-2 px-2"
                                 type="button"
@@ -161,7 +159,7 @@
                                 aria-controls="collapse{{ schedule.schedule_id }}"
                                 style="box-shadow:none;">
                         <div class="d-flex w-100 align-items-center justify-content-between gap-2">
-                            <div class="d-flex align-items-center flex-grow-1">
+                            <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
                             <span class="me-2">
                                 {{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                 {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
@@ -169,7 +167,7 @@
                             </span>
                             </div>
                             <div class="text-end">
-                            募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}<br>
+                            募集 {{ schedule.participants_count }}/{{ schedule.max_participants }}
                             {% if schedule.participants_count >= schedule.max_participants %}
                                 <span class="badge bg-warning text-dark">満員御礼</span>
                             {% else %}
@@ -190,7 +188,7 @@
                             </span>
                             </div>
                             <div class="text-end">
-                            募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}<br>
+                            募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}
                             {% if schedule.participants_count >= schedule.max_participants %}
                                 <span class="badge bg-warning text-dark">満員御礼</span>
                             {% else %}
@@ -203,7 +201,7 @@
                     </h2>
 
                     <!-- 操作ボタン群（h2の外・右側） -->
-                    <div class="d-flex align-items-center gap-2 flex-shrink-0 ms-2">
+                    <div class="d-flex align-items-center flex-nowrap gap-2 flex-shrink-0 ms-2">
                         <!-- 参加 -->
                         <button
                         class="btn btn-sm join-button text-nowrap
