@@ -458,7 +458,7 @@
                             const tenMinutes = 10 * 60 * 1000;
                             
                             if (emptyDuration >= tenMinutes) {
-                                alert('エントリー者が10分間いないため、練習を終了します。');
+                                console.log('10分間エントリー者がいないため、自動的にトップページへ移動');
                                 window.location.href = '/';
                                 return;
                             }
