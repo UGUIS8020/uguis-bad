@@ -331,16 +331,24 @@ def update_trueskill_for_players_and_return_updates(result_item):
         team_b_skill = sum(r.mu for _, r, _ in ratings_b) / len(ratings_b)
         skill_diff = team_a_skill - team_b_skill
         
+        # 期待される勝者を判定
+        expected_winner = "A" if skill_diff > 0 else "B"
+        actual_winner = winner.upper()
+        
         # 標準のTrueSkill計算
         if winner.upper() == "A":
             original_new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
-            # スキル差と勝敗の整合性を確認（高スキルチームが勝った場合は正、低スキルチームが勝った場合は負）
-            skill_result_consistency = skill_diff  # 正なら予想通り、負なら予想外
         else:
             original_new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
             original_new_ratings = original_new_ratings[::-1]
-            # スキル差と勝敗の整合性を確認（逆転勝利の場合は負の値）
-            skill_result_consistency = -skill_diff  # 正なら予想通り、負なら予想外
+        
+        # スキル差と勝敗の整合性を正しく計算
+        if expected_winner == actual_winner:
+            # 予想通りの結果: 正の値（調整を小さく）
+            skill_result_consistency = abs(skill_diff)
+        else:
+            # 番狂わせ: 負の値（調整を大きく）
+            skill_result_consistency = -abs(skill_diff)
 
         # スコア差の計算
         team1_score = int(result_item.get("team1_score", 0))

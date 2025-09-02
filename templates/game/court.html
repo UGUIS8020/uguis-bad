@@ -354,6 +354,14 @@
             </form>
         </div>
     </div>
+
+    {% if current_user.is_authenticated and current_user.administrator %}
+        <form method="POST" action="{{ url_for('game.score_input') }}">
+            <div class="text-center my-2">
+                <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
+            </div>
+        </form>
+    {% endif %} 
                
             
             
@@ -396,15 +404,8 @@
 
     
         </div>
-    </div>  
-
-    {% if current_user.is_authenticated and current_user.administrator %}
-    <form method="POST" action="{{ url_for('game.score_input') }}">
-        <div class="text-center mt-4">
-            <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
-        </div>
-    </form>
-    {% endif %}   
+    </div> 
+  
 
         <script>
         let lastUpdateTime = new Date();
