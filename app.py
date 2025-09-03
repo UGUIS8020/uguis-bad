@@ -2111,6 +2111,13 @@ def profile_image_edit(user_id):
             sy  = request.form.get('crop_sy',   type=float)
             ssz = request.form.get('crop_side', type=float)
 
+            # ★ここに追加★
+            print(f"Debug received: sx={sx}, sy={sy}, ssz={ssz}")
+            print(f"Debug orig_file exists: {orig_file is not None}")
+
+            # large と サーバ側プロフィール生成用に元画像のバイト列を確保
+            source_for_large = orig_file or profile_file
+
             # large と サーバ側プロフィール生成用に元画像のバイト列を確保
             source_for_large = orig_file or profile_file
             source_for_large.stream.seek(0)
@@ -2144,6 +2151,7 @@ def profile_image_edit(user_id):
 
             # 元画像＋座標が揃っている場合はサーバ側で同じ位置を正方形で切り出す
             if orig_file and sx is not None and sy is not None and ssz is not None and ssz > 0:
+                print("Debug: Using server-side cropping with coordinates")
                 iw, ih = src.size
                 left = max(0.0, min(float(iw - 1), sx))
                 top  = max(0.0, min(float(ih - 1), sy))
