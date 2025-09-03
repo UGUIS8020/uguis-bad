@@ -680,81 +680,79 @@ class User(UserMixin):
 #     return participants_info
 
 @cache.memoize(timeout=600)
-def get_participants_info(schedule):     
+def get_participants_info(schedule):
     participants_info = []
 
     try:
-        user_table = app.dynamodb.Table(app.table_name)
+        raw = schedule.get("participants") or []
+        # 1) ID or dict の両対応 & None 除外 & 文字列化
+        ids = []
+        for x in raw:
+            if isinstance(x, dict):
+                uid = x.get("user_id") or x.get("user#user_id")
+            else:
+                uid = x
+            if uid:
+                ids.append(str(uid))
+        if not ids:
+            return participants_info
 
-        if 'participants' in schedule and schedule['participants']:            
-            for participant_id in schedule['participants']:
-                try:
-                    # scanを削除してget_itemに変更
-                    response = user_table.get_item(
-                        Key={'user#user_id': participant_id}
-                    )
-                    
-                    if 'Item' in response:
-                        user = response['Item']                        
-                        
-                        raw_score = user.get('skill_score')
-                        if isinstance(raw_score, Decimal):
-                            skill_score = int(raw_score)
-                        elif isinstance(raw_score, (int, float)):
-                            skill_score = int(raw_score)
-                        else:
-                            skill_score = None
+        # 2) BatchGetItem（UnprocessedKeys を再試行）
+        request = {
+            app.table_name: {
+                "Keys": [{"user#user_id": uid} for uid in ids],
+                "ProjectionExpression": "user#user_id, display_name, profile_image_url, skill_score, practice_count",
+            }
+        }
 
-                        # ✅ 参加回数（practice_count）を取得
-                        raw_practice = user.get('practice_count')
-                        join_count = int(raw_practice) if isinstance(raw_practice, (Decimal, int, float)) else None
+        responses = []
+        unprocessed = request
+        client = getattr(app.dynamodb, "meta", None) and app.dynamodb.meta.client or app.dynamodb  # resource or client 両対応
+        # 最大数回リトライ
+        for _ in range(5):
+            resp = client.batch_get_item(RequestItems=unprocessed)
+            responses.extend(resp.get("Responses", {}).get(app.table_name, []))
+            unprocessed = resp.get("UnprocessedKeys") or {}
+            if not unprocessed:
+                break
+            # （必要なら短いスリープ）
 
-                        participants_info.append({                            
-                            'user_id': user.get('user#user_id'),
-                            'display_name': user.get('display_name', '名前なし'),
-                            'skill_score': skill_score,
-                            'join_count': join_count,
-                            'is_valid': True  # 正常なユーザー
-                        })
-                    else:
-                        # ユーザーが見つからない場合
-                        logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
-                        participants_info.append({
-                            'user_id': participant_id,
-                            'display_name': '削除されたユーザー',
-                            'skill_score': None,
-                            'join_count': None,
-                            'is_deleted': True,
-                            'is_valid': False
-                        })
-                        
-                except ClientError as e:
-                    # DynamoDBの特定エラー
-                    error_code = e.response['Error']['Code']
-                    logger.error(f"[参加者ID: {participant_id}] DynamoDBエラー({error_code}): {e}")
-                    participants_info.append({
-                        'user_id': participant_id,
-                        'display_name': f'エラー（{error_code}）',
-                        'skill_score': None,
-                        'join_count': None,
-                        'is_error': True,
-                        'is_valid': False
-                    })
-                    
-                except Exception as e:
-                    # その他のエラー
-                    logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
-                    participants_info.append({
-                        'user_id': participant_id,
-                        'display_name': 'エラー（要確認）',
-                        'skill_score': None,
-                        'join_count': None,
-                        'is_error': True,
-                        'is_valid': False
-                    })
+        # 3) 応答を map 化（元の並びを維持して組み立て）
+        by_id = {it["user#user_id"]: it for it in responses}
 
+        for uid in ids:
+            user = by_id.get(uid)
+            if user:
+                # 数値整形
+                raw_score = user.get("skill_score")
+                skill_score = int(raw_score) if isinstance(raw_score, (int, float, Decimal)) else None
+                raw_practice = user.get("practice_count")
+                join_count = int(raw_practice) if isinstance(raw_practice, (int, float, Decimal)) else None
+
+                # URL 正規化（空/空白/"None" は None へ）
+                url = (user.get("profile_image_url") or "").strip()
+                profile_image_url = url if url and url.lower() != "none" else None
+
+                participants_info.append({
+                    "user_id": user.get("user#user_id"),
+                    "display_name": user.get("display_name", "名前なし"),
+                    "skill_score": skill_score,
+                    "join_count": join_count,
+                    "profile_image_url": profile_image_url,
+                    "is_valid": True,
+                })
+            else:
+                participants_info.append({
+                    "user_id": uid,
+                    "display_name": "削除されたユーザー",
+                    "skill_score": None,
+                    "join_count": None,
+                    "profile_image_url": None,
+                    "is_deleted": True,
+                    "is_valid": False,
+                })
     except Exception as e:
-        logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
+        logger.error(f"参加者情報の取得中にエラー: {e}")
 
     return participants_info
 
@@ -813,86 +811,118 @@ def index():
         # 軽量なスケジュール情報のみ取得
         schedules = get_schedules_with_formatting()
 
-        # 参加者詳細情報の取得を追加
-        user_table = current_app.dynamodb.Table("bad-users")  # 適宜変更
+        # DynamoDB ユーザーテーブル
+        user_table = current_app.dynamodb.Table(app.table_name)
 
         for schedule in schedules:
+            # --- 参加者 ---
             participants_info = []
             raw_participants = schedule.get("participants", [])
             user_ids = []
 
-            # [{"S": "uuid"}] 形式にも対応
+            # 参加者IDの抽出（複数形式に対応）
             for item in raw_participants:
                 if isinstance(item, dict) and "S" in item:
                     user_ids.append(item["S"])
+                elif isinstance(item, dict) and "user_id" in item:
+                    user_ids.append(item["user_id"])
                 elif isinstance(item, str):
                     user_ids.append(item)
 
-            for user_id in user_ids:
+            # ユーザー詳細を取得
+            for uid in user_ids:
                 try:
-                    res = user_table.get_item(Key={"user#user_id": user_id})
+                    res = user_table.get_item(Key={"user#user_id": uid})
                     user = res.get("Item")
-                    if user:
-                        participants_info.append({
-                            "user_id": user["user#user_id"],
-                            "display_name": user.get("display_name", "不明")
-                        })
+                    if not user:
+                        continue
+
+                    # 画像URLは複数候補からフォールバック
+                    url = (user.get("profile_image_url")
+                           or user.get("profileImageUrl")
+                           or user.get("large_image_url")
+                           or "")
+                    url = url.strip() if isinstance(url, str) else None
+
+                    participants_info.append({
+                        "user_id": user["user#user_id"],
+                        "display_name": user.get("display_name", "不明"),
+                        "profile_image_url": url if url and url.lower() != "none" else None,
+                        "is_admin": bool(user.get("administrator")),
+                    })
                 except Exception:
-                    # ログ出力を削除
+                    # 個別の取得失敗はスキップ（全体は継続）
                     pass
 
+            # 管理者を先頭にソート
+            participants_info.sort(key=lambda x: not x.get("is_admin", False))
             schedule["participants_info"] = participants_info
 
-            # ★ 「たら」参加者情報処理を追加
+            # --- たら参加者 ---
             tara_participants_info = []
-            raw_tara_participants = schedule.get("tara_participants", [])
-            tara_user_ids = []
+            raw_tara = schedule.get("tara_participants", [])
+            tara_ids = []
 
-            # 「たら」参加者のuser_id抽出
-            for item in raw_tara_participants:
+            for item in raw_tara:
                 if isinstance(item, dict) and "S" in item:
-                    tara_user_ids.append(item["S"])
+                    tara_ids.append(item["S"])
+                elif isinstance(item, dict) and "user_id" in item:
+                    tara_ids.append(item["user_id"])
                 elif isinstance(item, str):
-                    tara_user_ids.append(item)
+                    tara_ids.append(item)
 
-            # 「たら」参加者の詳細情報取得
-            for user_id in tara_user_ids:
+            for uid in tara_ids:
                 try:
-                    res = user_table.get_item(Key={"user#user_id": user_id})
+                    res = user_table.get_item(Key={"user#user_id": uid})
                     user = res.get("Item")
-                    if user:
-                        tara_participants_info.append({
-                            "user_id": user["user#user_id"],
-                            "display_name": user.get("display_name", "不明")
-                        })
+                    if not user:
+                        continue
+
+                    url = (user.get("profile_image_url")
+                           or user.get("profileImageUrl")
+                           or user.get("large_image_url")
+                           or "")
+                    url = url.strip() if isinstance(url, str) else None
+
+                    tara_participants_info.append({
+                        "user_id": user["user#user_id"],
+                        "display_name": user.get("display_name", "不明"),
+                        "profile_image_url": url if url and url.lower() != "none" else None,
+                        "is_admin": bool(user.get("administrator")),
+                    })
                 except Exception:
                     pass
 
-            # スケジュールに「たら」参加者情報を追加
+            tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
             schedule["tara_participants_info"] = tara_participants_info
-            schedule["tara_participants"] = tara_user_ids  # フロントエンド用
-            schedule["tara_count"] = len(tara_user_ids)  # 「たら」参加者数
+            schedule["tara_participants"] = tara_ids
+            schedule["tara_count"] = len(tara_ids)
 
+        # トップ画像
         image_files = [
             'images/top001.jpg',
-            'images/top002.jpg',
+            'images[top002.jpg',
             'images/top003.jpg',
             'images/top004.jpg',
             'images/top005.jpg'
         ]
-
         selected_image = random.choice(image_files)
 
-        return render_template("index.html", 
-                               schedules=schedules,
-                               selected_image=selected_image,
-                               canonical=url_for('index', _external=True))
-        
+        return render_template(
+            "index.html",
+            schedules=schedules,
+            selected_image=selected_image,
+            canonical=url_for('index', _external=True)
+        )
+
     except Exception as e:
-        # 重要なエラーのみログ出力を残す
         logger.error(f"[index] スケジュール取得エラー: {e}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
-        return render_template("index.html", schedules=[], selected_image='images/default.jpg')
+        return render_template(
+            "index.html",
+            schedules=[],
+            selected_image='images/default.jpg'
+        )
     
 @app.route("/schedule_koyomi", methods=['GET'])
 @app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
@@ -1660,7 +1690,7 @@ def account(user_id):
                 s3_key = f"profile-images/{user_id}/{filename}"
                 try:
                     img = Image.open(image_file)
-                    img.thumbnail((300, 300))
+                    img.thumbnail((400, 400))
                     buffer = BytesIO()
                     img.save(buffer, format='JPEG', quality=85)
                     buffer.seek(0)
@@ -2149,23 +2179,30 @@ def profile_image_edit(user_id):
             # ===== プロフィール画像（正方形300px, JPEG） =====
             profile_bytes = None
 
-            # 元画像＋座標が揃っている場合はサーバ側で同じ位置を正方形で切り出す
             if orig_file and sx is not None and sy is not None and ssz is not None and ssz > 0:
-                print("Debug: Using server-side cropping with coordinates")
+                app.logger.info("Debug: Using server-side cropping with coordinates")
+
                 iw, ih = src.size
-                left = max(0.0, min(float(iw - 1), sx))
-                top  = max(0.0, min(float(ih - 1), sy))
+
+                # 受け取った座標（float想定）→ 一貫して丸め（切り捨て禁止）
+                left = int(round(float(sx)))
+                top  = int(round(float(sy)))
+                side = int(round(float(ssz)))
+
+                # 画像境界でクランプ
                 max_side = min(iw - left, ih - top)
-                side = max(1.0, min(float(ssz), float(max_side)))
+                side = max(1, min(side, max_side))
 
-                box = (int(round(left)),
-                       int(round(top)),
-                       int(round(left + side)),
-                       int(round(top + side)))
+                # 正方形を厳密に維持
+                right  = left + side
+                bottom = top  + side
 
-                prof_img = src.crop(box)
+                app.logger.info(f"crop box: left={left}, top={top}, side={side}, iw={iw}, ih={ih}")
 
-                # JPEG保存に向けたモード調整（透過は白合成）
+                # クロップ
+                prof_img = src.crop((left, top, right, bottom))
+
+                # 透過→白合成 & RGB
                 if prof_img.mode in ('RGBA', 'LA') or (prof_img.mode == 'P' and 'transparency' in prof_img.info):
                     bg = Image.new('RGB', prof_img.size, (255, 255, 255))
                     alpha = prof_img.split()[-1] if prof_img.mode in ('RGBA', 'LA') else prof_img.convert('RGBA').split()[-1]
@@ -2174,8 +2211,9 @@ def profile_image_edit(user_id):
                 elif prof_img.mode != 'RGB':
                     prof_img = prof_img.convert('RGB')
 
-                # 300×300に縮小（アスペクト比維持＋短辺基準のthumbnailで正方形）
-                prof_img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+                # 厳密正方形のままリサイズ（thumbnailは使わない）
+                out_size = 200  # ← 表示と揃えるなら 200 などに変更可
+                prof_img = prof_img.resize((out_size, out_size), Image.Resampling.LANCZOS)
 
                 _pbuf = BytesIO()
                 prof_img.save(_pbuf, format='JPEG', quality=85, optimize=True, progressive=True)

@@ -49,8 +49,8 @@
         
         .crop-container {
             position: relative;
-            width: 300px;
-            height: 300px;
+            width: 400px;
+            height: 400px;
             margin: 0 auto;
             border-radius: 50%;
             overflow: hidden;
@@ -378,7 +378,7 @@
 
     // ★新しい関数：画像の初期位置を設定
     function initializeImagePosition() {
-        const containerSize = 300; // .crop-containerのサイズ
+        const containerSize = 400; // .crop-containerのサイズ
         const imgWidth = cropImage.naturalWidth;
         const imgHeight = cropImage.naturalHeight;
         
@@ -440,7 +440,7 @@
     // ===== ドラッグここまで =====
 
     function applyCrop() {
-    const S = 400; // 出力一辺（正方形）
+    const S = 200; // 出力一辺（正方形）
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     canvas.width = S; canvas.height = S;
@@ -453,7 +453,7 @@
     const img = new Image();
     img.onload = function () {
         const iw = img.naturalWidth, ih = img.naturalHeight;
-        const containerSize = 300;
+        const containerSize = 400;
 
         // 現在の総スケール
         const totalScale = imageState.baseScale * imageState.scale;

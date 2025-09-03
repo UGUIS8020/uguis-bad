@@ -5,7 +5,7 @@
 {% block description %}埼玉県越谷市で活動しているバドミントンサークルです。経験者から初心者まで楽しく活動中。見学・体験随時募集中。{% endblock %}
 {% block keywords %}埼玉県,越谷市, バドミントン, サークル, 練習, 見学, 体験{% endblock %}
 
-{% block content %}   
+{% block content %}  
 
 <style>
 /* indexのスケジュール領域だけに限定して上書き */
@@ -113,6 +113,9 @@
                 <p>募集中であれば参加できます。初参加の方はmailかLINEでご連絡いただけると助かります</p>
             </div>
             {% endif %} 
+
+
+            
            
             
             
@@ -147,26 +150,9 @@
                     </div>
                     {% endif %}
 
-                    <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
-                    <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
-                        {% if current_user.is_authenticated and current_user.administrator %}
-                        <button class="accordion-button collapsed py-2 px-2"
-                                type="button"
-                                data-bs-toggle="collapse"
-                                data-bs-target="#collapse{{ schedule.schedule_id }}"
-                                aria-expanded="false"
-                                aria-controls="collapse{{ schedule.schedule_id }}"
-                                style="box-shadow:none;">
-                        <div class="d-flex w-100 align-items-center justify-content-between gap-2">
-                            <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
-                            <span class="me-2">
-                                {{ schedule.date | format_date }}({{ schedule.day_of_week }})
-                                {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
-                                {{ schedule.venue }}{{ schedule.court }}
 
 
-                                <style>
+                     <style>
                                 .avatar-ig{
                                     --size: 28px;   /* 画像の直径 */
                                     --ring: 2px;    /* グラデリングの太さ */
@@ -183,27 +169,84 @@
                                     border-radius:50%; object-fit:cover; display:block;
                                     background:#fff; box-shadow:0 0 0 var(--gap) #fff;
                                 }
-                                </style>                                
-
-                                {% if current_user.is_authenticated and schedule.participants %}
-                                <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
-                                    {% for p in schedule.participants[:5] %}
-                                    <a href="{{ url_for('account', user_id=p.user_id) }}" class="text-decoration-none" title="{{ p.display_name }}">
-                                        <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;">
+                                </style>
+                                
+                                  {# ログインしているときだけ表示する #}
+                                {% if current_user.is_authenticated %}
+                                {# participants_info が無ければ [] にする #}
+                                {% set plist = schedule.participants_info | default([]) %}
+                                {% if plist %}
+                                    <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
+                                    {% for p in plist[:5] %}
+                                        <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;" title="{{ p.display_name }}">
                                         <img
                                             src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                                             alt="{{ p.display_name }}"
-                                            loading="lazy" decoding="async"
+                                            width="28" height="28" loading="lazy" decoding="async"
+                                            class="rounded-circle" style="object-fit:cover;"
                                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
                                         </span>
-                                    </a>
                                     {% endfor %}
-                                    {% if schedule.participants|length > 5 %}
-                                    <span class="badge bg-secondary ms-1">+{{ schedule.participants|length - 5 }}</span>
+                                    {% if plist|length > 5 %}
+                                        <span class="badge bg-secondary ms-1">+{{ plist|length - 5 }}</span>
                                     {% endif %}
-                                </div>
+                                    </div>
                                 {% endif %}
-                                </span>
+                                {% endif %}
+
+
+
+
+
+                    <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
+                    <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">                   
+
+
+
+                        {% if current_user.is_authenticated and current_user.administrator %}
+                        <button class="accordion-button collapsed py-2 px-2"
+                                type="button"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#collapse{{ schedule.schedule_id }}"
+                                aria-expanded="false"
+                                aria-controls="collapse{{ schedule.schedule_id }}"
+                                style="box-shadow:none;">
+                        <div class="d-flex w-100 align-items-center justify-content-between gap-2">
+                            <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
+                            <span class="me-2">
+                                {{ schedule.date | format_date }}({{ schedule.day_of_week }})
+                                {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
+                                {{ schedule.venue }}{{ schedule.court }}  
+
+                                 
+
+
+                                                                 
+                                
+
+                                <!-- {# ログインしているときだけ表示する #}
+                                {% if current_user.is_authenticated %}
+                                {# participants_info が無ければ [] にする #}
+                                {% set plist = schedule.participants_info | default([]) %}
+                                {% if plist %}
+                                    <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
+                                    {% for p in plist[:5] %}
+                                        <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;" title="{{ p.display_name }}">
+                                        <img
+                                            src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                                            alt="{{ p.display_name }}"
+                                            width="28" height="28" loading="lazy" decoding="async"
+                                            class="rounded-circle" style="object-fit:cover;"
+                                            onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                                        </span>
+                                    {% endfor %}
+                                    {% if plist|length > 5 %}
+                                        <span class="badge bg-secondary ms-1">+{{ plist|length - 5 }}</span>
+                                    {% endif %}
+                                    </div>
+                                {% endif %}
+                                {% endif %} -->
 
 
                             </div>
