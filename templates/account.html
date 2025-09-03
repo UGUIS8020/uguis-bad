@@ -27,18 +27,22 @@
    
     
     <!-- 現在のプロフィール画像（クリックで編集ページに移動） -->
-    <a href="{{ url_for('profile_image_edit', user_id=user.user_id) }}">
-        <img src="{{ profile_image_url if profile_image_url and user.profile_image_url|length > 0 and not user.profile_image_url.isspace() else default_image_url }}"
-            class="mb-2 rounded" alt="プロフィール画像" width="150"
+        <a href="{{ url_for('profile_image_edit', user_id=user.user_id) }}">
+        <img
+            src="{{ user.profile_image_url or default_image_url }}"
+            alt="プロフィール画像"
+            class="mb-2 rounded"
+            width="150" height="150"
             id="current-profile-image"
+            loading="lazy" decoding="async"
             style="transition: opacity 0.2s;"
             onmouseover="this.style.opacity='0.8'"
-            onmouseout="this.style.opacity='1'">
+            onmouseout="this.style.opacity='1'"
+            onerror="this.onerror=null;this.src='{{ default_image_url }}'">
         </a>
         <div class="mt-2">
-            <small class="text-muted">画像をクリックして変更</small>
+        <small class="text-muted">画像をクリックして変更</small>
         </div>
-    </div>  
 
          <div class="mt-3 text-center">
             <a href="{{ url_for('logout') }}" 

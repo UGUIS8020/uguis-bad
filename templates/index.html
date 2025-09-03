@@ -164,7 +164,48 @@
                                 {{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                 {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
                                 {{ schedule.venue }}{{ schedule.court }}
-                            </span>
+
+
+                                <style>
+                                .avatar-ig{
+                                    --size: 28px;   /* 画像の直径 */
+                                    --ring: 2px;    /* グラデリングの太さ */
+                                    --gap: 1px;     /* 画像とリングの間の白い縁 */
+                                    display:inline-grid; place-items:center;
+                                    width:calc(var(--size) + (var(--ring)+var(--gap))*2);
+                                    height:calc(var(--size) + (var(--ring)+var(--gap))*2);
+                                    border-radius:50%;
+                                    padding:calc(var(--ring) + var(--gap));
+                                    background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
+                                }
+                                .avatar-ig>img{
+                                    width:var(--size); height:var(--size);
+                                    border-radius:50%; object-fit:cover; display:block;
+                                    background:#fff; box-shadow:0 0 0 var(--gap) #fff;
+                                }
+                                </style>                                
+
+                                {% if current_user.is_authenticated and schedule.participants %}
+                                <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
+                                    {% for p in schedule.participants[:5] %}
+                                    <a href="{{ url_for('account', user_id=p.user_id) }}" class="text-decoration-none" title="{{ p.display_name }}">
+                                        <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;">
+                                        <img
+                                            src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                                            alt="{{ p.display_name }}"
+                                            loading="lazy" decoding="async"
+                                            onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                                        </span>
+                                    </a>
+                                    {% endfor %}
+                                    {% if schedule.participants|length > 5 %}
+                                    <span class="badge bg-secondary ms-1">+{{ schedule.participants|length - 5 }}</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                </span>
+
+
                             </div>
                             <div class="text-end">
                             募集 {{ schedule.participants_count }}/{{ schedule.max_participants }}

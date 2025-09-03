@@ -520,9 +520,10 @@ class User(UserMixin):
     def __init__(self, user_id, display_name, user_name, furigana, email, password_hash,
                  gender, date_of_birth, post_code, address, phone, guardian_name, emergency_phone, badminton_experience,
                  organization='other', administrator=False, 
-                 created_at=None, updated_at=None):
+                 created_at=None, updated_at=None, profile_image_url=None):
         super().__init__()
         self.id = user_id
+        self.user_id = user_id  
         self.display_name = display_name
         self.user_name = user_name
         self.furigana = furigana
@@ -538,8 +539,9 @@ class User(UserMixin):
         self.organization = organization
         self.badminton_experience = badminton_experience
         self.administrator = administrator
-        self.created_at = created_at or datetime.now().isoformat()
+        self.created_at = created_at or datetime.now().isoformat()        
         self.updated_at = updated_at or datetime.now().isoformat()
+        self.profile_image_url = profile_image_url
 
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)  # _password_hashを使用
@@ -572,7 +574,8 @@ class User(UserMixin):
             badminton_experience=get_value('badminton_experience'),
             administrator=bool(get_value('administrator', False)),
             created_at=get_value('created_at'),
-            updated_at=get_value('updated_at')
+            updated_at=get_value('updated_at'),
+            profile_image_url=get_value('profile_image_url')
         )
 
     def to_dynamodb_item(self):
@@ -1570,26 +1573,26 @@ def get_table_info():
 def account(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(Key={'user#user_id': user_id})
+        # 更新直後でも最新を読む
+        response = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
         user = response.get('Item')
-
         if not user:
             abort(404)
 
-        user['user_id'] = user.pop('user#user_id')
-        app.logger.info(f"User loaded successfully: {user_id}")
+        # 内部表記を統一
+        user['user_id'] = user.get('user#user_id', user_id)
 
-        form = UpdateUserForm(user_id=user_id, dynamodb_table=app.table)
+        form = UpdateUserForm(user_id=user_id, dynamodb_table=table)
 
-        # ✅ デフォルト画像URLを設定（GET/POST 両方で使える）
-        default_image_url = f"{app.config['S3_LOCATION']}profile-images/default.jpg"
-        app.logger.debug(f"default_image_url = {default_image_url}")
+        # デフォルト画像URL（テンプレ共通）
+        default_image_url = url_for('static', filename='images/default.jpg')
 
-        # ✅ プロフィール画像がない場合は None に設定
-        user['profile_image_url'] = user.get('profile_image_url', None)
+        # プロフィール画像URL（空/空白は None 扱い）
+        piu = user.get('profile_image_url')
+        user['profile_image_url'] = (piu if isinstance(piu, str) and piu.strip() else None)
 
         if request.method == 'GET':
-            app.logger.debug("Initializing form with GET request.")
+            # 既存値をフォームに流し込み
             form.display_name.data = user['display_name']
             form.user_name.data = user['user_name']
             form.furigana.data = user.get('furigana', None)
@@ -1601,21 +1604,16 @@ def account(user_id):
             form.gender.data = user['gender']
             try:
                 form.date_of_birth.data = datetime.strptime(user['date_of_birth'], '%Y-%m-%d')
-            except (ValueError, KeyError) as e:
-                app.logger.error(f"Invalid date format for user {user_id}: {e}")
+            except (ValueError, KeyError):
                 form.date_of_birth.data = None
             form.organization.data = user.get('organization', '')
             form.guardian_name.data = user.get('guardian_name', '')
             form.emergency_phone.data = user.get('emergency_phone', '')
 
-            return render_template(
-                'account.html',
-                form=form,
-                user=user,
-                default_image_url=default_image_url  # ← デフォルト画像URLを渡す
-            )
+            return render_template('account.html', form=form, user=user, default_image_url=default_image_url)
 
-        if request.method == 'POST' and form.validate_on_submit():            
+        # POST: 更新処理
+        if request.method == 'POST' and form.validate_on_submit():
             current_time = datetime.now(timezone.utc).isoformat()
             update_expression_parts = []
             expression_values = {}
@@ -1636,99 +1634,78 @@ def account(user_id):
             ]
 
             for field_name, db_field in fields_to_update:
-                field_value = getattr(form, field_name).data
-                if field_value:
+                value = getattr(form, field_name).data
+                if value:
                     update_expression_parts.append(f"{db_field} = :{db_field}")
-                    expression_values[f":{db_field}"] = field_value
+                    expression_values[f":{db_field}"] = value
 
             if form.date_of_birth.data:
-                date_str = form.date_of_birth.data.strftime('%Y-%m-%d')
                 update_expression_parts.append("date_of_birth = :date_of_birth")
-                expression_values[':date_of_birth'] = date_str
+                expression_values[':date_of_birth'] = form.date_of_birth.data.strftime('%Y-%m-%d')
 
             if form.password.data:
-                hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
-                if hashed_password != user.get('password'):
+                hashed = generate_password_hash(form.password.data, method='pbkdf2:sha256')
+                if hashed != user.get('password'):
                     update_expression_parts.append("password = :password")
-                    expression_values[':password'] = hashed_password
+                    expression_values[':password'] = hashed
 
             # 更新日時は常に更新
             update_expression_parts.append("updated_at = :updated_at")
             expression_values[':updated_at'] = current_time
 
+            # 画像アップロード（この経路を使う場合のみ）
             if form.profile_image.data:
                 image_file = form.profile_image.data
                 filename = secure_filename(image_file.filename)
                 s3_key = f"profile-images/{user_id}/{filename}"
-
                 try:
-                    # Pillow で画像を開く
                     img = Image.open(image_file)
-
-                    # 最大サイズ指定（アスペクト比保持で縮小）
-                    max_size = (300, 300)
-                    img.thumbnail(max_size)
-
-                    # バッファにJPEG形式で保存
+                    img.thumbnail((300, 300))
                     buffer = BytesIO()
-                    img.save(buffer, format='JPEG', quality=85)  # PNGにしたいなら format='PNG'
+                    img.save(buffer, format='JPEG', quality=85)
                     buffer.seek(0)
-
-                    # S3にアップロード
-                    app.s3.upload_fileobj(
-                        buffer,
-                        app.config["S3_BUCKET"],
-                        s3_key,                        
-                    )
-
-                    # URLをDynamoDBに保存
+                    app.s3.upload_fileobj(buffer, app.config["S3_BUCKET"], s3_key)
                     image_url = f"{app.config['S3_LOCATION']}{s3_key}"
                     update_expression_parts.append("profile_image_url = :profile_image_url")
                     expression_values[":profile_image_url"] = image_url
-
                 except ClientError as e:
-                    app.logger.error(f"S3 upload failed: {e}", exc_info=True)
+                    app.logger.error(f"S3 upload failed in /account for user {user_id}: {e}", exc_info=True)
                     flash("画像のアップロードに失敗しました。", "danger")
-
                 except Exception as e:
-                    app.logger.error(f"Image processing failed: {e}", exc_info=True)
+                    app.logger.error(f"Image processing failed in /account for user {user_id}: {e}", exc_info=True)
                     flash("画像の処理に失敗しました。", "danger")
-                    
 
             try:
                 if update_expression_parts:
                     update_expression = "SET " + ", ".join(update_expression_parts)
-                    app.logger.debug(f"Final update expression: {update_expression}")
-                    response = table.update_item(
+                    table.update_item(
                         Key={'user#user_id': user_id},
                         UpdateExpression=update_expression,
                         ExpressionAttributeValues=expression_values,
                         ReturnValues="ALL_NEW"
                     )
-                    app.logger.info(f"User {user_id} updated successfully: {response}")
                     flash('プロフィールが更新されました。', 'success')
                 else:
                     flash('更新する項目がありません。', 'info')
-                
-                return redirect(url_for('account', user_id=user_id)) 
-            except ClientError as e:
-                # DynamoDB クライアントエラーの場合
-                error_code = e.response['Error']['Code']
-                error_message = e.response['Error']['Message']
-                app.logger.error(f"DynamoDB ClientError in account route for user {user_id}: {error_message} (Code: {error_code})", exc_info=True)
-                flash(f'DynamoDBでエラーが発生しました: {error_message}', 'error')       
 
-            except Exception as e:                
-                app.logger.error(f"Unexpected error in account route for user {user_id}: {e}", exc_info=True)
+                return redirect(url_for('account', user_id=user_id))
+
+            except ClientError as e:
+                app.logger.error(f"DynamoDB ClientError in /account for user {user_id}: {e}", exc_info=True)
+                flash('DynamoDBでエラーが発生しました。', 'error')
+                return redirect(url_for('account', user_id=user_id))
+            except Exception as e:
+                app.logger.error(f"Unexpected error in /account for user {user_id}: {e}", exc_info=True)
                 flash('予期せぬエラーが発生しました。', 'error')
                 return redirect(url_for('index'))
-    except Exception as e:        
-        app.logger.error(f"Unexpected error in account route for user {user_id}: {e}", exc_info=True)
+
+        # POST だがバリデーションNG → 再表示
+        return render_template('account.html', form=form, user=user, default_image_url=default_image_url)
+
+    except Exception as e:
+        app.logger.error(f"Unexpected error in /account for user {user_id}: {e}", exc_info=True)
         flash('予期せぬエラーが発生しました。', 'error')
         return redirect(url_for('index'))
-    
-    app.logger.warning(f"Fallthrough reached in account view for user {user_id}")
-    return redirect(url_for('account', user_id=user_id))
 
 def is_image_accessible(url):
     try:
@@ -2077,106 +2054,245 @@ def get_user_info(user_id):
         app.logger.error(f"/api/user_info エラー: {e}")
         return jsonify({'error': 'サーバーエラー'}), 500
     
-
 @app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
 @login_required
 def profile_image_edit(user_id):
     """プロフィール画像編集ページ"""
-    
-    # デバッグ用ログ追加
-    session_user_id = session.get('user_id')
-    app.logger.debug(f"Session user_id: {session_user_id}")
-    app.logger.debug(f"URL user_id: {user_id}")
-    app.logger.debug(f"Match: {session_user_id == user_id}")
-    
     try:
-        # 既存のアカウントルートと同じ方法でユーザー情報を取得
         table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(Key={'user#user_id': user_id})
-        user = response.get('Item')
-
+        resp = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        user = resp.get('Item')
         if not user:
             flash('ユーザーが見つかりません。', 'error')
             return redirect(url_for('index'))
-        
-        # user_id キーを調整（既存コードと同じ処理）
-        user['user_id'] = user.pop('user#user_id')
-        
-        # 現在のユーザーが編集権限を持っているかチェック
-        if session.get('user_id') != user_id:
+
+        # 内部表記を統一
+        user['user_id'] = user.get('user#user_id', user_id)
+
+        # 権限チェック
+        if session.get('_user_id') != user_id:
             flash('アクセス権限がありません。', 'error')
             return redirect(url_for('index'))
-        
+
+        # POST: 画像アップロード
         if request.method == 'POST':
-            # 画像アップロード処理
+            ts = int(time.time())
+
+            # 入力取り出し
             if 'profile_image' not in request.files:
                 flash('ファイルが選択されていません。', 'error')
                 return redirect(request.url)
-            
-            file = request.files['profile_image']
-            if file.filename == '':
+
+            profile_file = request.files['profile_image']      # フロントでトリミング済み（JPEG想定）
+            orig_file    = request.files.get('original_image') # 元画像（任意）
+
+            if not profile_file or profile_file.filename == '':
                 flash('ファイルが選択されていません。', 'error')
                 return redirect(request.url)
-            
-            if file and allowed_file(file.filename):
-                try:
-                    # 既存のアカウントルートと同じ画像処理方法を使用
-                    filename = secure_filename(file.filename)
-                    s3_key = f"profile-images/{user_id}/{filename}"
 
-                    # Pillow で画像を開く
-                    img = Image.open(file)
-                    max_size = (300, 300)
-                    img.thumbnail(max_size)
-
-                    # バッファにJPEG形式で保存
-                    buffer = BytesIO()
-                    img.save(buffer, format='JPEG', quality=85)
-                    buffer.seek(0)
-
-                    # S3にアップロード
-                    app.s3.upload_fileobj(
-                        buffer,
-                        app.config["S3_BUCKET"],
-                        s3_key,
-                    )
-
-                    # URLをDynamoDBに保存
-                    image_url = f"{app.config['S3_LOCATION']}{s3_key}"
-                    current_time = datetime.now(timezone.utc).isoformat()
-                    
-                    table.update_item(
-                        Key={'user#user_id': user_id},
-                        UpdateExpression="SET profile_image_url = :profile_image_url, updated_at = :updated_at",
-                        ExpressionAttributeValues={
-                            ":profile_image_url": image_url,
-                            ":updated_at": current_time
-                        },
-                        ReturnValues="ALL_NEW"
-                    )
-                    
-                    flash('プロフィール画像を更新しました。', 'success')
-                    return redirect(url_for('account', user_id=user_id))
-                    
-                except ClientError as e:
-                    app.logger.error(f"S3 upload failed for user {user_id}: {e}")
-                    flash('画像のアップロードに失敗しました。', 'error')
-                except Exception as e:
-                    app.logger.error(f"Profile image upload error for user {user_id}: {str(e)}")
-                    flash('画像のアップロード中にエラーが発生しました。', 'error')
-            else:
+            # 拡張子バリデーション
+            def _is_allowed_upload(f):
+                return f and f.filename and allowed_file(f.filename)
+            if not _is_allowed_upload(profile_file):
                 flash('サポートされていないファイル形式です。', 'error')
-        
-        # GET リクエストまたはエラー時の表示
-        default_image_url = f"{app.config['S3_LOCATION']}profile-images/default.jpg"
-        user['profile_image_url'] = user.get('profile_image_url', None)
-        
-        return render_template('profile_image_edit.html', 
-                             user=user, 
-                             default_image_url=default_image_url)
-    
+                return redirect(request.url)
+            if orig_file and not _is_allowed_upload(orig_file):
+                flash('サポートされていないファイル形式です。', 'error')
+                return redirect(request.url)
+
+            # ファイル名（largeはオリジナル基準、無ければprofile基準）
+            base_name = secure_filename((orig_file or profile_file).filename)
+            base, _ext = os.path.splitext(base_name)
+            base_filename = base or "image"
+            ext = (_ext or ".jpg").lower()
+
+            # 座標（クライアントで計算したクロップ位置が来ていれば使用）
+            sx  = request.form.get('crop_sx',   type=float)
+            sy  = request.form.get('crop_sy',   type=float)
+            ssz = request.form.get('crop_side', type=float)
+
+            # large と サーバ側プロフィール生成用に元画像のバイト列を確保
+            source_for_large = orig_file or profile_file
+            source_for_large.stream.seek(0)
+            orig_bytes = source_for_large.stream.read()
+
+            # 元画像の健全性チェック（偽装拡張子など）
+            try:
+                _tmp = Image.open(BytesIO(orig_bytes))
+                _tmp.verify()
+                del _tmp
+            except Exception:
+                flash('画像ファイルを読み込めませんでした。', 'error')
+                return redirect(request.url)
+
+            # 実処理用に再オープン
+            try:
+                src = Image.open(BytesIO(orig_bytes))
+            except UnidentifiedImageError:
+                flash('画像ファイルを認識できませんでした。', 'error')
+                return redirect(request.url)
+
+            # EXIF回転補正
+            try:
+                from PIL import ImageOps
+                src = ImageOps.exif_transpose(src)
+            except Exception:
+                pass
+
+            # ===== プロフィール画像（正方形300px, JPEG） =====
+            profile_bytes = None
+
+            # 元画像＋座標が揃っている場合はサーバ側で同じ位置を正方形で切り出す
+            if orig_file and sx is not None and sy is not None and ssz is not None and ssz > 0:
+                iw, ih = src.size
+                left = max(0.0, min(float(iw - 1), sx))
+                top  = max(0.0, min(float(ih - 1), sy))
+                max_side = min(iw - left, ih - top)
+                side = max(1.0, min(float(ssz), float(max_side)))
+
+                box = (int(round(left)),
+                       int(round(top)),
+                       int(round(left + side)),
+                       int(round(top + side)))
+
+                prof_img = src.crop(box)
+
+                # JPEG保存に向けたモード調整（透過は白合成）
+                if prof_img.mode in ('RGBA', 'LA') or (prof_img.mode == 'P' and 'transparency' in prof_img.info):
+                    bg = Image.new('RGB', prof_img.size, (255, 255, 255))
+                    alpha = prof_img.split()[-1] if prof_img.mode in ('RGBA', 'LA') else prof_img.convert('RGBA').split()[-1]
+                    bg.paste(prof_img, mask=alpha)
+                    prof_img = bg
+                elif prof_img.mode != 'RGB':
+                    prof_img = prof_img.convert('RGB')
+
+                # 300×300に縮小（アスペクト比維持＋短辺基準のthumbnailで正方形）
+                prof_img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+
+                _pbuf = BytesIO()
+                prof_img.save(_pbuf, format='JPEG', quality=85, optimize=True, progressive=True)
+                profile_bytes = _pbuf.getvalue()
+
+            # フォールバック：フロントでトリミング済みの画像をそのまま使用
+            if profile_bytes is None:
+                profile_file.stream.seek(0)
+                profile_bytes = profile_file.stream.read()
+
+            profile_s3_key = f"profile-images/{user_id}/{base_filename}_{ts}_profile.jpg"
+            profile_content_type = "image/jpeg"
+
+            # ===== large（長辺2000px・比率維持）=====
+            # アニメGIF/WEBPは無変換で保存、それ以外は長辺2000に縮小して拡張子に合わせて保存
+            mime_map = {
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".gif": "image/gif",
+                ".webp": "image/webp"
+            }
+            large_content_type = mime_map.get(ext, getattr(source_for_large, "mimetype", None) or "application/octet-stream")
+            large_s3_key = f"profile-images/{user_id}/{base_filename}_{ts}_large{ext}"
+
+            try:
+                src2 = Image.open(BytesIO(orig_bytes))
+                if getattr(src2, "is_animated", False) and ext in (".gif", ".webp"):
+                    large_buf = BytesIO(orig_bytes)
+                else:
+                    # EXIF回転補正
+                    try:
+                        from PIL import ImageOps
+                        src2 = ImageOps.exif_transpose(src2)
+                    except Exception:
+                        pass
+
+                    # 透過→非透過への変換はJPEG保存時のみ白合成
+                    if ext in (".jpg", ".jpeg") and (src2.mode in ('RGBA', 'LA') or (src2.mode == 'P' and 'transparency' in src2.info)):
+                        bg = Image.new('RGB', src2.size, (255, 255, 255))
+                        alpha = src2.split()[-1] if src2.mode in ('RGBA', 'LA') else src2.convert('RGBA').split()[-1]
+                        bg.paste(src2, mask=alpha)
+                        src2 = bg
+                    elif src2.mode not in ('RGB', 'RGBA', 'LA', 'P'):
+                        src2 = src2.convert('RGB')
+
+                    # 長辺2000px まで縮小（小さければ無変更）
+                    if max(src2.size) > 2000:
+                        src2.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
+
+                    large_buf = BytesIO()
+                    if ext in (".jpg", ".jpeg"):
+                        if src2.mode != 'RGB':
+                            src2 = src2.convert('RGB')
+                        src2.save(large_buf, format='JPEG', quality=90, optimize=True, progressive=True)
+                    elif ext == ".png":
+                        src2.save(large_buf, format='PNG', optimize=True)
+                    elif ext == ".webp":
+                        src2.save(large_buf, format='WEBP', quality=90, method=6)
+                    elif ext == ".gif":
+                        src2.save(large_buf, format='GIF', optimize=True)
+                    else:
+                        # 想定外は無加工
+                        large_buf = BytesIO(orig_bytes)
+                        large_content_type = getattr(source_for_large, "mimetype", None) or "application/octet-stream"
+
+                    large_buf.seek(0)
+
+            except UnidentifiedImageError:
+                flash('画像ファイルを認識できませんでした。', 'error')
+                return redirect(request.url)
+
+            # ===== S3 アップロード（ACLなし）=====
+            try:
+                app.s3.upload_fileobj(
+                    Fileobj=BytesIO(profile_bytes),
+                    Bucket=app.config["S3_BUCKET"],
+                    Key=profile_s3_key,
+                    ExtraArgs={
+                        "ContentType": profile_content_type,
+                        "CacheControl": "public, max-age=31536000, immutable",
+                    },
+                )
+                app.s3.upload_fileobj(
+                    Fileobj=large_buf,
+                    Bucket=app.config["S3_BUCKET"],
+                    Key=large_s3_key,
+                    ExtraArgs={
+                        "ContentType": large_content_type,
+                        "CacheControl": "public, max-age=31536000, immutable",
+                    },
+                )
+            except ClientError:
+                flash('画像のアップロードに失敗しました（S3）。', 'error')
+                return redirect(request.url)
+
+            # URL作成
+            base_url = app.config.get("S3_LOCATION", "").rstrip("/")
+            if not base_url:
+                region = app.config.get("AWS_REGION") or os.getenv("AWS_REGION") or "ap-northeast-1"
+                base_url = f"https://{app.config['S3_BUCKET']}.s3.{region}.amazonaws.com"
+            profile_image_url = f"{base_url}/{profile_s3_key}"
+            large_image_url   = f"{base_url}/{large_s3_key}"
+
+            # DynamoDB 更新
+            now_iso = datetime.now(timezone.utc).isoformat()
+            table.update_item(
+                Key={'user#user_id': user_id},
+                UpdateExpression="SET profile_image_url = :p, large_image_url = :l, updated_at = :u",
+                ExpressionAttributeValues={
+                    ":p": profile_image_url,
+                    ":l": large_image_url,
+                    ":u": now_iso
+                },
+                ReturnValues="NONE"
+            )
+
+            flash('プロフィール画像を更新しました。', 'success')
+            return redirect(url_for('account', user_id=user_id))
+
+        # GET（初回表示）
+        default_image_url = url_for('static', filename='images/default.jpg')
+        user['profile_image_url'] = user.get('profile_image_url')
+        return render_template('profile_image_edit.html', user=user, default_image_url=default_image_url)
+
     except Exception as e:
-        app.logger.error(f"Unexpected error in profile_image_edit route for user {user_id}: {str(e)}")
+        app.logger.error(f"Unexpected error in profile_image_edit for {user_id}: {e}", exc_info=True)
         flash('予期しないエラーが発生しました。', 'error')
         return redirect(url_for('index'))
 
@@ -2184,8 +2300,7 @@ def profile_image_edit(user_id):
 def allowed_file(filename):
     """許可されたファイル拡張子かチェック"""
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 match_table = dynamodb.Table("bad-game-match_entries")
