@@ -177,7 +177,7 @@
                                 {% set plist = schedule.participants_info | default([]) %}
                                 {% if plist %}
                                     <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
-                                    {% for p in plist[:5] %}
+                                    {% for p in plist[:7] %}
                                         <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;" title="{{ p.display_name }}">
                                         <img
                                             src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
@@ -187,8 +187,8 @@
                                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
                                         </span>
                                     {% endfor %}
-                                    {% if plist|length > 5 %}
-                                        <span class="badge bg-secondary ms-1">+{{ plist|length - 5 }}</span>
+                                    {% if plist|length > 7 %}
+                                        <span class="badge bg-secondary ms-1">+{{ plist|length - 7 }}</span>
                                     {% endif %}
                                     </div>
                                 {% endif %}
