@@ -607,8 +607,7 @@ def entry():
             "match_count": 0,     # 試合回数を初期化
         }
     match_table.put_item(Item=entry_item)
-    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}")
-    flash("試合への参加登録が完了しました", "success")
+    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}")    
 
     return redirect(url_for("game.court"))
 
@@ -835,12 +834,7 @@ def create_pairings():
         #     if entry_id:
         #         increment_rest_count(entry_id)
 
-        # 10. 結果表示
-        pending_names = [p.name for p in waiting_players]
-        if pending_names:
-            flash(f"{len(matches)}件の試合を作成しました。参加待ち: {', '.join(pending_names)}", "success")
-        else:
-            flash(f"{len(matches)}件の試合を作成しました。", "success")
+        # 10. 結果表示     
 
         return redirect(url_for("game.court"))
 
@@ -1734,8 +1728,7 @@ def reset_participants():
         import traceback
         error_trace = traceback.format_exc()
         current_app.logger.error(f"[全削除失敗] {str(e)}")
-        current_app.logger.error(f"スタックトレース: {error_trace}")
-        flash("参加者の全削除に失敗しました", 'danger')
+        current_app.logger.error(f"スタックトレース: {error_trace}")        
 
     return redirect(url_for('game.court'))
 
