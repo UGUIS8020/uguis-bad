@@ -56,6 +56,14 @@ def court():
         current_app.logger.info(f"📊 休憩中プレイヤー数: {len(resting_players)}")
         current_app.logger.info(f"📊 試合中プレイヤー数: {len(playing_players)}")
         
+        # 🔒 進行中試合のチェック機能を追加
+        has_ongoing = has_ongoing_matches()
+        completed, total = get_match_progress()
+        current_courts = get_current_match_status()
+        
+        current_app.logger.info(f"[DEBUG] has_ongoing_matches: {has_ongoing}")
+        current_app.logger.info(f"[DEBUG] match_progress: {completed}/{total}")
+        
         # ユーザー状態の判定
         user_id = current_user.get_id()
         is_registered = any(p['user_id'] == user_id for p in pending_players)
@@ -89,14 +97,19 @@ def court():
             current_user_skill_score=skill_score,
             current_user_match_count=match_count,
             match_courts=match_courts,
-            match_id=match_id
+            match_id=match_id,
+            # 🔒 進行中試合の情報を追加
+            has_ongoing_matches=has_ongoing,
+            completed_matches=completed,
+            total_matches=total,
+            current_courts=current_courts
         )
         
     except Exception as e:
         current_app.logger.error(f"コート入場エラー詳細: {str(e)}")
         import traceback
         current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-        return f"エラー: {e}"    
+        return f"エラー: {e}"   
 
     
 def _now_utc_iso():
@@ -749,6 +762,11 @@ def update_player_for_rest(entry_id):
 @bp_game.route('/create_pairings', methods=["POST"])
 @login_required
 def create_pairings():
+    # 進行中の試合チェック
+    if has_ongoing_matches():
+        flash('進行中の試合があるため、新しいペアリングを実行できません。全ての試合のスコア入力を完了してください。', 'warning')
+        return redirect(url_for('game.court'))
+    
     try:
         max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)        
 
@@ -765,6 +783,11 @@ def create_pairings():
         if len(entries) < 4:
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
+
+        # 再度チェック（二重送信防止）
+        if has_ongoing_matches():
+            flash('他のユーザーが同時にペアリングを実行したため、処理を中止しました。', 'warning')
+            return redirect(url_for('game.court'))
 
         # 🔍 スキルスコア最下位2名を選定
         skill_sorted = sorted(
@@ -834,7 +857,9 @@ def create_pairings():
         #     if entry_id:
         #         increment_rest_count(entry_id)
 
-        # 10. 結果表示     
+        # 10. 成功メッセージ
+        flash(f"ペアリングが正常に実行されました。{len(matches)}試合を開始します。", "success")
+        current_app.logger.info(f"ペアリング成功: {len(matches)}試合, {len(waiting_players)}人待機")
 
         return redirect(url_for("game.court"))
 
@@ -2014,6 +2039,251 @@ def test_data_status():
         
     except Exception as e:
         return f"エラー: {e}"
+    
 
+  # ペアリングを実行するボタンの制御  
+def has_ongoing_matches():
+    """進行中の試合があるかチェック（DynamoDB版）"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # entry_statusが"playing"のエントリーがあるかチェック
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        ongoing_count = len(response.get("Items", []))
+        current_app.logger.info(f"進行中の試合プレイヤー数: {ongoing_count}")
+        
+        return ongoing_count > 0
+        
+    except Exception as e:
+        current_app.logger.error(f"進行中試合チェックエラー: {str(e)}")
+        return False  # エラー時は安全側に倒してペアリングを許可
+
+def get_match_progress():
+    """試合進行状況を取得（DynamoDB版）"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # 現在の試合セッションのプレイヤーを取得
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").is_in(["playing", "finished"])
+        )
+        
+        items = response.get("Items", [])
+        
+        # 最新のmatch_idを取得して、そのセッションのみを対象にする
+        if not items:
+            return 0, 0
+            
+        # match_idでグループ化
+        match_sessions = {}
+        for item in items:
+            match_id = item.get("match_id", "")
+            if match_id:
+                if match_id not in match_sessions:
+                    match_sessions[match_id] = {"playing": 0, "finished": 0}
+                status = item.get("entry_status", "")
+                if status in ["playing", "finished"]:
+                    match_sessions[match_id][status] += 1
+        
+        # 最新のセッション（最も多くのプレイヤーがいるセッション）を取得
+        if not match_sessions:
+            return 0, 0
+            
+        latest_session = max(match_sessions.items(), key=lambda x: sum(x[1].values()))
+        session_data = latest_session[1]
+        
+        total_players = session_data["playing"] + session_data["finished"]
+        finished_players = session_data["finished"]
+        
+        # 試合数に変換（4人で1試合）
+        total_matches = total_players // 4
+        # 完了した試合数を推定（全員が完了したコートを計算）
+        completed_matches = finished_players // 4
+        
+        current_app.logger.info(f"試合進行状況: {completed_matches}/{total_matches} 試合完了")
+        
+        return completed_matches, total_matches
+        
+    except Exception as e:
+        current_app.logger.error(f"試合進行状況取得エラー: {str(e)}")
+        return 0, 0
+
+def get_current_match_status():
+    """現在の試合状況の詳細を取得"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        playing_players = response.get("Items", [])
+        
+        # コート別にグループ化
+        courts = {}
+        for player in playing_players:
+            court_num = player.get("court_number", 0)
+            if court_num not in courts:
+                courts[court_num] = []
+            courts[court_num].append(player)
+        
+        return courts
+        
+    except Exception as e:
+        current_app.logger.error(f"試合状況取得エラー: {str(e)}")
+        return {}
+
+def complete_match_for_player(entry_id):
+    """プレイヤーの試合完了処理"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # エントリーのステータスをfinishedに更新
+        response = match_table.scan(
+            FilterExpression=Attr("entry_id").eq(entry_id)
+        )
+        
+        items = response.get("Items", [])
+        if items:
+            entry = items[0]
+            match_table.update_item(
+                Key={
+                    'user_id': entry['user_id'],
+                    'joined_at': entry['joined_at']
+                },
+                UpdateExpression='SET entry_status = :status',
+                ExpressionAttributeValues={
+                    ':status': 'finished'
+                }
+            )
+            
+            # 全試合完了チェック
+            if not has_ongoing_matches():
+                current_app.logger.info("全ての試合が完了しました！")
+                # 必要に応じて通知やクリーンアップ処理を追加
+            
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"試合完了処理エラー: {str(e)}")
+        return False
+    
+# routes.py の修正版
+@bp_game.route('/game')  # または適切なルート名
+def game_view():
+    try:
+        # 既存のpendingプレイヤー取得処理
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        response = match_table.scan(FilterExpression=Attr("entry_status").eq("pending"))
+        entries_by_user = {}
+        for e in response.get("Items", []):
+            uid, joined_at = e["user_id"], e.get("joined_at", "")
+            if uid not in entries_by_user or joined_at > entries_by_user[uid].get("joined_at", ""):
+                entries_by_user[uid] = e
+        pending_players = list(entries_by_user.values())
+        
+        # 進行中の試合チェック
+        has_ongoing = has_ongoing_matches()
+        completed, total = get_match_progress()
+        current_courts = get_current_match_status()
+        
+        return render_template('game.html',
+            pending_players=pending_players,
+            has_ongoing_matches=has_ongoing,
+            completed_matches=completed,
+            total_matches=total,
+            current_courts=current_courts
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"ゲーム画面表示エラー: {str(e)}")
+        flash("データの取得中にエラーが発生しました。", "error")
+        return render_template('game.html', pending_players=[], has_ongoing_matches=False)
+
+
+# 管理者用のリセット機能（オプション）
+@bp_game.route('/reset_ongoing_matches', methods=['POST'])
+@login_required
+def reset_ongoing_matches():
+    """管理者が進行中の試合を強制リセット"""
+    if not current_user.administrator:
+        flash('管理者権限が必要です。', 'error')
+        return redirect(url_for('game.court'))
+    
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # playing状態のエントリーを取得
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        playing_entries = response.get("Items", [])
+        reset_count = 0
+        
+        # 各エントリーをpendingに戻す
+        for entry in playing_entries:
+            try:
+                match_table.update_item(
+                    Key={
+                        'user_id': entry['user_id'],
+                        'joined_at': entry['joined_at']
+                    },
+                    UpdateExpression='SET entry_status = :status REMOVE match_id, court_number, team',
+                    ExpressionAttributeValues={
+                        ':status': 'pending'
+                    }
+                )
+                reset_count += 1
+            except Exception as update_error:
+                current_app.logger.error(f"エントリーリセット失敗 {entry.get('user_id')}: {update_error}")
+        
+        flash(f'進行中の試合をリセットしました。{reset_count}人をエントリー待ちに戻しました。', 'warning')
+        current_app.logger.info(f"管理者による試合リセット: {reset_count}人")
+        
+    except Exception as e:
+        current_app.logger.error(f"試合リセットエラー: {str(e)}")
+        flash('試合リセット中にエラーが発生しました。', 'error')
+    
+    return redirect(url_for('game.court'))
+
+# スコア入力完了時の処理を更新する関数（既存のスコア入力処理に追加）
+def complete_match_for_player(entry_id):
+    """プレイヤーの試合完了処理"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # エントリーのステータスをfinishedに更新
+        response = match_table.scan(
+            FilterExpression=Attr("entry_id").eq(entry_id)
+        )
+        
+        items = response.get("Items", [])
+        if items:
+            entry = items[0]
+            match_table.update_item(
+                Key={
+                    'user_id': entry['user_id'],
+                    'joined_at': entry['joined_at']
+                },
+                UpdateExpression='SET entry_status = :status',
+                ExpressionAttributeValues={
+                    ':status': 'finished'
+                }
+            )
+            
+            # 全試合完了チェック
+            if not has_ongoing_matches():
+                current_app.logger.info("全ての試合が完了しました！")
+                # 必要に応じて通知やクリーンアップ処理を追加
+            
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"試合完了処理エラー: {str(e)}")
+        return False
    
 

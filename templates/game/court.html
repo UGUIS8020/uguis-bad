@@ -206,21 +206,7 @@
                 </div>
             </div>
         </div>  
-        </div></div>
-
-        <!-- 現在の状態表示 -->        
-
-        <!-- {% if current_user.administrator %}
-            <div class="d-flex justify-content-between align-items-center mb-4">
-              <a href="{{ url_for('game.create_pairings') }}" class="btn btn-primary">
-                ペアリングを実行する
-              </a>
-            </div>
-            {% endif %} -->
-
-        <!-- あなたの状態 - シンプル版 -->            
-
-        <!-- 参加待ちプレイヤー一覧 -->            
+        </div></div>         
 
         <div class="card-header bg-primary text-white d-flex justify-content-center align-items-center gap-4 py-2">
             <h5 class="mb-0">
@@ -303,27 +289,77 @@
 
 
 
-        <!-- ペアリング実行ボタン（管理者のみ表示） -->
-{% if current_user.administrator %}
+       {% if current_user.administrator %}
 <div class="card status-card mb-4">
     <div class="card-body">
+        <!-- 進行中の試合がある場合の表示 -->
+        {% if has_ongoing_matches %}
+        <div class="alert alert-warning mb-3">
+            <div class="d-flex align-items-center">
+                <i class="fa-solid fa-clock me-2"></i>
+                <div>
+                    <strong>進行中の試合があります</strong>
+                    <div class="small">{{ completed_matches }}/{{ total_matches }}試合完了</div>
+                </div>
+            </div>
+            <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar bg-warning" 
+                     style="width: {{ (completed_matches / total_matches * 100) if total_matches > 0 else 0 }}%">
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
         <form method="POST" action="{{ url_for('game.create_pairings') }}">
             <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
                 <div class="d-flex align-items-center">
-                    <!-- <label for="max_courts" class="form-label fw-bold mb-0 me-2">使用コート数：</label> -->
-                    <select name="max_courts" id="max_courts" class="form-select">
+                    <select name="max_courts" id="max_courts" 
+                            class="form-select" 
+                            {{ 'disabled' if has_ongoing_matches else '' }}>
                         {% for i in range(1, 7) %}
                             <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
                         {% endfor %}
                     </select>
                 </div>
 
-                <button type="submit" class="btn btn-success btn-lg">
-                    <i class="fa-solid fa-circle-play"></i>
-                    ペアリングを実行する（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
+                <button type="submit" 
+                        class="btn btn-lg {{ 'btn-secondary' if has_ongoing_matches else 'btn-success' }}"
+                        {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% if has_ongoing_matches %}
+                        <i class="fa-solid fa-clock"></i>
+                        スコア入力待ち
+                    {% else %}
+                        <i class="fa-solid fa-circle-play"></i>
+                        ペアリングを実行する（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
+                    {% endif %}
                 </button>
+                
+                <!-- 管理者用リセットボタン（進行中の試合がある場合のみ表示） -->
+                {% if has_ongoing_matches and current_user.administrator %}
+                <div class="ms-2">
+                    <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}" 
+                          style="display: inline;"
+                          onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
+                        <button type="submit" class="btn btn-warning btn-sm">
+                            <i class="fa-solid fa-refresh"></i>
+                            強制リセット
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
             </div>
         </form>
+        
+        <!-- デバッグ情報（一時的に表示） -->
+        {% if current_user.administrator %}
+        <div class="mt-3 p-2 bg-light border rounded">
+            <small>
+                <strong>DEBUG:</strong> 
+                has_ongoing={{ has_ongoing_matches }}, 
+                progress={{ completed_matches }}/{{ total_matches }}
+            </small>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endif %}
