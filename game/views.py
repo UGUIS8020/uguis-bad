@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 import boto3
 import uuid
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta, timezone
 import random
 from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
@@ -12,9 +12,8 @@ import pytz
 import re
 from decimal import Decimal
 
-
-
 bp_game = Blueprint('game', __name__)
+
 
 # DynamoDBリソース取得
 dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
@@ -57,6 +56,14 @@ def court():
         current_app.logger.info(f"📊 休憩中プレイヤー数: {len(resting_players)}")
         current_app.logger.info(f"📊 試合中プレイヤー数: {len(playing_players)}")
         
+        # 🔒 進行中試合のチェック機能を追加
+        has_ongoing = has_ongoing_matches()
+        completed, total = get_match_progress()
+        current_courts = get_current_match_status()
+        
+        current_app.logger.info(f"[DEBUG] has_ongoing_matches: {has_ongoing}")
+        current_app.logger.info(f"[DEBUG] match_progress: {completed}/{total}")
+        
         # ユーザー状態の判定
         user_id = current_user.get_id()
         is_registered = any(p['user_id'] == user_id for p in pending_players)
@@ -79,7 +86,7 @@ def court():
             current_app.logger.info(f"🔍 match_courtsのキー数: {len(match_courts)}")
         else:
             match_courts = {}
-            current_app.logger.warning("⚠️ match_idが取得できませんでした")
+            current_app.logger.warning("進行中の試合はありません")
         
         return render_template(
             'game/court.html',
@@ -90,161 +97,208 @@ def court():
             current_user_skill_score=skill_score,
             current_user_match_count=match_count,
             match_courts=match_courts,
-            match_id=match_id
+            match_id=match_id,
+            # 🔒 進行中試合の情報を追加
+            has_ongoing_matches=has_ongoing,
+            completed_matches=completed,
+            total_matches=total,
+            current_courts=current_courts
         )
         
     except Exception as e:
         current_app.logger.error(f"コート入場エラー詳細: {str(e)}")
         import traceback
         current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-        return f"エラー: {e}"    
+        return f"エラー: {e}"   
 
     
-def get_latest_match_id():
-    """最新の試合IDを取得する関数"""
-    current_app.logger.info("🔍 get_latest_match_id 開始")
-    
-    # 1. 進行中の試合を探す
-    current_app.logger.info("🔍 ステップ1: 進行中の試合を探す")
-    match_table = current_app.dynamodb.Table("bad-game-match_entries")
-    response = match_table.scan(
-        FilterExpression=Attr("entry_status").eq("playing")
+def _now_utc_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def _since_iso(hours=12):
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+def _scan_all(table, **kwargs):
+    """DynamoDB Scanのページネーション吸収（必要最小限で）"""
+    items = []
+    resp = table.scan(**kwargs)
+    items.extend(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+    return items
+
+def _has_entries_for_match(match_table, match_id):
+    resp = match_table.scan(
+        ProjectionExpression="entry_status",
+        FilterExpression=Attr("match_id").eq(match_id) & Attr("entry_status").eq("playing"),
+        Limit=1,
+        ConsistentRead=True,
     )
-    playing_items = response.get("Items", [])
+    items = resp.get("Items", [])
+    current_app.logger.info(f"🔍 _has_entries_for_match({match_id}): {len(items)}件のplayingエントリ")
+    return bool(items)
+
+# def get_latest_match_id(hours_window=12):
+#     """'playing' が残っている最新の match_id を返す（なければ None）"""
+#     current_app.logger.info("🔍 get_latest_match_id 開始")
+
+#     match_table  = current_app.dynamodb.Table("bad-game-match_entries")
+#     result_table = current_app.dynamodb.Table("bad-game-results")
+
+#     since = _since_iso(hours_window)
+
+#     # 1) まず 'playing' のエントリーから探す（最新優先）
+#     current_app.logger.info("🔍 ステップ1: 進行中(playing)の試合を探す")
+#     playing_items = _scan_all(
+#         match_table,
+#         ProjectionExpression="match_id, entry_status, created_at",
+#         FilterExpression=Attr("entry_status").eq("playing") & Attr("created_at").gt(since),
+#         ConsistentRead=True  
+#     )
+#     current_app.logger.info(f"🔍 進行中のプレイヤー数: {len(playing_items)}")
+
+#     if playing_items:
+#         playing_items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+#         seen = set()
+#         for it in playing_items:
+#             mid = it.get("match_id")
+#             if not mid or mid in seen:
+#                 continue
+#             seen.add(mid)
+#             # その match_id に playing が1件以上あることを確認
+#             if _has_entries_for_match(match_table, mid):
+#                 current_app.logger.info(f"🎯 進行中の試合ID: {mid}")
+#                 return mid
+
+#     # 2) （保険）結果テーブル側を新しい順に当たり、playing が残っているものだけ採用
+#     current_app.logger.info("🔍 ステップ2: 結果テーブルから最新の試合を取得（playing確認つき）")
+#     result_items = _scan_all(
+#         result_table,
+#         ProjectionExpression="match_id, created_at",
+#         FilterExpression=Attr("created_at").gt(since)
+#     )
+#     current_app.logger.info(f"🔍 結果テーブルのアイテム数(最近{hours_window}h): {len(result_items)}")
+
+#     if result_items:
+#         result_items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+#         current_app.logger.info(f"🔍 結果テーブルのmatch_id例: {[r.get('match_id') for r in result_items[:10]]}")
+#         seen = set()
+#         for r in result_items:
+#             mid = r.get("match_id")
+#             if not mid or mid in seen:
+#                 continue
+#             seen.add(mid)
+#             if _has_entries_for_match(match_table, mid):  # ← playing が残っている試合のみOK
+#                 current_app.logger.info(f"🎯 結果テーブルからの最新試合ID(playing有): {mid}")
+#                 return mid
+
+#     current_app.logger.info("進行中の試合はありません")
+#     return None
+
+def get_latest_match_id(hours_window=12):
+    """'playing' が残っている最新の match_id を返す（なければ None）"""
+    current_app.logger.info("🔍 get_latest_match_id 開始")
+
+    match_table = current_app.dynamodb.Table("bad-game-match_entries")
+    since = _since_iso(hours_window)
+
+    # playing状態のエントリから最新のmatch_idを取得
+    current_app.logger.info("🔍 ステップ1: 進行中(playing)の試合を探す")
+    playing_items = _scan_all(
+        match_table,
+        ProjectionExpression="match_id, entry_status, created_at",
+        FilterExpression=Attr("entry_status").eq("playing") & Attr("created_at").gt(since),
+        ConsistentRead=True  
+    )
     current_app.logger.info(f"🔍 進行中のプレイヤー数: {len(playing_items)}")
-    
+
     if playing_items:
-        # 進行中の試合があれば、その試合IDを返す
-        for item in playing_items:
-            match_id = item.get("match_id")
-            if match_id and match_id != "pending":
-                current_app.logger.info(f"🎯 進行中の試合ID: {match_id}")
-                return match_id
-    
-    # 2. すべてのエントリーから非"pending"のmatch_idを探す
-    current_app.logger.info("🔍 ステップ2: 非pendingのmatch_idを探す")
-    try:
-        response = match_table.scan(
-            FilterExpression=Attr("match_id").ne("pending")
-        )
-        items = response.get("Items", [])
-        current_app.logger.info(f"🔍 非pendingのエントリー数: {len(items)}")
-        
-        if items:
-            # ユニークなmatch_idを抽出
-            unique_match_ids = set()
-            for item in items:
-                match_id = item.get("match_id")
-                if match_id and match_id != "pending":
-                    unique_match_ids.add(match_id)
-            
-            current_app.logger.info(f"🔍 ユニークなmatch_id数: {len(unique_match_ids)}")
-            if unique_match_ids:
-                # match_idをソート（降順）して最新のものを取得
-                latest_match_id = sorted(unique_match_ids, reverse=True)[0]
-                current_app.logger.info(f"🎯 最新の試合ID（非進行中）: {latest_match_id}")
-                return latest_match_id
-    except Exception as e:
-        current_app.logger.error(f"エントリー検索エラー: {str(e)}")
-    
-    # 3. 結果テーブルから最新の試合を取得
-    current_app.logger.info("🔍 ステップ3: 結果テーブルから最新の試合を取得")
-    result_table = current_app.dynamodb.Table("bad-game-results")
-    
-    try:
-        # すべての結果を取得
-        response = result_table.scan()
-        result_items = response.get("Items", [])
-        current_app.logger.info(f"🔍 結果テーブルのアイテム数: {len(result_items)}")
-        
-        if result_items:
-            # match_idの一覧をログに出力
-            match_ids = [item.get("match_id") for item in result_items if item.get("match_id")]
-            current_app.logger.info(f"🔍 結果テーブルのmatch_id一覧: {match_ids[:10]}...")  # 最初の10個だけ表示
-            
-            # 作成日時でソートして最新のものを取得
-            sorted_items = sorted(result_items, key=lambda x: x.get("created_at", ""), reverse=True)
-            if sorted_items:
-                latest_match_id = sorted_items[0].get("match_id")
-                current_app.logger.info(f"🎯 結果テーブルからの最新試合ID: {latest_match_id}")
-                return latest_match_id
-    except Exception as e:
-        current_app.logger.error(f"結果テーブル検索エラー: {str(e)}")
-    
-    # 該当する試合が見つからない場合はNoneを返す
-    current_app.logger.info("❌ 最新の試合IDが見つかりませんでした")
+        # 最新のmatch_idを直接返す（_has_entries_for_matchによる検証を省略）
+        latest = max(playing_items, key=lambda x: x.get("created_at", ""))
+        match_id = latest.get("match_id")
+        current_app.logger.info(f"🎯 進行中の試合ID: {match_id}")
+        return match_id
+
+    current_app.logger.info("進行中の試合はありません")
     return None
 
 def get_match_players_by_court(match_id):
     """指定された試合IDに対するコート別のプレイヤー構成を取得"""
     match_table = current_app.dynamodb.Table("bad-game-match_entries")
-    
     current_app.logger.info(f"🔍 試合情報取得開始: match_id={match_id}")
-    
-    response = match_table.scan(
+
+    players = _scan_all(
+        match_table,
+        ProjectionExpression=(
+            "user_id, display_name, skill_score, gender, organization, badminton_experience, "
+            "match_id, entry_status, court_number, team, team_name, team_side"
+        ),
         FilterExpression=Attr("match_id").eq(match_id) & Attr("entry_status").eq("playing")
     )
-    players = response.get("Items", [])
-    
     current_app.logger.info(f"🔍 試合プレイヤー取得: {len(players)}人")
-    
-    # 実際のデータ構造を確認
+
     for i, p in enumerate(players):
         current_app.logger.info(f"🔍 プレイヤー{i+1}の全フィールド: {p}")
         current_app.logger.info(f"🔍 利用可能なキー: {list(p.keys())}")
-    
+
     courts = {}
 
+    def norm_team(val: str) -> str | None:
+        if not val:
+            return None
+        s = str(val).strip().lower()
+        if s in ("a", "team_a", "left"):
+            return "A"
+        if s in ("b", "team_b", "right"):
+            return "B"
+        return None
+
     for p in players:
-        # court の取得
-        court_raw = p.get("court_number")  # データベースでは court_number を使用
+        court_raw = p.get("court_number")
         if not court_raw:
             current_app.logger.warning(f"⚠️ court_numberが見つかりません: {p}")
             continue
-        
         try:
-            court_num = int(court_raw)
+            court_num = int(str(court_raw).strip())
         except (ValueError, TypeError):
             current_app.logger.warning(f"⚠️ 無効なコート番号: {court_raw}")
             continue
 
-        # team の取得（フィールド名を確認）
         team_raw = p.get("team") or p.get("team_name") or p.get("team_side")
-        if not team_raw:
-            current_app.logger.warning(f"⚠️ チーム情報が見つかりません: {p}")
-            # チーム情報がない場合の対処法を検討
-            continue
-        
-        # プレイヤー情報を整形
+        team_norm = norm_team(team_raw)
+
         player_info = {
             "user_id": p.get("user_id"),
             "display_name": p.get("display_name", "匿名"),
-            "skill_score": int(p.get("skill_score", 0)),
+            "skill_score": int(p.get("skill_score", 0) or 0),
             "gender": p.get("gender", "unknown"),
             "organization": p.get("organization", ""),
             "badminton_experience": p.get("badminton_experience", "")
         }
 
-        # court 番号に基づいて分類
         if court_num not in courts:
-            courts[court_num] = {
-                "court_number": court_num,
-                "team_a": [],
-                "team_b": [],
-            }
+            courts[court_num] = {"court_number": court_num, "team_a": [], "team_b": []}
 
-        # チーム分けのロジックを修正
-        # team情報がない場合は、プレイヤーの順番で分ける
-        if len(courts[court_num]["team_a"]) <= len(courts[court_num]["team_b"]):
+        # 1) team_norm が A/B のときはそれに従う
+        if team_norm == "A":
             courts[court_num]["team_a"].append(player_info)
-        else:
+        elif team_norm == "B":
             courts[court_num]["team_b"].append(player_info)
+        else:
+            # 2) 情報が無いときは人数バランスで
+            if len(courts[court_num]["team_a"]) <= len(courts[court_num]["team_b"]):
+                courts[court_num]["team_a"].append(player_info)
+            else:
+                courts[court_num]["team_b"].append(player_info)
 
     current_app.logger.info(f"🔍 構築されたコート情報: {len(courts)}面")
-    for court_num, court_info in courts.items():
-        current_app.logger.info(f"🔍 コート{court_num}: チームA={len(court_info['team_a'])}人, チームB={len(court_info['team_b'])}人")
-    
-    return courts         
+    for court_num, court_info in sorted(courts.items()):
+        current_app.logger.info(
+            f"🔍 コート{court_num}: チームA={len(court_info['team_a'])}人, チームB={len(court_info['team_b'])}人"
+        )
+    return courts     
 
 
 @bp_game.route("/api/court_status")
@@ -356,103 +410,124 @@ def get_current_user_status():
 
 
 def get_pending_players():
-    """参加待ちプレイヤーを取得"""
+    """参加待ちプレイヤーを取得（match_idは見ない／entry_statusのみ）"""
     try:
         today = date.today().isoformat()
+        match_table   = current_app.dynamodb.Table("bad-game-match_entries")
         history_table = current_app.dynamodb.Table("bad-users-history")
-        response = match_table.scan(
-            FilterExpression=Attr('match_id').eq('pending') & Attr('entry_status').eq('pending')
+        user_table    = current_app.dynamodb.Table("bad-users")
+
+        # ✅ entry_statusのみでフィルタ。メタ行は除外。強整合読みを推奨
+        resp = match_table.scan(
+            FilterExpression=Attr('entry_status').eq('pending') & ~Attr('entry_id').contains('meta'),
+            ConsistentRead=True,
         )
+        items = resp.get('Items', [])
 
         players = []
-        for item in response.get('Items', []):
-            user_id = item['user_id']
+        for item in items:
+            user_id = item.get('user_id')
+            if not user_id:
+                continue
 
-            # ユーザー詳細情報を取得
-            user_response = user_table.get_item(Key={"user#user_id": user_id})
-            user_data = user_response.get("Item", {})
+            # ユーザー詳細
+            uresp = user_table.get_item(Key={"user#user_id": user_id})
+            user_data = uresp.get("Item", {})
 
-            # 🟢 履歴から参加回数を取得
+            # 参加回数（履歴）
             try:
-                history_response = history_table.scan(
-                    FilterExpression=Attr('user_id').eq(user_id)
-                )
-                history_items = history_response.get('Items', [])
+                hresp = history_table.scan(FilterExpression=Attr('user_id').eq(user_id))
+                history_items = hresp.get('Items', [])
                 join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
             except Exception as e:
-                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {str(e)}")
+                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {e}")
                 join_count = 0
 
-            player_info = {
-                'entry_id': item['entry_id'],
+            players.append({
+                'entry_id': item.get('entry_id'),
                 'user_id': user_id,
                 'display_name': item.get('display_name', user_data.get('display_name', '不明')),
                 'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
                 'badminton_experience': user_data.get('badminton_experience', '未設定'),
                 'joined_at': item.get('joined_at'),
-                'join_count': join_count  # 🔽 参加回数を追加
-            }
-            players.append(player_info)
+                'rest_count': item.get('rest_count', 0),
+                'match_count': item.get('match_count', 0),
+                'join_count': join_count,
+            })
 
         # 参加時刻でソート
-        players.sort(key=lambda x: x.get('joined_at', ''))
+        players.sort(key=lambda x: x.get('joined_at') or "")
 
         current_app.logger.info(f"[PENDING PLAYERS] 表示件数: {len(players)}")
         for p in players:
-            current_app.logger.info(f"  - {p['display_name']}（{p['skill_score']}点）参加時刻: {p['joined_at']}")
+            current_app.logger.info(f"  - {p['display_name']}（{p['skill_score']}点）参加時刻: {p.get('joined_at')}")
 
         return players
 
     except Exception as e:
-        current_app.logger.error(f"参加待ちプレイヤー取得エラー: {str(e)}")
+        current_app.logger.error(f"参加待ちプレイヤー取得エラー: {e}")
         return []
     
 
 def get_resting_players():
-    """休憩中プレイヤーを取得"""
+    """休憩中プレイヤーを取得（match_idは見ない／entry_statusのみ）"""
     try:
         today = date.today().isoformat()
-        history_table = current_app.dynamodb.Table("bad-users-history")
 
-        response = match_table.scan(
-            FilterExpression=Attr('entry_status').eq('resting')
+        match_table   = current_app.dynamodb.Table("bad-game-match_entries")
+        history_table = current_app.dynamodb.Table("bad-users-history")
+        user_table    = current_app.dynamodb.Table("bad-users")
+
+        # ✅ entry_statusのみでフィルタ。メタ行除外。強整合読み。
+        resp = match_table.scan(
+            FilterExpression=Attr('entry_status').eq('resting') & ~Attr('entry_id').contains('meta'),
+            ConsistentRead=True,
         )
+        items = resp.get('Items', [])
 
         players = []
-        for item in response.get('Items', []):
-            user_id = item['user_id']
+        for item in items:
+            user_id = item.get('user_id')
+            if not user_id:
+                continue
 
-            # ユーザー詳細情報を取得
-            user_response = user_table.get_item(Key={"user#user_id": user_id})
-            user_data = user_response.get("Item", {})
+            # ユーザー詳細
+            uresp = user_table.get_item(Key={"user#user_id": user_id})
+            user_data = uresp.get("Item", {}) or {}
 
-            # 🔽 履歴から参加回数を取得
+            # 参加回数（履歴）
             try:
-                history_response = history_table.scan(
-                    FilterExpression=Attr('user_id').eq(user_id)
-                )
-                history_items = history_response.get('Items', [])
+                hresp = history_table.scan(FilterExpression=Attr('user_id').eq(user_id))
+                history_items = hresp.get('Items', []) or []
                 join_count = sum(1 for h in history_items if h.get('date') and h['date'] < today)
             except Exception as e:
-                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {str(e)}")
+                current_app.logger.warning(f"[履歴取得エラー] user_id={user_id}: {e}")
                 join_count = 0
 
-            player_info = {
-                'entry_id': item['entry_id'],
+            players.append({
+                'entry_id': item.get('entry_id'),
                 'user_id': user_id,
                 'display_name': item.get('display_name', user_data.get('display_name', '不明')),
                 'skill_score': item.get('skill_score', user_data.get('skill_score', 50)),
                 'badminton_experience': user_data.get('badminton_experience', '未設定'),
                 'joined_at': item.get('joined_at'),
-                'join_count': join_count,  # ✅ 追加
-                'is_current_user': user_id == current_user.get_id()  # ✅ 追加
-            }
-            players.append(player_info)
+                'rest_count': item.get('rest_count', 0),
+                'match_count': item.get('match_count', 0),
+                'join_count': join_count,
+                'is_current_user': (user_id == current_user.get_id()),
+            })
+
+        # 並び順：休憩回数が多い→参加時刻（任意）
+        players.sort(key=lambda x: (-(x.get('rest_count') or 0), x.get('joined_at') or ""))
+
+        current_app.logger.info(f"[RESTING PLAYERS] 表示件数: {len(players)}")
+        for p in players:
+            current_app.logger.info(f"  - {p['display_name']}（{p['skill_score']}点）休憩回数: {p.get('rest_count',0)}")
 
         return players
 
     except Exception as e:
-        current_app.logger.error(f"休憩中プレイヤー取得エラー: {str(e)}")
+        current_app.logger.error(f"休憩中プレイヤー取得エラー: {e}")
         return []
     
 def get_user_status(user_id):
@@ -545,8 +620,7 @@ def entry():
             "match_count": 0,     # 試合回数を初期化
         }
     match_table.put_item(Item=entry_item)
-    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}")
-    flash("試合への参加登録が完了しました", "success")
+    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}")    
 
     return redirect(url_for("game.court"))
 
@@ -688,6 +762,11 @@ def update_player_for_rest(entry_id):
 @bp_game.route('/create_pairings', methods=["POST"])
 @login_required
 def create_pairings():
+    # 進行中の試合チェック
+    if has_ongoing_matches():
+        flash('進行中の試合があるため、新しいペアリングを実行できません。全ての試合のスコア入力を完了してください。', 'warning')
+        return redirect(url_for('game.court'))
+    
     try:
         max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)        
 
@@ -704,6 +783,11 @@ def create_pairings():
         if len(entries) < 4:
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
+
+        # 再度チェック（二重送信防止）
+        if has_ongoing_matches():
+            flash('他のユーザーが同時にペアリングを実行したため、処理を中止しました。', 'warning')
+            return redirect(url_for('game.court'))
 
         # 🔍 スキルスコア最下位2名を選定
         skill_sorted = sorted(
@@ -768,17 +852,14 @@ def create_pairings():
                 update_player_for_match(name_to_id[name], match_id, court_num, team)
 
         # 9. 待機プレイヤーの休憩カウント増加
-        for p in waiting_players:
-            entry_id = name_to_id.get(p.name)
-            if entry_id:
-                increment_rest_count(entry_id)
+        # for p in waiting_players:
+        #     entry_id = name_to_id.get(p.name)
+        #     if entry_id:
+        #         increment_rest_count(entry_id)
 
-        # 10. 結果表示
-        pending_names = [p.name for p in waiting_players]
-        if pending_names:
-            flash(f"{len(matches)}件の試合を作成しました。参加待ち: {', '.join(pending_names)}", "success")
-        else:
-            flash(f"{len(matches)}件の試合を作成しました。", "success")
+        # 10. 成功メッセージ
+        flash(f"ペアリングが正常に実行されました。{len(matches)}試合を開始します。", "success")
+        current_app.logger.info(f"ペアリング成功: {len(matches)}試合, {len(waiting_players)}人待機")
 
         return redirect(url_for("game.court"))
 
@@ -789,64 +870,13 @@ def create_pairings():
 
 
 
-# def update_players_to_playing(matches, match_id, match_table):
-#     """選ばれた人を"playing"に更新する関数"""
-    
-#     for match in matches:
-#         try:
-#             # データ構造の検証
-#             if not isinstance(match, dict):
-#                 current_app.logger.error(f"❌ match is not dict, got {type(match)}: {match}")
-#                 continue
-            
-#             # コートデータの取得（新旧両方の構造に対応）
-#             courts_data = match.get("courts", match)
-            
-#             for court_num, court_data in courts_data.items():
-#                 # court_dataが辞書であることを確認
-#                 if not isinstance(court_data, dict):
-#                     current_app.logger.error(f"❌ court_data for {court_num} is not dict, got {type(court_data)}: {court_data}")
-#                     continue
-                
-#                 for team_key in ["team_a", "team_b"]:
-#                     players = court_data.get(team_key, [])
-                    
-#                     if not isinstance(players, list):
-#                         current_app.logger.error(f"❌ players for {court_num}-{team_key} is not list: {type(players)}")
-#                         continue
-                    
-#                     for player in players:
-#                         if not isinstance(player, dict) or "entry_id" not in player:
-#                             current_app.logger.error(f"❌ Invalid player data: {player}")
-#                             continue
-                        
-#                         # DynamoDB更新
-#                         match_table.update_item(
-#                             Key={"entry_id": player["entry_id"]},
-#                             UpdateExpression=(
-#                                 "SET entry_status = :s, match_id = :m, court = :c, team = :t, "
-#                                 "match_count = if_not_exists(match_count, :zero) + :one"
-#                             ),
-#                             ExpressionAttributeValues={
-#                                 ":s": "playing",
-#                                 ":m": match_id,
-#                                 ":c": str(court_num),
-#                                 ":t": team_key,
-#                                 ":zero": 0,
-#                                 ":one": 1
-#                             }
-#                         )
-#                         current_app.logger.info(f"✅ Updated player {player.get('display_name', 'Unknown')} to playing on {court_num}-{team_key}")
-                        
-#         except Exception as e:
-#             current_app.logger.error(f"❌ Error updating players in match: {e}")
-#             continue
-
 def update_players_to_playing(matches, match_id, match_table):
-    """選ばれた人を"playing"に更新する関数"""
-    
+    """選ばれた人を 'playing' に更新する（このタイミングで match_id を新規に付与）"""
     current_app.logger.info(f"🟢 [START] update_players_to_playing - match_id: {match_id}")
-    
+
+    # 例: 2025-09-02T14:25:00+09:00
+    now_iso = datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()
+
     for match_idx, match in enumerate(matches):
         try:
             current_app.logger.info(f"🔍 処理中の match[{match_idx}]: {match}")
@@ -854,57 +884,84 @@ def update_players_to_playing(matches, match_id, match_table):
             if not isinstance(match, dict):
                 current_app.logger.error(f"❌ match[{match_idx}] は dict ではありません: {type(match)}")
                 continue
-            
+
             courts_data = match.get("courts", match)
+            if not isinstance(courts_data, dict):
+                current_app.logger.error(f"❌ courts_data が dict ではありません: {type(courts_data)}")
+                continue
+
             current_app.logger.info(f"📦 使用する courts_data: {list(courts_data.keys())}")
 
-            for court_num, court_data in courts_data.items():
+            for court_key, court_data in courts_data.items():
                 if not isinstance(court_data, dict):
-                    current_app.logger.error(f"❌ court_data[{court_num}] が dict ではありません: {type(court_data)}")
+                    current_app.logger.error(f"❌ court_data[{court_key}] が dict ではありません: {type(court_data)}")
                     continue
-                
+
+                # court_number は数値に正規化
+                try:
+                    court_number = int(str(court_key).strip())
+                except (ValueError, TypeError):
+                    current_app.logger.error(f"❌ 無効な court_number: {court_key}")
+                    continue
+
                 for team_key in ["team_a", "team_b"]:
                     players = court_data.get(team_key, [])
-                    
                     if not isinstance(players, list):
-                        current_app.logger.error(f"❌ players[{court_num}][{team_key}] が list ではありません: {type(players)}")
+                        current_app.logger.error(f"❌ players[{court_key}][{team_key}] が list ではありません: {type(players)}")
                         continue
-                    
-                    current_app.logger.info(f"🧩 court={court_num}, team={team_key}, players={len(players)}人")
+
+                    # "team_a"/"team_b" -> "A"/"B" に正規化（保存は 'A' / 'B'）
+                    team_letter = "A" if team_key == "team_a" else "B"
+
+                    current_app.logger.info(f"🧩 court={court_number}, team={team_letter}, players={len(players)}人")
 
                     for player in players:
                         if not isinstance(player, dict) or "entry_id" not in player:
                             current_app.logger.error(f"❌ 無効なプレイヤーデータ: {player}")
                             continue
-                        
+
                         entry_id = player["entry_id"]
                         display_name = player.get("display_name", "Unknown")
                         user_id = player.get("user_id", "N/A")
 
                         current_app.logger.info(f"↪️ DynamoDB更新開始: {display_name} (entry_id={entry_id})")
 
-                        # DynamoDB 更新処理
+                        # 🔒 冪等化: pending/resting の人だけ playing に昇格（playing 連打防止）
+                        # ついでに 'court' フィールドは今後使わない前提で削除（古い互換を掃除）
                         result = match_table.update_item(
                             Key={"entry_id": entry_id},
                             UpdateExpression=(
-                                "SET entry_status = :s, match_id = :m, court = :c, team = :t, "
-                                "match_count = if_not_exists(match_count, :zero) + :one"
+                                "SET entry_status = :playing, "
+                                "    match_id     = :mid, "
+                                "    court_number = :court, "
+                                "    team         = :team, "
+                                "    team_side    = :team, "        # 互換のため重複持ち
+                                "    updated_at   = :now, "
+                                "    match_count  = if_not_exists(match_count, :zero) + :one "
+                                "REMOVE court"                      # 旧 'court' を掃除（残すならこの行は外す）
+                            ),
+                            ConditionExpression=(
+                                "attribute_exists(entry_id) AND "
+                                "(attribute_not_exists(entry_status) OR entry_status IN (:pend, :rest))"
                             ),
                             ExpressionAttributeValues={
-                                ":s": "playing",
-                                ":m": match_id,
-                                ":c": court_num,
-                                ":t": team_key,
+                                ":playing": "playing",
+                                ":mid": str(match_id),
+                                ":court": court_number,
+                                ":team": team_letter,
+                                ":now": now_iso,
                                 ":zero": 0,
-                                ":one": 1
+                                ":one": 1,
+                                ":pend": "pending",
+                                ":rest": "resting",
                             },
-                            ReturnValues="UPDATED_NEW"
+                            ReturnValues="UPDATED_NEW",
                         )
 
                         updated_attrs = result.get("Attributes", {})
                         current_app.logger.info(
                             f"✅ 更新完了: {display_name} (user_id={user_id}, entry_id={entry_id}) "
-                            f"→ court={court_num}, team={team_key}, 更新後: {updated_attrs}"
+                            f"→ court_number={court_number}, team={team_letter}, 更新後: {updated_attrs}"
                         )
         except Exception as e:
             current_app.logger.error(f"❌ 例外発生（match[{match_idx}]）: {e}")
@@ -1029,198 +1086,6 @@ def perform_pairing(entries, match_id, max_courts=6):
         except Exception as e:
             current_app.logger.error(f"⚠️ 休憩者更新エラー: {p.get('display_name')} - {str(e)}")
 
-
-# def perform_pairing_v2(entries, match_id, max_courts=6):
-#     """
-#     プレイヤーのDB更新を行わない版（データ構造のみ返す）
-#     create_pairings関数で一括更新する場合に使用
-#     """
-#     matches = []
-#     rest = []
-#     court_number = 1
-
-#     print(f"🔍 DEBUG: 総エントリー数 = {len(entries)}")
-#     print(f"🔍 DEBUG: 最大コート数 = {max_courts}")
-
-#     random.shuffle(entries)
-
-#     # 4人ずつのグループを作成
-#     for i in range(0, len(entries), 4):
-#         if court_number > max_courts:
-#             # コート数を超えた場合、残りは全て休憩
-#             remaining_players = entries[i:]
-#             print(f"🔍 DEBUG: コート数超過 - 残り{len(remaining_players)}人は休憩")
-#             rest.extend(remaining_players)
-#             break
-
-#         group = entries[i:i + 4]
-#         print(f"🔍 DEBUG: グループ{court_number}: {len(group)}人")
-        
-#         if len(group) == 4:
-#             # 4人なので試合を作成
-#             teamA = group[:2]
-#             teamB = group[2:]
-
-#             print(f"🔍 DEBUG: コート{court_number}で試合作成")
-#             for p in teamA:
-#                 print(f"🔍 DEBUG: チームA: {p.get('display_name')}")
-#             for p in teamB:
-#                 print(f"🔍 DEBUG: チームB: {p.get('display_name')}")
-
-#             # 新しい辞書形式でマッチデータを作成
-#             match_data = {
-#                 f"court_{court_number}": {
-#                     "team_a": teamA,
-#                     "team_b": teamB
-#                 }
-#             }
-            
-#             matches.append(match_data)
-#             court_number += 1
-
-#         else:
-#             # 4人未満なので休憩
-#             print(f"🔍 DEBUG: グループ{court_number}は{len(group)}人なので休憩")
-#             rest.extend(group)
-
-#     print(f"🎉 DEBUG: ペアリング完了 - 試合数: {len(matches)}, 休憩者数: {len(rest)}")
-#     return matches, rest
-
-
-# @bp_game.route("/finish_current_match", methods=["POST"])
-# @login_required
-# def finish_current_match():
-#     try:
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-#         match_id = get_latest_match_id()
-#         if not match_id:
-#             current_app.logger.warning("最新の試合IDが見つかりません")
-#             return "試合IDが見つかりません", 400
-
-#         # 今の試合に出ているプレイヤーを取得（metaデータ除外）
-#         playing_response = match_table.scan(
-#             FilterExpression=Attr("match_id").eq(match_id) & ~Attr("entry_id").contains("meta")
-#         )
-#         playing_players = playing_response.get("Items", [])
-
-#         for player in playing_players:
-#             match_table.update_item(
-#                 Key={'entry_id': player['entry_id']},
-#                 UpdateExpression="SET #status = :pending, entry_status = :pending, match_id = :mid REMOVE court, team",
-#                 ExpressionAttributeNames={"#status": "status"},
-#                 ExpressionAttributeValues={
-#                     ":pending": "pending",
-#                     ":mid": "pending"
-#                 }
-#             )
-#             current_app.logger.info(f"→ {player.get('display_name')} ({player.get('user_id')}) を pending に戻しました")
-
-#         return "OK", 200
-
-#     except Exception as e:
-#         current_app.logger.error(f"[試合終了処理エラー] {str(e)}")
-#         return "エラー", 500
-
-# @bp_game.route("/finish_current_match", methods=["POST"])
-# @login_required
-# def finish_current_match():
-#     try:
-#         # 最新の試合IDを取得
-#         match_id = get_latest_match_id()
-#         if not match_id:
-#             current_app.logger.warning("⚠️ アクティブな試合IDが見つかりません")
-#             return "アクティブな試合が見つかりません", 400
-
-#         current_app.logger.info(f"🏁 試合終了処理開始: match_id={match_id}")
-
-#         # 試合ID形式の検証（オプション）
-#         match_id_pattern = re.compile(r'^\d{8}_\d{6}$')
-#         if not match_id_pattern.match(match_id):
-#             current_app.logger.warning(f"⚠️ 非標準形式の試合ID: {match_id}")
-        
-#         # 試合に出ていたプレイヤーを pending に戻す処理
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-#         playing_response = match_table.scan(
-#             FilterExpression=Attr("match_id").eq(match_id) & ~Attr("entry_id").contains("meta")
-#         )
-#         playing_players = playing_response.get("Items", [])
-        
-#         updated_count = 0
-#         for player in playing_players:
-#             try:
-#                 match_table.update_item(
-#                     Key={'entry_id': player['entry_id']},
-#                     UpdateExpression="SET entry_status = :pending, match_id = :mid REMOVE court_number, team_side",
-#                     ExpressionAttributeValues={
-#                         ":pending": "pending",
-#                         ":mid": "pending"
-#                     }
-#                 )
-#                 updated_count += 1
-#             except Exception as e:
-#                 current_app.logger.error(f"⚠️ プレイヤー更新エラー: {player.get('display_name', 'Unknown')} - {str(e)}")
-        
-#         current_app.logger.info(f"✅ {updated_count}/{len(playing_players)}人のプレイヤーを待機状態に更新")
-
-#         # TrueSkill評価の呼び出し
-#         results_table = current_app.dynamodb.Table("bad-game-results")
-#         response = results_table.scan(
-#             FilterExpression=Attr("match_id").eq(match_id)
-#         )
-#         match_results = response.get("Items", [])
-        
-#         current_app.logger.info(f"🎮 試合結果数: {len(match_results)}")
-
-#         skill_update_count = 0
-#         for result in match_results:
-#             try:
-#                 team_a = parse_players(result["team_a"])
-#                 team_b = parse_players(result["team_b"])
-#                 winner = result.get("winner", "A")
-
-#                 result_item = {
-#                     "team_a": team_a,
-#                     "team_b": team_b,
-#                     "winner": winner
-#                 }
-
-#                 current_app.logger.info(f"🎯 コート{result.get('court_number')}: {winner}チーム勝利")
-#                 update_trueskill_for_players(result_item)
-#                 skill_update_count += 1
-#             except Exception as e:
-#                 court_number = result.get('court_number', 'Unknown')
-#                 current_app.logger.error(f"⚠️ スキル更新エラー (コート{court_number}): {str(e)}")
-
-#         current_app.logger.info(f"✅ スキル更新完了: {skill_update_count}/{len(match_results)}コート, match_id={match_id}")
-        
-#         # フラッシュメッセージでユーザーに通知（オプション）
-#         try:
-#             flash(f"試合が終了しました。{updated_count}人のプレイヤーを待機状態に戻しました。", "success")
-#         except Exception:
-#             pass
-        
-#         # Ajaxリクエストの場合はJSONを返し、それ以外はリダイレクト
-#         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-#             return jsonify({
-#                 "success": True,
-#                 "message": "試合が正常に終了しました",
-#                 "updated_players": updated_count,
-#                 "skill_updates": skill_update_count
-#             })
-        
-#         return redirect(url_for('game.court'))
-
-#     except Exception as e:
-#         current_app.logger.error(f"[試合終了処理エラー] {str(e)}")
-#         import traceback
-#         current_app.logger.error(traceback.format_exc())
-        
-#         # Ajaxリクエストの場合はJSONエラーを返し、それ以外はリダイレクト
-#         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-#             return jsonify({"success": False, "error": str(e)}), 500
-        
-#         flash(f"エラーが発生しました: {str(e)}", "danger")
-#         return redirect(url_for('game.court'))
     
 @bp_game.route("/finish_current_match", methods=["POST"])
 @login_required
@@ -1242,7 +1107,11 @@ def finish_current_match():
         # 試合に出ていたプレイヤーを pending に戻す処理
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
         playing_response = match_table.scan(
-            FilterExpression=Attr("match_id").eq(match_id) & ~Attr("entry_id").contains("meta")
+            FilterExpression=(
+                Attr("match_id").eq(match_id) &
+                Attr("entry_status").eq("playing") &
+                ~Attr("entry_id").contains("meta")
+            )
         )
         playing_players = playing_response.get("Items", [])
         
@@ -1254,15 +1123,24 @@ def finish_current_match():
             try:
                 match_table.update_item(
                     Key={'entry_id': player['entry_id']},
-                    UpdateExpression="SET entry_status = :pending, match_id = :mid REMOVE court_number, team_side",
+                    UpdateExpression="""
+                        SET entry_status = :pending,
+                            updated_at   = :now
+                        REMOVE court_number, team, team_side
+                    """,
+                    ConditionExpression="entry_status = :playing AND match_id = :mid",
                     ExpressionAttributeValues={
                         ":pending": "pending",
-                        ":mid": "pending"
+                        ":now": datetime.now(pytz.timezone("Asia/Tokyo")).isoformat(),
+                        ":playing": "playing",
+                        ":mid": match_id,
                     }
                 )
                 updated_count += 1
             except Exception as e:
-                current_app.logger.error(f"⚠️ プレイヤー更新エラー: {player.get('display_name', 'Unknown')} - {str(e)}")
+                current_app.logger.error(
+                    f"⚠️ プレイヤー更新エラー: {player.get('display_name', 'Unknown')} - {str(e)}"
+                )
         
         current_app.logger.info(f"✅ {updated_count}/{len(playing_players)}人のプレイヤーを待機状態に更新")
 
@@ -1770,21 +1648,21 @@ def submit_score(match_id, court_number):
             return "スコアの保存に失敗しました", 500
 
         # スキルスコア更新と同期
-        try:
-            # スキルスコアを更新して返り値を取得
-            updated_skills = update_trueskill_for_players_and_return_updates(result_item)
+        # try:
+        #     # スキルスコアを更新して返り値を取得
+        #     updated_skills = update_trueskill_for_players_and_return_updates(result_item)
             
-            # エントリーテーブルも同期して更新
-            sync_count = sync_match_entries_with_updated_skills(entry_mapping, updated_skills)
-            current_app.logger.info(f"✅ エントリーテーブル同期完了: {sync_count}件のエントリーを更新")
-        except Exception as e:
-            current_app.logger.error(f"[TrueSkill 更新/同期エラー] {str(e)}")
-            import traceback
-            current_app.logger.error(traceback.format_exc())
-            # エラーがあってもスコア自体は保存されているので、200を返す
-            return "スコアは保存されましたが、スキルスコアの更新に失敗しました", 200
+        #     # エントリーテーブルも同期して更新
+        #     sync_count = sync_match_entries_with_updated_skills(entry_mapping, updated_skills)
+        #     current_app.logger.info(f"✅ エントリーテーブル同期完了: {sync_count}件のエントリーを更新")
+        # except Exception as e:
+        #     current_app.logger.error(f"[TrueSkill 更新/同期エラー] {str(e)}")
+        #     import traceback
+        #     current_app.logger.error(traceback.format_exc())
+        #     # エラーがあってもスコア自体は保存されているので、200を返す
+        #     return "スコアは保存されましたが、スキルスコアの更新に失敗しました", 200
 
-        # JavaScriptが制御するので明示的にリダイレクトせずOKだけ返す
+        # # JavaScriptが制御するので明示的にリダイレクトせずOKだけ返す
         return "", 200
 
     except Exception as e:
@@ -1875,49 +1753,76 @@ def reset_participants():
         import traceback
         error_trace = traceback.format_exc()
         current_app.logger.error(f"[全削除失敗] {str(e)}")
-        current_app.logger.error(f"スタックトレース: {error_trace}")
-        flash("参加者の全削除に失敗しました", 'danger')
+        current_app.logger.error(f"スタックトレース: {error_trace}")        
 
     return redirect(url_for('game.court'))
 
 
 def get_organized_match_data(match_id):
-    """試合データを整理して返す共通関数"""
+    """指定試合の 'playing' エントリーだけをコート別に整形して返す"""
     match_table = current_app.dynamodb.Table("bad-game-match_entries")
-    response = match_table.scan(
-        FilterExpression=Attr("match_id").eq(match_id)
+
+    # playing のみ取得（終了後の pending は除外）
+    players = _scan_all(
+        match_table,
+        ProjectionExpression=(
+            "user_id, display_name, skill_score, entry_status, "
+            "court_number, team_side, team, team_name"
+        ),
+        FilterExpression=Attr("match_id").eq(match_id) & Attr("entry_status").eq("playing"),
+        ConsistentRead=True,
     )
-    items = response.get("Items", [])
-    current_app.logger.info(f"[get_organized_match_data] match_id={match_id}, 取得エントリ数: {len(items)}")
-    
-    # ソートしてからチームに割り当てる（一貫性を保つため）
-    # team_sideでソートすると、AとBが順番に並ぶ
-    sorted_items = sorted(items, key=lambda x: (x.get("court_number", 999), x.get("team_side", "")))
-    
+
+    current_app.logger.info(
+        f"[get_organized_match_data] match_id={match_id}, playing件数: {len(players)}"
+    )
+    if not players:
+        # 進行中の試合が無い/全員終了済みなら空を返す
+        return {}
+
+    def norm_team(item):
+        v = item.get("team_side") or item.get("team") or item.get("team_name")
+        if v is None:
+            return None
+        s = str(v).strip().upper()
+        if s in ("A", "TEAM_A", "LEFT"):
+            return "A"
+        if s in ("B", "TEAM_B", "RIGHT"):
+            return "B"
+        return None
+
+    def to_int_court(v):
+        try:
+            return int(str(v))
+        except Exception:
+            return 999
+
+    # 並びを安定させる
+    players.sort(key=lambda x: (to_int_court(x.get("court_number")), (norm_team(x) or "Z")))
+
     match_courts = {}
-    for item in sorted_items:
+    for item in players:
         court = item.get("court_number")
-        team = item.get("team_side")
+        team = norm_team(item)
         display_name = item.get("display_name", "(no name)")
         current_app.logger.info(f"[item] court={court}, team={team}, display_name={display_name}")
-        
-        if court is not None and team in ["A", "B"]:
-            court_data = match_courts.setdefault(court, {
-                "court_number": court,
-                "team_a": [],
-                "team_b": []
-            })
-            if team == "A":
-                court_data["team_a"].append(item)
-            elif team == "B":
-                court_data["team_b"].append(item)
-    
-    # 各コートのチームメンバーが正しく割り当てられているか確認ログ
+
+        if court is None or team not in ("A", "B"):
+            continue
+
+        court_num = to_int_court(court)
+        court_data = match_courts.setdefault(
+            court_num,
+            {"court_number": court_num, "team_a": [], "team_b": []}
+        )
+        (court_data["team_a"] if team == "A" else court_data["team_b"]).append(item)
+
+    # 確認ログ
     for court, data in match_courts.items():
-        team_a_names = [player.get("display_name", "") for player in data["team_a"]]
-        team_b_names = [player.get("display_name", "") for player in data["team_b"]]
-        current_app.logger.info(f"Court {court}: Team A = {team_a_names}, Team B = {team_b_names}")
-    
+        a_names = [p.get("display_name", "") for p in data["team_a"]]
+        b_names = [p.get("display_name", "") for p in data["team_b"]]
+        current_app.logger.info(f"Court {court}: Team A = {a_names}, Team B = {b_names}")
+
     return match_courts
 
 @bp_game.route("/api/skill_score")
@@ -1935,140 +1840,11 @@ def api_skill_score():
 
 
 
-
-
-# @bp_game.route('/create_test_data')
-# @login_required
-# def create_test_data():
-#     """開発用：テストデータを作成（新設計対応）"""
-#     if not current_user.administrator:        
-#         return redirect(url_for('index'))
-    
-#     test_players = [
-#         {'display_name': 'テスト太郎', 'skill_score': 40},
-#         {'display_name': 'テスト花子', 'skill_score': 60},
-#         {'display_name': 'テスト一郎', 'skill_score': 50},
-#         {'display_name': 'テスト美咲', 'skill_score': 70},
-#         {'display_name': 'テスト健太', 'skill_score': 35},
-#         {'display_name': 'テスト淳二', 'skill_score': 65},
-#         {'display_name': '悟空', 'skill_score': 45},
-#         {'display_name': 'テスト愛', 'skill_score': 55},
-#         {'display_name': 'テスト翔太', 'skill_score': 42},
-#         {'display_name': 'ノーマン', 'skill_score': 58},  
-#         {'display_name': 'ロバート', 'skill_score': 35},  
-#         {'display_name': 'キャメロン', 'skill_score': 100},  
-#     ]
-    
-#     try:
-#         now = datetime.now().isoformat()
-#         for i, player in enumerate(test_players):            
-#             entry_id = str(uuid.uuid4())
-#             user_id = f'test_user_{i}'
-
-#             # 新設計に必要なフィールドを明示的に付与
-#             item = {
-#             'entry_id': entry_id,
-#             'user_id': user_id,
-#             'display_name': player['display_name'],
-#             'joined_at': now,
-#             'created_at': now,
-#             'match_id': "pending",
-#             'entry_status': "pending",
-#             'skill_score': player.get('skill_score', 50),
-#             'rest_count': 0,
-#         }
-#             match_table.put_item(Item=item)        
-
-#     except Exception as e:
-#         current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')        
-
-#     return redirect(url_for('game.court'))
-
-# @bp_game.route('/test_data_status')
-# @login_required
-# def test_data_status():
-#     """開発用：テストデータの状態を確認"""
-#     if not current_user.administrator:
-#         flash('管理者のみ実行可能です', 'danger')
-#         return redirect(url_for('index'))
-    
-#     try:
-#         # test_user_ で始まるuser_idを持つすべてのエントリを検索
-#         response = match_table.scan(
-#             FilterExpression="begins_with(user_id, :prefix)",
-#             ExpressionAttributeValues={":prefix": "test_user_"}
-#         )
-        
-#         items = response.get('Items', [])
-        
-#         # match_idごとにグループ化
-#         groups = {}
-#         for item in items:
-#             match_id = item.get('match_id', 'unknown')
-#             if match_id not in groups:
-#                 groups[match_id] = []
-#             groups[match_id].append(item)
-        
-#         # 結果をHTMLで表示
-#         output = "<h1>テストデータの状態</h1>"
-#         output += f"<p>テストデータの総数: {len(items)}件</p>"
-        
-#         for match_id, group_items in groups.items():
-#             output += f"<h2>マッチID: {match_id} ({len(group_items)}件)</h2>"
-#             output += "<ul>"
-#             for item in group_items:
-#                 output += f"<li>{item.get('display_name')} (ID: {item.get('entry_id')})</li>"
-#             output += "</ul>"
-        
-#         return output
-        
-#     except Exception as e:
-#         return f"エラー: {e}"
-    
-# @bp_game.route('/clear_test_data')
-# @login_required
-# def clear_test_data():
-#     """開発用：test_user_ のテストデータを削除"""
-#     if not current_user.administrator:
-        
-#         return redirect(url_for('index'))
-
-#     deleted_count = 0
-#     last_evaluated_key = None
-
-#     try:
-#         while True:
-#             scan_kwargs = {
-#                 'FilterExpression': Attr('user_id').begins_with("test_user_")
-#             }
-#             if last_evaluated_key:
-#                 scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-
-#             response = match_table.scan(**scan_kwargs)
-#             items = response.get('Items', [])
-
-#             for item in items:
-#                 try:
-#                     match_table.delete_item(Key={                        
-#                         'entry_id': item['entry_id']
-#                     })
-#                     deleted_count += 1
-#                 except Exception as e:
-#                     current_app.logger.error(f"削除失敗: {e}, item: {item}")
-
-#             last_evaluated_key = response.get('LastEvaluatedKey')
-#             if not last_evaluated_key:
-#                 break
-        
-#     except Exception as e:
-
-#         pass
-
 @bp_game.route('/create_test_data')
 @login_required
 def create_test_data():
     """開発用：テストデータを作成（新設計対応）- ユーザーテーブルも含む"""
-    from decimal import Decimal  # Decimal型のインポートを追加
+    from decimal import Decimal
     from datetime import datetime
     import uuid
     
@@ -2090,143 +1866,105 @@ def create_test_data():
         {'display_name': 'キャメロン', 'skill_score': 100},  
     ]
     
-    try:
-        now = datetime.now().isoformat()
-        
-        # ユーザーテーブルとマッチテーブルの両方に同時にデータを作成
-        user_table = current_app.dynamodb.Table("bad-users")
-        
-        for i, player in enumerate(test_players):            
-            entry_id = str(uuid.uuid4())
-            user_id = f'test_user_{i}'
+    now = datetime.now().isoformat()
+    user_table = current_app.dynamodb.Table("bad-users")
+    
+    for i, player in enumerate(test_players):            
+        entry_id = str(uuid.uuid4())
+        user_id = f'test_user_{i}'
 
-            # マッチテーブルにエントリを作成
-            match_item = {
-                'entry_id': entry_id,
-                'user_id': user_id,
-                'display_name': player['display_name'],
-                'joined_at': now,
-                'created_at': now,
-                'match_id': "pending",
-                'entry_status': "pending",
-                'skill_score': Decimal(str(player.get('skill_score', 50))),
-                'rest_count': 0,
-            }
-            match_table.put_item(Item=match_item)
-            
-            # ユーザーテーブルにもユーザーを作成
-            user_item = {
-                'user#user_id': user_id,  # 正しいパーティションキー
-                'user_id': user_id,       # 検索用に追加
-                'display_name': player['display_name'],
-                'user_name': f"テスト_{player['display_name']}",
-                'email': f"{user_id}@example.com",
-                'skill_score': Decimal(str(player.get('skill_score', 50))),
-                'gender': "unknown",
-                'badminton_experience': "テスト",
-                'organization': "テスト組織",
-                'administrator': False,
-                'wins': Decimal("0"),
-                'losses': Decimal("0"),
-                'match_count': Decimal("0"),
-                'created_at': now,
-                'last_updated': now
-            }
-            
-            # ユーザーテーブルに保存
-            try:
-                user_table.put_item(Item=user_item)
-                current_app.logger.info(f"ユーザー {user_id} ({player['display_name']}) をユーザーテーブルに作成しました")
-            except Exception as e:
-                current_app.logger.error(f"ユーザーテーブル作成エラー: {user_id} {str(e)}")
+        # マッチテーブルにエントリを作成
+        match_item = {
+            'entry_id': entry_id,
+            'user_id': user_id,
+            'display_name': player['display_name'],
+            'joined_at': now,
+            'created_at': now,
+            'match_id': "pending",
+            'entry_status': "pending",
+            'skill_score': Decimal(str(player.get('skill_score', 50))),
+            'rest_count': 0,
+        }
+        match_table.put_item(Item=match_item)
         
-        current_app.logger.info(f"テストデータの作成が完了しました。{len(test_players)}件のデータを作成しました。")
-        flash(f"{len(test_players)}件のテストデータを作成しました", "success")
-
-    except Exception as e:
-        current_app.logger.error(f'[create_test_data] 失敗: {str(e)}')
-        flash(f"テストデータ作成エラー: {str(e)}", "danger")
+        # ユーザーテーブルにユーザーを作成
+        user_item = {
+            'user#user_id': user_id,
+            'user_id': user_id,
+            'display_name': player['display_name'],
+            'user_name': f"テスト_{player['display_name']}",
+            'email': f"{user_id}@example.com",
+            'skill_score': Decimal(str(player.get('skill_score', 50))),
+            'gender': "unknown",
+            'badminton_experience': "テスト",
+            'organization': "テスト組織",
+            'administrator': False,
+            'wins': Decimal("0"),
+            'losses': Decimal("0"),
+            'match_count': Decimal("0"),
+            'created_at': now,
+            'last_updated': now
+        }
+        
+        user_table.put_item(Item=user_item)
 
     return redirect(url_for('game.court'))
 
 @bp_game.route('/clear_test_data')
 @login_required
 def clear_test_data():
-    """開発用：test_user_ のテストデータを削除（マッチテーブルのみ - 後方互換性のため）"""
-    from decimal import Decimal  # Decimal型のインポートを追加
-    from datetime import datetime
+    """開発用：test_user_ のテストデータを削除（マッチテーブルとユーザーテーブル）"""
     from boto3.dynamodb.conditions import Attr
     
     if not current_user.administrator:
         return redirect(url_for('index'))
 
-    deleted_count = 0
+    # マッチテーブルから削除
     last_evaluated_key = None
+    while True:
+        scan_kwargs = {
+            'FilterExpression': Attr('user_id').begins_with("test_user_")
+        }
+        if last_evaluated_key:
+            scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
 
-    try:
-        while True:
-            scan_kwargs = {
-                'FilterExpression': Attr('user_id').begins_with("test_user_")
-            }
-            if last_evaluated_key:
-                scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
+        response = match_table.scan(**scan_kwargs)
+        items = response.get('Items', [])
 
-            response = match_table.scan(**scan_kwargs)
-            items = response.get('Items', [])
+        for item in items:
+            match_table.delete_item(Key={
+                'entry_id': item['entry_id']
+            })
 
-            for item in items:
-                try:
-                    match_table.delete_item(Key={                        
-                        'entry_id': item['entry_id']
-                    })
-                    deleted_count += 1
-                except Exception as e:
-                    current_app.logger.error(f"削除失敗: {e}, item: {item}")
-
-            last_evaluated_key = response.get('LastEvaluatedKey')
-            if not last_evaluated_key:
-                break
-        
-        # ユーザーテーブルも削除する（新機能）
-        # 元のエンドポイントを維持しながら機能を拡張
-        user_table = current_app.dynamodb.Table("bad-users")
-        last_evaluated_key = None
-        deleted_user_count = 0
-        
-        while True:
-            # スキャンでtest_user_で始まるユーザーを検索
-            scan_kwargs = {
-                'FilterExpression': 'begins_with(#uid, :prefix)',
-                'ExpressionAttributeNames': {'#uid': 'user_id'},
-                'ExpressionAttributeValues': {':prefix': 'test_user_'}
-            }
-            if last_evaluated_key:
-                scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-                
-            response = user_table.scan(**scan_kwargs)
-            items = response.get('Items', [])
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key:
+            break
+    
+    # ユーザーテーブルから削除
+    user_table = current_app.dynamodb.Table("bad-users")
+    last_evaluated_key = None
+    
+    while True:
+        scan_kwargs = {
+            'FilterExpression': 'begins_with(#uid, :prefix)',
+            'ExpressionAttributeNames': {'#uid': 'user_id'},
+            'ExpressionAttributeValues': {':prefix': 'test_user_'}
+        }
+        if last_evaluated_key:
+            scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
             
-            for item in items:
-                try:
-                    user_table.delete_item(Key={
-                        'user#user_id': item['user#user_id']
-                    })
-                    deleted_user_count += 1
-                except Exception as e:
-                    current_app.logger.error(f"ユーザーテーブル削除失敗: {e}, item: {item}")
+        response = user_table.scan(**scan_kwargs)
+        items = response.get('Items', [])
+        
+        for item in items:
+            user_table.delete_item(Key={
+                'user#user_id': item['user#user_id']
+            })
+        
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key:
+            break
             
-            last_evaluated_key = response.get('LastEvaluatedKey')
-            if not last_evaluated_key:
-                break
-                
-        message = f"テストデータを削除しました。マッチテーブル: {deleted_count}件、ユーザーテーブル: {deleted_user_count}件"
-        current_app.logger.info(message)
-        flash(message, "success")
-        
-    except Exception as e:
-        current_app.logger.error(f"テストデータ削除エラー: {str(e)}")
-        flash(f"エラーが発生しました: {str(e)}", "danger")
-        
     return redirect(url_for('game.court'))
 
 @bp_game.route('/test_data_status')
@@ -2301,6 +2039,251 @@ def test_data_status():
         
     except Exception as e:
         return f"エラー: {e}"
+    
 
+  # ペアリングを実行するボタンの制御  
+def has_ongoing_matches():
+    """進行中の試合があるかチェック（DynamoDB版）"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # entry_statusが"playing"のエントリーがあるかチェック
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        ongoing_count = len(response.get("Items", []))
+        current_app.logger.info(f"進行中の試合プレイヤー数: {ongoing_count}")
+        
+        return ongoing_count > 0
+        
+    except Exception as e:
+        current_app.logger.error(f"進行中試合チェックエラー: {str(e)}")
+        return False  # エラー時は安全側に倒してペアリングを許可
+
+def get_match_progress():
+    """試合進行状況を取得（DynamoDB版）"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # 現在の試合セッションのプレイヤーを取得
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").is_in(["playing", "finished"])
+        )
+        
+        items = response.get("Items", [])
+        
+        # 最新のmatch_idを取得して、そのセッションのみを対象にする
+        if not items:
+            return 0, 0
+            
+        # match_idでグループ化
+        match_sessions = {}
+        for item in items:
+            match_id = item.get("match_id", "")
+            if match_id:
+                if match_id not in match_sessions:
+                    match_sessions[match_id] = {"playing": 0, "finished": 0}
+                status = item.get("entry_status", "")
+                if status in ["playing", "finished"]:
+                    match_sessions[match_id][status] += 1
+        
+        # 最新のセッション（最も多くのプレイヤーがいるセッション）を取得
+        if not match_sessions:
+            return 0, 0
+            
+        latest_session = max(match_sessions.items(), key=lambda x: sum(x[1].values()))
+        session_data = latest_session[1]
+        
+        total_players = session_data["playing"] + session_data["finished"]
+        finished_players = session_data["finished"]
+        
+        # 試合数に変換（4人で1試合）
+        total_matches = total_players // 4
+        # 完了した試合数を推定（全員が完了したコートを計算）
+        completed_matches = finished_players // 4
+        
+        current_app.logger.info(f"試合進行状況: {completed_matches}/{total_matches} 試合完了")
+        
+        return completed_matches, total_matches
+        
+    except Exception as e:
+        current_app.logger.error(f"試合進行状況取得エラー: {str(e)}")
+        return 0, 0
+
+def get_current_match_status():
+    """現在の試合状況の詳細を取得"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        playing_players = response.get("Items", [])
+        
+        # コート別にグループ化
+        courts = {}
+        for player in playing_players:
+            court_num = player.get("court_number", 0)
+            if court_num not in courts:
+                courts[court_num] = []
+            courts[court_num].append(player)
+        
+        return courts
+        
+    except Exception as e:
+        current_app.logger.error(f"試合状況取得エラー: {str(e)}")
+        return {}
+
+def complete_match_for_player(entry_id):
+    """プレイヤーの試合完了処理"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # エントリーのステータスをfinishedに更新
+        response = match_table.scan(
+            FilterExpression=Attr("entry_id").eq(entry_id)
+        )
+        
+        items = response.get("Items", [])
+        if items:
+            entry = items[0]
+            match_table.update_item(
+                Key={
+                    'user_id': entry['user_id'],
+                    'joined_at': entry['joined_at']
+                },
+                UpdateExpression='SET entry_status = :status',
+                ExpressionAttributeValues={
+                    ':status': 'finished'
+                }
+            )
+            
+            # 全試合完了チェック
+            if not has_ongoing_matches():
+                current_app.logger.info("全ての試合が完了しました！")
+                # 必要に応じて通知やクリーンアップ処理を追加
+            
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"試合完了処理エラー: {str(e)}")
+        return False
+    
+# routes.py の修正版
+@bp_game.route('/game')  # または適切なルート名
+def game_view():
+    try:
+        # 既存のpendingプレイヤー取得処理
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        response = match_table.scan(FilterExpression=Attr("entry_status").eq("pending"))
+        entries_by_user = {}
+        for e in response.get("Items", []):
+            uid, joined_at = e["user_id"], e.get("joined_at", "")
+            if uid not in entries_by_user or joined_at > entries_by_user[uid].get("joined_at", ""):
+                entries_by_user[uid] = e
+        pending_players = list(entries_by_user.values())
+        
+        # 進行中の試合チェック
+        has_ongoing = has_ongoing_matches()
+        completed, total = get_match_progress()
+        current_courts = get_current_match_status()
+        
+        return render_template('game.html',
+            pending_players=pending_players,
+            has_ongoing_matches=has_ongoing,
+            completed_matches=completed,
+            total_matches=total,
+            current_courts=current_courts
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"ゲーム画面表示エラー: {str(e)}")
+        flash("データの取得中にエラーが発生しました。", "error")
+        return render_template('game.html', pending_players=[], has_ongoing_matches=False)
+
+
+# 管理者用のリセット機能（オプション）
+@bp_game.route('/reset_ongoing_matches', methods=['POST'])
+@login_required
+def reset_ongoing_matches():
+    """管理者が進行中の試合を強制リセット"""
+    if not current_user.administrator:
+        flash('管理者権限が必要です。', 'error')
+        return redirect(url_for('game.court'))
+    
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # playing状態のエントリーを取得
+        response = match_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing")
+        )
+        
+        playing_entries = response.get("Items", [])
+        reset_count = 0
+        
+        # 各エントリーをpendingに戻す
+        for entry in playing_entries:
+            try:
+                match_table.update_item(
+                    Key={
+                        'user_id': entry['user_id'],
+                        'joined_at': entry['joined_at']
+                    },
+                    UpdateExpression='SET entry_status = :status REMOVE match_id, court_number, team',
+                    ExpressionAttributeValues={
+                        ':status': 'pending'
+                    }
+                )
+                reset_count += 1
+            except Exception as update_error:
+                current_app.logger.error(f"エントリーリセット失敗 {entry.get('user_id')}: {update_error}")
+        
+        flash(f'進行中の試合をリセットしました。{reset_count}人をエントリー待ちに戻しました。', 'warning')
+        current_app.logger.info(f"管理者による試合リセット: {reset_count}人")
+        
+    except Exception as e:
+        current_app.logger.error(f"試合リセットエラー: {str(e)}")
+        flash('試合リセット中にエラーが発生しました。', 'error')
+    
+    return redirect(url_for('game.court'))
+
+# スコア入力完了時の処理を更新する関数（既存のスコア入力処理に追加）
+def complete_match_for_player(entry_id):
+    """プレイヤーの試合完了処理"""
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        # エントリーのステータスをfinishedに更新
+        response = match_table.scan(
+            FilterExpression=Attr("entry_id").eq(entry_id)
+        )
+        
+        items = response.get("Items", [])
+        if items:
+            entry = items[0]
+            match_table.update_item(
+                Key={
+                    'user_id': entry['user_id'],
+                    'joined_at': entry['joined_at']
+                },
+                UpdateExpression='SET entry_status = :status',
+                ExpressionAttributeValues={
+                    ':status': 'finished'
+                }
+            )
+            
+            # 全試合完了チェック
+            if not has_ongoing_matches():
+                current_app.logger.info("全ての試合が完了しました！")
+                # 必要に応じて通知やクリーンアップ処理を追加
+            
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"試合完了処理エラー: {str(e)}")
+        return False
    
 

@@ -94,9 +94,13 @@ body {
     left: 0 !important;
     right: 0 !important;
     width: 100% !important;
+    padding-left: 10px !important;  /* 左パディング */
+    padding-right: 10px !important; /* 右パディング */
     z-index: 1020 !important;
     background-color: #f8f9fa !important;
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1) !important;
+    box-sizing: border-box !important; /* パディングを幅に含める */
+    color: #2c3e50 !important;
 }
 
 /* タイトルの色を統一 */
@@ -106,19 +110,11 @@ body {
     color: #2c3e50 !important;
 }
 
-/* text-warningクラスの色を上書き */
-.fixed-footer .text-warning {
-    color: #2c3e50 !important;
-}
-
 /* または、ヘッダーと同じ色に統一する場合 */
 .navbar-light .navbar-nav .nav-link.text-warning {
     color: #ffc107 !important; /* 元のwarning色 */
 }
 
-.fixed-footer .navbar {
-    padding: 0.5rem 0;
-}
 </style>
 
 <body>
@@ -198,49 +194,75 @@ body {
 
 <!-- 固定フッター（間隔調整版） -->
 <footer class="fixed-footer">
-    <nav class="navbar navbar-light bg-light">
-        <div class="container d-flex justify-content-between align-items-center">          
-            <a class="navbar-brand fst-italic" href="{{ url_for('index') }}">
-                <h1 class="navbar-title">鶯 badminton</h1>
+  <nav class="navbar navbar-light bg-light">
+    <div class="container d-flex justify-content-between align-items-center">
+      <a class="navbar-brand fst-italic" href="{{ url_for('index') }}">
+        <h1 class="navbar-title fs-1">鶯</h1>
+      </a>
+
+      <ul class="navbar-nav d-flex flex-row align-items-center">
+        {% if current_user.is_authenticated %}
+          <li class="nav-item">
+            <a class="btn btn-outline-danger ms-2"
+               href="{{ url_for('game.court') }}"
+               target="_blank"
+               rel="noopener noreferrer"
+               title="新しいタブで待機画面を開きます">
+              <i class="fas fa-external-link-alt me-1"></i>コート
             </a>
-            
-            <ul class="navbar-nav d-flex flex-row">
-                {% if current_user.is_authenticated %}
-                <li class="nav-item">
-                    <a class="btn btn-outline-danger ms-2" 
-                       href="{{ url_for('game.court') }}" 
-                       target="_blank" 
-                       rel="noopener noreferrer"
-                       title="新しいタブで待機画面を開きます">                        
-                        <i class="fas fa-external-link-alt me-1"></i>
-                        コートに入る                        
-                    </a>
-                </li>
-                
-                <li class="nav-item ms-4">  <!-- ms-4 で間隔を広げる -->
-                    <a class="nav-link fw-bold text-warning d-flex align-items-center" href="{{ url_for('account', user_id=current_user.id) }}">
-                        {% if current_user.profile_image %}
-                        <img src="{{ current_user.profile_image }}" 
-                            alt="プロフィール画像" 
-                            class="rounded-circle me-2" 
-                            style="width: 30px; height: 30px; object-fit: cover;">
-                        {% else %}
-                        <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center me-2" 
-                            style="width: 30px; height: 30px; font-size: 12px; color: white;">
-                            {{ current_user.display_name[0] | upper }}
-                        </div>
-                        {% endif %}
-                        {{ current_user.display_name | truncate(10) }}
-                    </a>  
-                </li>
-                {% else %}
-                <li class="nav-item ms-4">  <!-- ログイン時も同じ間隔 -->
-                    <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
-                </li>
-                {% endif %}
-            </ul>
-        </div>
-    </nav>      
+          </li>
+
+          <style>
+            /* 汎用クラス */
+            .avatar-ig {
+                --size: 40px;   /* 画像の直径 */
+                --ring: 3px;    /* グラデーションの太さ */
+                --gap: 1px;     /* 画像とリングの間の白い縁（0でなし） */
+
+                display: inline-grid;
+                place-items: center;
+                width: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+                height: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+                border-radius: 50%;
+                padding: calc(var(--ring) + var(--gap));
+                background: conic-gradient(
+                #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75
+                ); /* Instagram風 */
+            }
+            .avatar-ig > img {
+                width: var(--size);
+                height: var(--size);
+                object-fit: cover;
+                border-radius: 50%;
+                display: block;
+                background: #fff;        /* 透過画像のための白バック */
+                box-shadow: 0 0 0 var(--gap) #fff; /* 白い縁取り（--gapと揃う） */
+            }
+            /* お好み：ホバーで少し光らせる */
+            .avatar-ig:hover { filter: brightness(1.05); }
+            </style>
+
+          <li class="nav-item ms-4">
+            <a class="nav-link fw-bold text-warning d-flex align-items-center fs-4"
+            href="{{ url_for('account', user_id=(current_user.user_id or current_user.id)) }}">
+            <span class="avatar-ig" style="--size:40px;--ring:3px;--gap:2px;">
+                <img
+                src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                alt="プロフィール画像"
+                loading="lazy" decoding="async"
+                onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+            </span>
+            <span class="ms-2">{{ current_user.display_name | truncate(10) }}</span>
+            </a>
+            </li>
+        {% else %}
+          <li class="nav-item ms-4">
+            <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
+          </li>
+        {% endif %}
+      </ul>
+    </div>
+  </nav>
 </footer>
   
   <script>

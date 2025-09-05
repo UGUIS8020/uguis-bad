@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -25,6 +26,92 @@
             margin-bottom: 20px;
             border-radius: 5px;
             display: none;
+        }
+
+        /* スコア入力フィールドを大きくするスタイル */
+        .score-input {
+            font-size: 3rem !important;
+            height: 5rem !important;
+            text-align: center !important;
+            font-weight: bold !important;
+            border: 3px solid #28a745 !important;
+            border-radius: 15px !important;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important;
+        }
+
+        .score-input:focus {
+            border-color: #fd7e14 !important;
+            box-shadow: 0 0 20px rgba(253, 126, 20, 0.5) !important;
+        }
+
+        /* チーム名表示を大きく */
+        .team-name {
+            font-size: 2.5rem !important;
+            font-weight: bold !important;
+            min-width: 400px;
+            text-align: center;
+        }
+
+        /* バッジを大きく */
+        .team-badge {
+            font-size: 2.5rem !important;
+            padding: 0.8rem 1.2rem !important;
+            border-radius: 20px !important;
+        }
+
+        /* VS表示 */
+        .vs-display {
+            font-size: 4rem !important;
+            font-weight: bold !important;
+            color: #28a745;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        /* カードを大きく */
+        .court-card {
+            min-height: 600px;
+        }
+
+        /* スコア入力エリア全体のレイアウト改善 */
+        .score-row {
+            margin: 2rem 0 !important;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 20px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+
+        /* ボタンも大きく */
+        .submit-btn {
+            font-size: 2rem !important;
+            padding: 1rem 3rem !important;
+            border-radius: 15px !important;
+            font-weight: bold !important;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2) !important;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* レスポンシブ対応 */
+        @media (max-width: 768px) {
+            .team-name {
+                font-size: 1.8rem !important;
+                min-width: 250px;
+            }
+            
+            .score-input {
+                font-size: 2.5rem !important;
+                height: 4rem !important;
+            }
+            
+            .vs-display {
+                font-size: 3rem !important;
+            }
+            
+            .team-badge {
+                font-size: 2rem !important;
+                padding: 0.6rem 1rem !important;
+            }
         }
     </style>
 </head>
@@ -63,63 +150,67 @@
     </div>
 
     <!-- コートデータのループ -->
-    <!-- <div class="row row-cols-1 row-cols-md-2 g-4"> -->
     <div class="row row-cols-1 g-4">
         {% if match_courts and match_courts|length > 0 %}
             {% for court_num, court in match_courts.items() %}
             <div class="col">
-                <div class="card h-100 shadow-sm">
+                <div class="card h-100 shadow-lg court-card">
                     <div class="card-header bg-success text-white text-center">
-                        <h4 class="mb-0">コート{{ court_num }}</h4>
+                        <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body p-4">
                         <form class="score-form" 
                             data-court-number="{{ court_num }}"
                             id="score-form-{{ court_num }}"
                             action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">                            
                             
-
-                            <div class="d-flex justify-content-center align-items-center mb-3">
-                                <div>
-                                    <span class="badge bg-danger me-2 fs-3">A</span>
-                                    <span class="fs-3 fw-bold" style="display: inline-block; width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                        {% for player in court.team_a %}
-                                            {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                        {% endfor %}
-                                    </span>
-                                </div>
-                                <div class="ms-3" style="width: 100px;">                                
-                                    <input type="number" name="team1_score" class="form-control form-control-lg text-end"
-                                        required min="0" placeholder="得点"
-                                        inputmode="numeric" pattern="\d*">
+                            <!-- チームA -->
+                            <div class="score-row">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <span class="badge bg-danger me-3 team-badge">A</span>
+                                        <span class="team-name">
+                                            {% for player in court.team_a %}
+                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                            {% endfor %}
+                                        </span>
+                                    </div>
+                                    <div style="width: 200px;">                                
+                                        <input type="number" name="team1_score" class="form-control score-input"
+                                            required min="0" placeholder="0"
+                                            inputmode="numeric" pattern="\d*">
+                                    </div>
                                 </div>
                             </div>
 
-                        <div class="d-flex justify-content-center align-items-center mb-3">
-                       
-                            <div>
-                                <span class="badge bg-primary me-2 fs-3">B</span>
-                                <span class="fs-3 fw-bold" style="display: inline-block; width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                    {% for player in court.team_b %}
-                                        {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                    {% endfor %}
-                                </span>
+                            <!-- VS表示 -->
+                            <div class="text-center my-4">
+                                <span class="vs-display">VS</span>
                             </div>
-                            <div class="ms-3" style="width: 100px;">                                
-                                <input type="number" name="team2_score" class="form-control form-control-lg text-end"
-                                    required min="0" placeholder="得点"
-                                    inputmode="numeric" pattern="\d*">
-                            </div>                         
 
-                        </div>
-
-
-
-
-
+                            <!-- チームB -->
+                            <div class="score-row">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <span class="badge bg-primary me-3 team-badge">B</span>
+                                        <span class="team-name">
+                                            {% for player in court.team_b %}
+                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                            {% endfor %}
+                                        </span>
+                                    </div>
+                                    <div style="width: 200px;">                                
+                                        <input type="number" name="team2_score" class="form-control score-input"
+                                            required min="0" placeholder="0"
+                                            inputmode="numeric" pattern="\d*">
+                                    </div>                         
+                                </div>
+                            </div>
                                 
-                            <div class="text-center mt-3">
-                                <button type="submit" class="btn btn-orange btn-lg">スコア送信</button>
+                            <div class="text-center mt-5">
+                                <button type="submit" class="btn btn-orange submit-btn">
+                                    <i class="fas fa-trophy me-2"></i>スコア送信
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -138,8 +229,8 @@
     <!-- 試合終了ボタン -->
     <form method="POST" action="{{ url_for('game.finish_current_match') }}">
         <div class="text-center mt-5 mb-5">
-            <button id="endMatchButton" type="submit" class="btn btn-danger btn-xl px-5 py-3 fs-4" disabled>
-                試合終了
+            <button id="endMatchButton" type="submit" class="btn btn-danger btn-xl px-5 py-3 fs-2" disabled>
+                <i class="fas fa-flag-checkered me-2"></i>試合終了
             </button>
         </div>
     </form>
@@ -202,7 +293,7 @@
                     const submitBtn = form.querySelector("button[type='submit']");
                     if (submitBtn) {
                         submitBtn.disabled = true;
-                        submitBtn.textContent = "送信済み";
+                        submitBtn.innerHTML = '<i class="fas fa-check me-2"></i>送信済み';
                         submitBtn.classList.remove("btn-orange");
                         submitBtn.classList.add("submitted-btn");
                     }
@@ -226,20 +317,29 @@
         if (endButton) {
             endButton.addEventListener("click", function (e) {
                 e.preventDefault();
+                
+                // ボタンを即座に無効化（重複クリック防止）
+                endButton.disabled = true;
+                endButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
 
                 fetch("/game/finish_current_match", {
-                    method: "POST"
+                    method: "POST",
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'  // Ajax判定用ヘッダー
+                    }
                 })
-                .then(res => {
-                    if (res.ok) {
+                .then(res => res.json())  // JSONレスポンスを期待
+                .then(data => {
+                    if (data.success) {
                         window.location.href = "/game/court";
                     } else {
-                        return res.text().then(text => {
-                            throw new Error(text || "試合終了処理に失敗しました");
-                        });
+                        throw new Error(data.error || "処理に失敗しました");
                     }
                 })
                 .catch(error => {
+                    // エラー時はボタンを再度有効化
+                    endButton.disabled = false;
+                    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
                     alert(error.message || "通信エラーが発生しました");
                     console.error(error);
                 });
@@ -264,6 +364,18 @@
                 });
             });
         }
+
+        // スコア入力フィールドにフォーカス時のアニメーション効果
+        document.querySelectorAll('.score-input').forEach(input => {
+            input.addEventListener('focus', function() {
+                this.style.transform = 'scale(1.05)';
+                this.style.transition = 'transform 0.2s ease';
+            });
+            
+            input.addEventListener('blur', function() {
+                this.style.transform = 'scale(1)';
+            });
+        });
     });
 
     // デバッグ情報の表示/非表示を切り替える関数
