@@ -1377,6 +1377,86 @@ def rest():
     
     return redirect(url_for('game.court'))
 
+@bp_game.route('/api/toggle_player_status', methods=['POST'])
+@login_required
+def toggle_player_status():
+    # 管理者権限チェック
+    if not current_user.administrator:
+        current_app.logger.warning(f'非管理者からのアクセス: {current_user.get_id()}')
+        return jsonify({'success': False, 'message': '管理者権限が必要です'}), 403
+    
+    try:
+        data = request.get_json()
+        current_app.logger.info(f'受信データ: {data}')
+        
+        player_id = data.get('player_id')
+        current_status = data.get('current_status')
+        
+        current_app.logger.info(f'プレイヤーID: {player_id}, 現在のステータス: {current_status}')
+        
+        if not player_id or not current_status:
+            current_app.logger.error('パラメータが不足しています')
+            return jsonify({'success': False, 'message': 'パラメータが不足しています'}), 400
+        
+        # DynamoDBからプレイヤーのエントリーを取得
+        current_entry = get_user_current_entry(player_id)
+        current_app.logger.info(f'取得したエントリー: {current_entry}')
+        
+        if not current_entry:
+            current_app.logger.error(f'プレイヤー {player_id} のエントリーが見つかりません')
+            return jsonify({'success': False, 'message': 'プレイヤーのエントリーが見つかりません'}), 404
+        
+        # プレイヤー名を取得
+        player_name = current_entry.get('display_name', 'プレイヤー')
+        current_app.logger.info(f'プレイヤー名: {player_name}')
+        
+        # 現在のステータスを確認
+        actual_status = current_entry.get('entry_status')
+        current_app.logger.info(f'実際のステータス: {actual_status}, 期待するステータス: {current_status}')
+        
+        # 現在の状態に応じて切り替え
+        if current_status == 'pending' and actual_status == 'pending':
+            # 参加待ち → 休憩中
+            current_app.logger.info(f'{player_name}を休憩状態に変更中...')
+            match_table.update_item(
+                Key={'entry_id': current_entry['entry_id']},
+                UpdateExpression='SET entry_status = :status, rest_started_at = :time',
+                ExpressionAttributeValues={
+                    ':status': 'resting',
+                    ':time': datetime.now().isoformat()
+                }
+            )
+            current_app.logger.info(f'{player_name}を休憩状態に変更完了')
+            return jsonify({
+                'success': True, 
+                'message': f'{player_name}さんを休憩状態に変更しました',
+                'new_status': 'resting'
+            })
+        
+        elif current_status == 'resting' and actual_status == 'resting':
+            # 休憩中 → 参加待ち
+            current_app.logger.info(f'{player_name}を参加待ち状態に変更中...')
+            match_table.update_item(
+                Key={'entry_id': current_entry['entry_id']},
+                UpdateExpression='SET entry_status = :status',
+                ExpressionAttributeValues={
+                    ':status': 'pending'
+                }
+            )
+            current_app.logger.info(f'{player_name}を参加待ち状態に変更完了')
+            return jsonify({
+                'success': True, 
+                'message': f'{player_name}さんを参加待ち状態に変更しました',
+                'new_status': 'pending'
+            })
+        
+        current_app.logger.error(f'状態の不一致: 期待={current_status}, 実際={actual_status}')
+        return jsonify({'success': False, 'message': f'状態の変更に失敗しました。現在の状態: {actual_status}'}), 400
+        
+    except Exception as e:
+        current_app.logger.error(f'状態変更エラー: {e}', exc_info=True)
+        return jsonify({'success': False, 'message': f'エラーが発生しました: {str(e)}'}), 500
+
 @bp_game.route('/resume', methods=['POST'])
 @login_required
 def resume():
