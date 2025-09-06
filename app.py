@@ -701,7 +701,11 @@ def get_participants_info(schedule):
         request = {
             app.table_name: {
                 "Keys": [{"user#user_id": uid} for uid in ids],
-                "ProjectionExpression": "user#user_id, display_name, profile_image_url, skill_score, practice_count",
+                # ProjectionExpressionで#を含む属性名はExpressionAttributeNamesでエスケープが必要
+                "ProjectionExpression": "#user_id, display_name, profile_image_url, skill_score, practice_count",
+                "ExpressionAttributeNames": {
+                    "#user_id": "user#user_id"
+                }
             }
         }
 

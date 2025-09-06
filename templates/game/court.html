@@ -276,22 +276,30 @@
             <small class="text-warning">
                 <i class="fas fa-hand-pointer"></i> 管理者: 名前をクリックで状態変更
             </small>
-            {% endif %}
-        </div>
+            {% endif %}   </div>
+
+
+
+
+
+
+
+
         
         <div class="card-body px-4">
             <!-- 参加待ちプレイヤー -->
             {% if pending_players %}
             <div class="row gx-3 gy-2">
                 {% for player in pending_players %}
+                
                 <div class="col-xxl-2 col-xl-3 col-lg-4 col-md-6 col-sm-12 mb-2">
                     <div class="player-item border rounded px-2 py-2 text-center h-100 {% if current_user.administrator %}admin-clickable{% endif %}"
-                         {% if current_user.administrator %}
-                         onclick="togglePlayerStatus('{{ player.id }}', 'pending')"
-                         data-player-id="{{ player.id }}"
-                         data-player-name="{{ player.display_name }}"
-                         data-current-status="pending"
-                         {% endif %}>
+                        {% if current_user.administrator %}
+                        onclick="togglePlayerStatus('{{ player.user_id }}', 'pending')"
+                        data-player-id="{{ player.user_id }}"
+                        data-player-name="{{ player.display_name }}"
+                        data-current-status="pending"
+                        {% endif %}>
                         <div class="fs-5 fw-semibold">
                             {{ player.display_name }}
                         </div>
@@ -317,7 +325,6 @@
             </div>
             {% endif %}
         
-            <!-- 休憩中プレイヤー表示 -->
             {% if resting_players %}
             <div class="row {% if pending_players %}mt-4{% endif %}">
                 <div class="col-12 mb-3">
@@ -326,12 +333,12 @@
                 {% for player in resting_players %}
                 <div class="col-xxl-2 col-xl-3 col-lg-4 col-md-6 col-sm-12 mb-2">
                     <div class="player-item border border-warning rounded px-2 py-2 text-center h-100 bg-light {% if current_user.administrator %}admin-clickable{% endif %}"
-                         {% if current_user.administrator %}
-                         onclick="togglePlayerStatus('{{ player.id }}', 'resting')"
-                         data-player-id="{{ player.id }}"
-                         data-player-name="{{ player.display_name }}"
-                         data-current-status="resting"
-                         {% endif %}>
+                        {% if current_user.administrator %}
+                        onclick="togglePlayerStatus('{{ player.user_id }}', 'resting')"
+                        data-player-id="{{ player.user_id }}"
+                        data-player-name="{{ player.display_name }}"
+                        data-current-status="resting"
+                        {% endif %}>
                         <div class="fw-bold fs-5 mb-1 text-warning">
                             {{ player.display_name if player.display_name else '名前なし' }}
                         </div>

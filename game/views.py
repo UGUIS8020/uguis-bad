@@ -29,14 +29,14 @@ def court():
         if "score_format" not in session:
             session["score_format"] = "21"
 
-        # ✅ 参加希望のプレイヤーだけ取得（休憩中など除外）
+        # ✅ 全ステータスのプレイヤーを取得
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
         response = match_table.scan(
-            FilterExpression=Attr("entry_status").eq("pending") | Attr("entry_status").eq("resting"),
+            FilterExpression=Attr("entry_status").is_in(["pending", "resting", "playing"]),
             ConsistentRead=True
         )
         items = response.get("Items", [])
-        current_app.logger.info(f"📊 参加待ちプレイヤー数: {len(items)}")
+        current_app.logger.info(f"📊 全プレイヤー数: {len(items)}")
         
         # デフォルト値を設定
         for item in items:
@@ -55,6 +55,9 @@ def court():
         current_app.logger.info(f"📊 参加待ちプレイヤー数: {len(pending_players)}")
         current_app.logger.info(f"📊 休憩中プレイヤー数: {len(resting_players)}")
         current_app.logger.info(f"📊 試合中プレイヤー数: {len(playing_players)}")
+        
+        # 進行中の試合プレイヤー数を正確に取得
+        current_app.logger.info(f"進行中の試合プレイヤー数: {len(playing_players)}")
         
         # 🔒 進行中試合のチェック機能を追加
         has_ongoing = has_ongoing_matches()
@@ -109,7 +112,7 @@ def court():
         current_app.logger.error(f"コート入場エラー詳細: {str(e)}")
         import traceback
         current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-        return f"エラー: {e}"   
+        return f"エラー: {e}"
 
     
 def _now_utc_iso():
@@ -1427,6 +1430,7 @@ def toggle_player_status():
                 }
             )
             current_app.logger.info(f'{player_name}を休憩状態に変更完了')
+            
             return jsonify({
                 'success': True, 
                 'message': f'{player_name}さんを休憩状態に変更しました',
@@ -1444,6 +1448,7 @@ def toggle_player_status():
                 }
             )
             current_app.logger.info(f'{player_name}を参加待ち状態に変更完了')
+            
             return jsonify({
                 'success': True, 
                 'message': f'{player_name}さんを参加待ち状態に変更しました',
