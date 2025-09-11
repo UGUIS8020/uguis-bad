@@ -1,7 +1,6 @@
 # --- 標準ライブラリ ---
-import os
+import os, time, hashlib, json, base64
 import uuid
-import time
 import random
 import calendar
 import logging
@@ -128,6 +127,8 @@ def create_app():
         app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
         app.table = app.dynamodb.Table(app.table_name)
         app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
+        app.bad_table_name = os.getenv("BAD_TABLE_NAME", "bad_items")
+        app.bad_table = app.dynamodb.Table(app.bad_table_name)
 
         # --- Flask-Login ---
         login_manager.init_app(app)
@@ -2006,7 +2007,6 @@ def video_link():
     return render_template("video_link.html")
 
 
-
 @app.route('/badminton-chat-logs')
 def badminton_chat_logs_page():
     """
@@ -2352,8 +2352,263 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
-match_table = dynamodb.Table("bad-game-match_entries")
+
+# dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+# match_table = dynamodb.Table("bad-game-match_entries")
+
+# ---- imports（不足分をすべて追加）----
+from urllib.parse import quote_plus
+from dateutil import parser as dtp
+
+import requests, feedparser
+from bs4 import BeautifulSoup
+
+import boto3
+from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Key
+
+from flask import render_template, request
+
+@app.route("/admin/run_badnews")
+def run_badnews():
+    total = collect_badminton_news()
+    return f"collect ok ({total})"
+
+# ---- 収集系ユーティリティ ----
+REAL_UA = {"User-Agent": (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)}
+
+# ---- ユーティリティ関数 ----
+def sha256(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def iso(dt):
+    if not dt:
+        return None
+    try:
+        d = dtp.parse(str(dt))
+        if not d.tzinfo:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
+
+def extract_og_image(url: str, timeout=6):
+    try:
+        resp = requests.get(url, timeout=timeout, headers=REAL_UA, allow_redirects=True)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # 優先順: og:image:secure_url → og:image → twitter:image
+        for prop, attr in [("og:image:secure_url", "property"),
+                           ("og:image", "property"),
+                           ("twitter:image", "name")]:
+            tag = soup.find("meta", **{attr: prop})
+            if tag and tag.get("content"):
+                img = tag["content"].strip()
+                return urljoin(resp.url, img)
+    except Exception:
+        pass
+    return None
+
+def put_unique(item: dict):
+    table = current_app.bad_table  # アプリケーションコンテキストから取得
+    pk = f"URL#{sha256(item['url'])}"
+    try:
+        table.put_item(
+            Item={
+                "pk": pk, "sk": "METADATA",
+                "url": item["url"], "title": item.get("title"),
+                "source": item.get("source"), "kind": item.get("kind"),
+                "lang": item.get("lang"), "published_at": item.get("published_at"),
+                "summary": item.get("summary"), "image_url": item.get("image_url"),
+                "author": item.get("author"),
+                "gsi1pk": f"KIND#{item.get('kind')}#LANG#{item.get('lang')}",
+                "gsi1sk": item.get("published_at") or "0000-00-00T00:00:00"
+            },
+            ConditionExpression="attribute_not_exists(pk)"
+        )
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+# ---- データ収集関数 ----
+def fetch_google_news(query="バドミントン", lang="ja"):
+    """Google Newsからニュースを取得"""
+    url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=ja&gl=JP&ceid=JP:ja"
+    feed = feedparser.parse(url)
+    
+    count = 0
+    for e in feed.entries:
+        link = getattr(e, "link", None)
+        if not link:
+            continue
+            
+        item = {
+            "source": "google_news",
+            "kind": "news",
+            "title": (getattr(e, "title", "") or "").strip(),
+            "url": link,
+            "published_at": iso(getattr(e, "published", None)),
+            "summary": getattr(e, "summary", None),
+            "author": getattr(e, "source", {}).get("title") if hasattr(e, "source") else None,
+            "image_url": None,
+            "lang": lang,
+        }
+        
+        # OG画像を取得
+        if not item["image_url"]:
+            item["image_url"] = extract_og_image(item["url"])
+            
+        if put_unique(item):
+            count += 1
+            
+    print(f"Google News: {count}件の新しい記事を追加 (クエリ: {query})")
+    return count
+
+def fetch_youtube_rss(query="badminton", lang="en"):
+    """YouTubeのRSSから動画を取得"""
+    url = f"https://www.youtube.com/feeds/videos.xml?search_query={quote_plus(query)}"
+    feed = feedparser.parse(url)
+    
+    count = 0
+    for e in feed.entries:
+        link = getattr(e, "link", None)
+        if not link:
+            continue
+            
+        thumb = None
+        media = getattr(e, "media_thumbnail", None)
+        if media and len(media) > 0:
+            thumb = media[0].get("url")
+            
+        item = {
+            "source": "youtube_rss",
+            "kind": "video",
+            "title": (getattr(e, "title", "") or "").strip(),
+            "url": link,
+            "published_at": iso(getattr(e, "published", None)),
+            "summary": None,
+            "author": getattr(e, "author", None),
+            "image_url": thumb,
+            "lang": lang,
+        }
+        
+        if put_unique(item):
+            count += 1
+            
+    print(f"YouTube RSS: {count}件の新しい動画を追加 (クエリ: {query})")
+    return count
+
+# ---- DynamoDB クエリ関数 ----
+def bad_query_items(kind=None, lang=None, limit=40, last_evaluated_key=None):
+    table = current_app.bad_table
+    if not kind:
+        kind = "news"
+    if not lang:
+        lang = "ja"
+
+    kwargs = {
+        "IndexName": "gsi1",
+        "KeyConditionExpression": Key("gsi1pk").eq(f"KIND#{kind}#LANG#{lang}"),
+        "ScanIndexForward": False,  # gsi1sk（published_at）で新しい順
+        "Limit": limit,
+    }
+    if last_evaluated_key:
+        kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+    resp = table.query(**kwargs)
+    return resp.get("Items", []), resp.get("LastEvaluatedKey")
+
+
+# ---- ルート定義 ----
+import base64, json
+
+@app.route("/bad_news")
+def bad_news():
+    kind = request.args.get("kind") or "news"   # 'news' or 'video'
+    lang = request.args.get("lang") or "ja"     # 'ja' or 'en'
+    page_token = request.args.get("tok")
+
+    last_evaluated_key = None
+    if page_token:
+        try:
+            last_evaluated_key = json.loads(
+                base64.urlsafe_b64decode(page_token.encode()).decode()
+            )
+        except Exception:
+            last_evaluated_key = None  # トークン壊れ時の保険
+
+    items, lek = bad_query_items(kind=kind, lang=lang, limit=40, last_evaluated_key=last_evaluated_key)
+
+    next_tok = None
+    if lek:
+        next_tok = base64.urlsafe_b64encode(json.dumps(lek).encode()).decode()
+
+    return render_template("bad_news.html", rows=items, kind=kind, lang=lang, page=1, next_tok=next_tok)
+
+@app.route("/bad_news/demo")
+def bad_news_demo():
+    """デモ用のダミーデータ表示"""
+    test_items = [
+        {
+            "title": "桃田賢斗が全英オープンで快勝",
+            "url": "https://example.com/news1",
+            "author": "NHK",
+            "published_at": "2025-09-10T09:00:00",
+            "summary": "バドミントン男子シングルスで桃田賢斗選手が準々決勝進出。",
+            "kind": "news",
+            "image_url": "https://placehold.jp/300x200.png"
+        },
+        {
+            "title": "Badminton World Championships Highlights",
+            "url": "https://example.com/video1",
+            "author": "YouTube",
+            "published_at": "2025-09-09T18:30:00",
+            "summary": None,
+            "kind": "video",
+            "image_url": "https://placehold.jp/300x200.png"
+        }
+    ]
+    return render_template("bad_news.html", rows=test_items)
+
+# ---- データ収集実行 ----
+def collect_badminton_news():
+    """バドミントンニュースを収集する"""
+    print("バドミントンニュース収集を開始...")
+    
+    total = 0
+    
+    # 日本語ニュース
+    total += fetch_google_news("バドミントン", "ja")
+    time.sleep(1)
+    
+    # 英語ニュース
+    total += fetch_google_news("badminton", "en")
+    time.sleep(1)
+    
+    # 英語動画
+    total += fetch_youtube_rss("badminton highlights", "en")
+    time.sleep(1)
+    
+    # 日本語動画
+    total += fetch_youtube_rss("バドミントン 試合", "ja")
+    
+    print(f"収集完了: 合計 {total}件の新しいコンテンツを追加")
+    return total
+
+@app.route("/admin/auto_collect", methods=["POST"])
+def auto_collect():
+    """定期的にニュース収集を実行"""
+    try:
+        total = collect_badminton_news()
+        return {"success": True, "total": total}
+    except Exception as e:
+        return {"success": False, "error": str(e)}, 500
+
 
 from uguu.timeline import uguu
 from uguu.users import users
@@ -2366,10 +2621,37 @@ for blueprint in [uguu, post, users]:
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
 app.register_blueprint(bp_game, url_prefix='/game')
 
-# if __name__ == "__main__":       
-#     app.run(debug=True)
-
-
 if __name__ == "__main__":
     app.run(debug=True)
+
+# if __name__ == "__main__":
+#     # ← ここでコンテキストを張ってからデバッグ関数を呼ぶ
+#     import json
+#     from flask import current_app
+#     from botocore.exceptions import ClientError
+
+#     def _debug_bad_items_schema():
+#         table = current_app.bad_table
+#         cli = table.meta.client
+#         try:
+#             desc = cli.describe_table(TableName=table.name)
+#         except ClientError as e:
+#             print("describe_table ERROR:", e)
+#             return
+
+#         print("TABLE NAME:", table.name)
+#         print("REGION:", cli.meta.region_name)
+#         ks = desc["Table"]["KeySchema"]
+#         print("Table KeySchema:", ks)
+
+#         gsis = desc["Table"].get("GlobalSecondaryIndexes", [])
+#         print("GSI count:", len(gsis))
+#         for g in gsis:
+#             print(" - GSI Name:", g["IndexName"], "Status:", g["IndexStatus"])
+#             print("   KeySchema:", g["KeySchema"])
+
+#     with app.app_context():
+#         _debug_bad_items_schema()
+
+#     app.run(debug=True)
 

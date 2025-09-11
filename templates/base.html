@@ -136,6 +136,10 @@ body {
                 <li class="nav-item">
                     <a class="nav-link" aria-current="page" href="{{ url_for('bad_manager') }}">質問</a>
                 </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('bad_news') }}">News</a>
+                </li>
                 
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('gallery') }}">ギャラリー</a>
@@ -190,7 +194,7 @@ body {
   {% from "_formhelpers.html" import render_field %} 
 
   {% block content %}
-  {% endblock %}
+{% endblock %}
 
 <!-- 固定フッター（間隔調整版） -->
 <footer class="fixed-footer">
