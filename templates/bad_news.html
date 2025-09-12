@@ -1,10 +1,86 @@
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>バドミントンニュース</title>
+{% extends "base.html" %}
+
+{# SEO最適化 #}
+{% block title %}バドミントンニュース - 最新情報と動画 | Uguis Badminton{% endblock %}
+{% block description %}バドミントンの最新ニュースと動画を日本語・英語で配信。国内外の大会結果、選手情報、技術解説など幅広くカバー。Google NewsやYouTubeから自動収集した最新情報をお届けします。{% endblock %}
+{% block keywords %}バドミントンニュース,バドミントン動画,BWF,全日本バドミントン,大会結果,選手情報,技術解説,国際大会,最新情報{% endblock %}
+
+{% block extra_meta %}
+  {# 正規URL（canonical） #}
+  <link rel="canonical" href="https://uguis-bad.shibuya8020.com/bad_news">
+
+  {# 検索エンジン向けのメタタグ #}
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+  <meta name="googlebot" content="index, follow">
+  <meta name="author" content="Uguis Badminton">
+
+  {# Open Graph（Facebook等のSNS用） #}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="バドミントンニュース - 最新情報と動画配信">
+  <meta property="og:description" content="バドミントンの最新ニュースと動画を日本語・英語で配信。国内外の大会結果、選手情報、技術解説など幅広くカバー。">
+  <meta property="og:url" content="https://uguis-bad.shibuya8020.com/bad_news">
+  <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/badminton_news_og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="バドミントンニュースのイメージ画像">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:site_name" content="Uguis Badminton">
+
+  {# Twitter Card #}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="バドミントンニュース - 最新情報と動画配信">
+  <meta name="twitter:description" content="バドミントンの最新ニュース・動画を自動収集。国内外の大会情報、選手ニュース、技術解説を日英両言語で配信。">
+  <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/badminton_news_og.jpg">
+  <meta name="twitter:image:alt" content="バドミントンニュースのイメージ画像">
+
+  {# パンくずリスト用構造化データ #}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "ホーム",
+        "item": "https://uguis-bad.shibuya8020.com/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "バドミントンニュース",
+        "item": "https://uguis-bad.shibuya8020.com/bad_news"
+      }
+    ]
+  }
+  </script>
+
+  {# その他のSEO向上タグ #}
+  <meta name="revisit-after" content="1 days">
+
+{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "NewsMediaOrganization",
+  "name": "Uguis Badminton News",
+  "url": "https://uguis-bad.shibuya8020.com/bad_news",
+  "logo": {
+    "@type": "ImageObject",
+    "url": "https://uguis-bad.shibuya8020.com/static/images/logo.png"
+  },
+  "sameAs": [
+    "https://uguis-bad.shibuya8020.com/"
+  ],
+  "description": "バドミントンの最新ニュースと動画を配信するニュースサイト"
+}
+</script>
+{% endblock %}
+
+{% block content %}
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -173,8 +249,7 @@
             border: 1px solid #f5c6cb;
         }
     </style>
-</head>
-<body>
+
     <div class="header">
         <h1>🏸 バドミントンニュース</h1>
         
@@ -279,5 +354,5 @@
             console.log('バドミントンニュースページを読み込みました');
         });
     </script>
-</body>
-</html>
+
+{% endblock %}
