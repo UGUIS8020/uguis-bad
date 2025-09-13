@@ -157,13 +157,7 @@
             
         <div class="d-flex flex-column align-items-center gap-3 mb-2" >
             <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
-        </div>
-
-        <a class="question-link" href="https://bad-manager.shibuya8020.com/" target="_blank" rel="noopener noreferrer">
-            <h2>ご質問はこちら。</h2>
-        </a>
-
-
+        </div> 
 
             <!-- AI質問ボックス -->
         <div class="search-box">
@@ -178,14 +172,7 @@
                     <button class="btn btn-sm btn-outline-secondary float-end" id="save-qa">この回答をQ&Aに追加</button>
                 </div>
                 <div class="response-content" id="response-text"></div>
-            </div>
-            <div class="tag-container">
-                <p class="small text-muted">よくある質問例：</p>
-                <span class="tag tag-treatment" data-question="自家歯牙移植とインプラントはどちらが良いですか？">治療法比較</span>
-                <span class="tag tag-cost" data-question="自家歯牙移植の費用はどのくらいかかりますか？">費用について</span>
-                <span class="tag tag-risk" data-question="自家歯牙移植にはどのようなリスクがありますか？">リスク</span>
-                <span class="tag tag-procedure" data-question="手術はどのような流れで行われますか？">手術の流れ</span>
-            </div>
+            </div>            
         </div>  
         
         
@@ -556,9 +543,9 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-    // 設定: バドマネージャーのURL
+    // 設定: バドマネージャーのURL（HTTPS）
     const API_BASE_URL = 'https://bad-manager.shibuya8020.com'; // 本番環境
-    // const API_BASE_URL = 'http://127.0.0.1:7861'; // ローカルテスト用
+    // const API_BASE_URL = 'http://127.0.0.1:7861'; // ローカル開発環境
     
     const questionInput = document.getElementById('ugumanager-question');
     const askButton = document.getElementById('ask-ugumanager');
@@ -584,7 +571,7 @@
             const timeoutId = setTimeout(() => controller.abort(), 60000);
             
             // Step 1: POST リクエストでevent_idを取得
-            const postResponse = await fetch(`${API_BASE_URL}/call/respond_badminton`, {
+            const postResponse = await fetch(`${API_BASE_URL}/gradio_api/call/respond_badminton`, {
                 method: 'POST',
                 mode: 'cors',
                 headers: {
@@ -612,7 +599,7 @@
             }
 
             // Step 2: GET リクエストで結果を取得（ストリーミング）
-            const getResponse = await fetch(`${API_BASE_URL}/call/respond_badminton/${eventId}`, {
+            const getResponse = await fetch(`${API_BASE_URL}/gradio_api/call/respond_badminton/${eventId}`, {
                 method: 'GET',
                 mode: 'cors',
                 headers: {
@@ -704,7 +691,7 @@
                 <div class="alert alert-danger">
                     <strong>エラー:</strong> ${errorMessage}
                     <br><small>バドマネージャーサーバーが正常に動作しているか確認してください。</small>
-                    <br><small>エンドポイント: ${API_BASE_URL}/call/respond_badminton</small>
+                    <br><small>エンドポイント: ${API_BASE_URL}/gradio_api/call/respond_badminton</small>
                 </div>
             `;
             responseDiv.style.display = 'block';
