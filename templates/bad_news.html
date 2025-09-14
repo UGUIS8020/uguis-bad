@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {# SEO最適化 #}
@@ -95,6 +94,7 @@
             padding: 30px;
             border-radius: 12px;
             margin-bottom: 30px;
+            margin-top: 60px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         
@@ -145,6 +145,11 @@
             height: 200px;
             object-fit: cover;
             background: #f0f0f0;
+        }
+        
+        /* 日本語ニュース専用スタイル（画像なし） */
+        .news-card.jp-news .news-content {
+            padding: 30px 20px 20px 20px; /* 上部パディング増加 */
         }
         
         .news-content {
@@ -254,11 +259,11 @@
         <h1>🏸 バドミントンニュース</h1>
         
         <!-- 管理者コントロール -->
-        <div class="admin-controls">
+        <!-- <div class="admin-controls">
             <button class="collect-btn" onclick="collectNews()">📥 ニュース収集実行</button>
             <button class="collect-btn" onclick="autoRefresh()">🔄 自動更新 ON/OFF</button>
             <div id="status" class="status"></div>
-        </div>
+        </div> -->
         
         <!-- フィルタータブ -->
         <div class="filter-tabs">
@@ -271,14 +276,17 @@
 
     <div class="news-grid">
         {% for item in rows %}
-        <article class="news-card">
-            {% if item.image_url %}
-                <img src="{{ item.image_url }}" alt="{{ item.title }}" class="news-image" 
-                     onerror="this.style.display='none'">
-            {% else %}
-                <div class="news-image" style="background: linear-gradient(45deg, #f0f0f0, #e0e0e0); display: flex; align-items: center; justify-content: center; color: #999;">
-                    {{ '🎥' if item.kind == 'video' else '📰' }}
-                </div>
+        <article class="news-card {{ 'jp-news' if lang == 'ja' and kind == 'news' }}">
+            {# ニュース（日本語・英語問わず）は画像を表示しない。動画のみ画像表示 #}
+            {% if kind == 'video' %}
+                {% if item.image_url %}
+                    <img src="{{ item.image_url }}" alt="{{ item.title }}" class="news-image" 
+                        onerror="this.style.display='none'">
+                {% else %}
+                    <div class="news-image" style="background: linear-gradient(45deg, #f0f0f0, #e0e0e0); display: flex; align-items: center; justify-content: center; color: #999;">
+                        🎥
+                    </div>
+                {% endif %}
             {% endif %}
             
             <div class="news-content">
@@ -295,11 +303,8 @@
                 
                 {% if item.author %}
                     <p style="font-size: 13px; color: #888; margin: 8px 0;">出典: {{ item.author }}</p>
-                {% endif %}
+                {% endif %}                
                 
-                {% if item.summary %}
-                    <p class="news-summary">{{ item.summary }}</p>
-                {% endif %}
             </div>
         </article>
         {% endfor %}
