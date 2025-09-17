@@ -72,10 +72,12 @@
 
 <style>
 .search-box {
+
         background-color: #f8f9fa;
         padding: 10px;
-        border-radius: 8px;
-        margin-bottom: 30px;
+        border-radius: 8px;        
+        margin: 0 auto 50px auto;
+        width: 90%;
     }
     
     .qa-input-container {
@@ -157,27 +159,7 @@
             
         <div class="d-flex flex-column align-items-center gap-3 mb-2" >
             <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
-        </div> 
-
-            <!-- AI質問ボックス -->
-        <div class="search-box">
-            <h3>ご質問はこちら</h3>            
-            <div class="qa-input-container">
-                <textarea class="qa-input" placeholder="質問を入力（例：「10年ほどブランクがありますが、参加できますか？」「初めての参加です、何をもっていったらいいですか？」など）" id="ugumanager-question" rows="3"></textarea>
-                <button class="btn btn-primary mt-2" id="ask-ugumanager">鶯マネージャーに質問する</button>
-            </div>
-            <div id="ugumanager-response" class="ugumanager-response" style="display: none;">
-                <div class="response-header">
-                    <strong>鶯マネの回答:</strong>
-                    <button class="btn btn-sm btn-outline-secondary float-end" id="save-qa">この回答をQ&Aに追加</button>
-                </div>
-                <div class="response-content" id="response-text"></div>
-            </div>            
-        </div>  
-        
-        
-
-
+        </div>
 
 
             <div class="schedule-title d-flex flex-column flex-md-row align-items-center justify-content-center text-center gap-2 mb-3">
@@ -436,7 +418,25 @@
         <div class="container">                
 
 
-        </section>
+        </section>      
+
+            <!-- AI質問ボックス -->
+        <div class="search-box">
+            <h3>ご質問はこちら</h3>            
+            <div class="qa-input-container">
+                <textarea class="qa-input" placeholder="質問を入力（例：「10年ほどブランクがありますが、参加できますか？」「初めての参加です、何をもっていったらいいですか？」など）" id="ugumanager-question" rows="3"></textarea>
+                <div class="text-center">
+                <button class="btn btn-primary mt-2" id="ask-ugumanager">鶯マネージャーに質問する</button>
+            </div>
+            </div>
+            <div id="ugumanager-response" class="ugumanager-response" style="display: none;">
+                <div class="response-header">
+                    <strong>鶯マネの回答:</strong>
+                    <button class="btn btn-sm btn-outline-secondary float-end" id="save-qa">この回答をQ&Aに追加</button>
+                </div>
+                <div class="response-content" id="response-text"></div>
+            </div>            
+        </div>  
 
         <section id="contact" class="mb-5 text-center">        
 
