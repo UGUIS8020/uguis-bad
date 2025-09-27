@@ -24,7 +24,7 @@
     <link rel="canonical" href="{{ request.url }}">
     
     <!-- OGP設定 -->
-    <meta property="og:title" content="{% block og_title %}{{ self.title()|striptags|trim }}{% endblock %}">  
+    <meta property="og:title" content="{% block og_title %}{% block og_title_content %}{% endblock %}{% endblock %}">  
     <meta property="og:description" content="{% block og_description %}{{ self.description()|striptags|trim }}{% endblock %}">
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:url" content="{{ request.url }}">
