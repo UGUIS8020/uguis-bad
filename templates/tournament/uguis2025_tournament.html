@@ -218,8 +218,7 @@ img{
 .container02{
     margin: 0 auto;
     padding: 0;
-    background-color: #beaa73;
-    border: 5px solid black;      
+    background-color: #beaa73;        
     display: flex;
     justify-content: center;    
     width: fit-content;
@@ -309,12 +308,32 @@ img{
 <div class="boxtop">2025.10.12 日曜日 9時開始~終わるまで(18時終了を目標)</div>
 <div class="boxtop">鶯杯其の弐 参加者募集中！</div>
 
-<div class="container02">
+<!-- <div class="container02">
     <img src="{{ url_for('static', filename='images/2025/tournament2025_03.jpg') }}"
          class="tournament-image"
          alt="鶯杯其の弐 バドミントン大会の告知ポスター"
          width="1200" height="630" loading="eager" fetchpriority="high">
-</div>     
+</div>     -->
+
+<div class="container02">
+    <img src="{{ url_for('static', filename='images/2025/tournament2025_001.jpg') }}"
+         class="tournament-image"
+         alt="鶯杯其の弐 バドミントン大会の告知ポスター"
+         width="500" height="315" loading="eager" fetchpriority="high">
+</div>  
+
+<div class="container_main02">
+    <div class="box003">
+        <h3>ご質問、エントリーはLINEで受け付けております</h3>
+        <div class="d-flex flex-column align-items-center mb-1" >
+            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer"
+               class="btn"
+               aria-label="LINEで問い合わせる"
+               style="background-color:#00B900; color:#fff; font-size:1.5rem; width:100%; max-width:100%;">
+                <b>LINEで大会エントリー</b></a>
+        </div>   
+    </div>
+</div>   
 
 <div class="container05">                 
     <a href="{{ url_for('uguis2024_tournament') }}" class="btn btn-secondary my-3">前回、鶯杯2024大会のページはこちら</a>
@@ -358,19 +377,5 @@ img{
     <h3>主催者:渋谷 正彦 連絡先: <a href="tel:07066330363">070-6633-0363</a></h3>
     <h3>e-mail: <a href="mailto:shibuyamasahiko@gmail.com">shibuyamasahiko@gmail.com</a></h3>
 </div>
-
-<div class="container_main02">
-    <div class="box003">
-        <h3>質問、エントリーはLINEでお願いします</h3>
-        <div class="d-flex flex-column align-items-center gap-3 mb-4" >
-            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer"
-               class="btn"
-               aria-label="LINEで問い合わせる"
-               style="background-color:#00B900; color:#fff; font-size:1.5rem; width:100%; max-width:100%;">
-                <b>LINEで連絡 ココをクリック</b>
-            </a>
-        </div>   
-    </div>
-</div>   
      
 {% endblock %}
