@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}第2回鶯バドミントン大会2025.10.12 | 埼玉県越谷市{% endblock %}
-{% block og_title_content %}第2回鶯バドミントン大会2025.10.12 | 埼玉県越谷市{% endblock %}
-{% block description %}2025年10月12日(日) 越谷市立西体育館にてバドミントン大会『鶯杯其の弐』を開催。年齢・性別・レベル不問、男子・女子・ミックス全種目参加可能。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。事前登録制、参加費1800円。{% endblock %}
-{% block keywords %}バドミントン大会,鶯杯,埼玉県,越谷市,サークル,トーナメント,2025年10月,初心者歓迎,男女混合,リーグ戦{% endblock %}
+{% block title %}越谷 バドミントン 大会｜誰でも参加OK｜第2回鶯バドミントン大会（2025/10/12）{% endblock %}
+{% block og_title_content %}越谷 バドミントン 大会｜誰でも参加OK｜第2回鶯バドミントン大会（2025/10/12）{% endblock %}
+{% block description %}越谷でバドミントン大会を開催。誰でも参加OK（年齢・性別・レベル不問）！第2回鶯バドミントン大会は2025年10月12日、越谷市立西体育館にて。男子・女子・ミックス参加可、予選リーグ→上位/下位トーナメント、参加費1,800円、事前登録制。{% endblock %}
+{% block keywords %}越谷, バドミントン, 大会, 誰でも参加OK, 初心者歓迎, 鶯バドミントン, 越谷市, 西体育館, ミックスダブルス, 2025年10月{% endblock %}
 
 {% block extra_meta %}
   {# 正規URL（canonical） #}
@@ -15,8 +15,8 @@
   <meta name="author" content="鶯バドミントンサークル">
 
   {# Open Graph（Facebook等のSNS用） #}
-  <meta property="og:type" content="event">
-  <meta property="og:title" content="鶯杯其の弐｜第2回 鶯バドミントン大会（2025/10/12）">
+  <meta property="og:type" content="event">  
+  <meta property="og:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第2回鶯バドミントン大会（2025/10/12）">
   <meta property="og:description" content="2025年10月12日(日) 越谷市立西体育館で開催。年齢・性別・レベル不問、男子・女子・ミックス参加OK。リーグ戦→上位/下位トーナメントで最後まで楽しめます。事前登録・参加費1,800円。">
   <meta property="og:url" content="https://uguis-bad.shibuya8020.com/tournament/uguis2025_tournament">
   <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
@@ -28,7 +28,7 @@
 
   {# Twitter Card #}
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="鶯杯其の弐｜第2回 鶯バドミントン大会（2025/10/12）">
+  <meta name="twitter:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第2回鶯バドミントン大会（2025/10/12）">
   <meta name="twitter:description" content="越谷市立西体育館で開催。年齢・性別・レベル不問／男子・女子・ミックスOK。リーグ戦→トーナメントで最後まで楽しめる形式。">
   <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
   <meta name="twitter:image:alt" content="第2回鶯バドミントン大会2025のイメージ画像">
@@ -65,6 +65,7 @@
 {% endblock %}
 
 {% block jsonld %}
+<!-- SportsEvent -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -102,6 +103,40 @@
     "telephone": "+81-70-6633-0363",
     "email": "shibuyamasahiko@gmail.com"
   }
+}
+</script>
+
+<!-- FAQPage（任意でSEO強化） -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "誰でも参加できますか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "はい。年齢・性別・レベル不問で、基礎打ちとルール理解があれば誰でも参加OKです。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "開催場所はどこですか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "越谷市立西体育館（埼玉県越谷市七左町四丁目223番地）で開催します。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "参加費と申込方法は？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "参加費は1人1,800円（ペア3,600円）。事前登録制で、ページ内のLINEリンクからお申し込みください。"
+      }
+    }
+  ]
 }
 </script>
 {% endblock %}
@@ -152,6 +187,7 @@ h1 {
 }
 
 h2 {
+    text-align: center;
     margin: 0;
     margin: 15px 0px 5px;
     font-size: 1.6em;
@@ -304,7 +340,8 @@ img{
     <span style="color: #666;">第2回鶯バドミントン大会2025</span>
 </div>
 
-<h1>バドミントン大会</h1>
+<h1>越谷で開催！誰でも参加OKのバドミントン大会</h1>
+<h2>第2回 鶯バドミントン大会（2025年10月12日｜越谷市立西体育館）</h2>
 <div class="boxtop">2025.10.12 日曜日 9時開始~終わるまで(18時終了を目標)</div>
 <div class="boxtop">鶯杯其の弐 参加者募集中！</div>
 
@@ -317,9 +354,9 @@ img{
 
 <div class="container02">
     <img src="{{ url_for('static', filename='images/2025/tournament2025_001.jpg') }}"
-         class="tournament-image"
-         alt="鶯杯其の弐 バドミントン大会の告知ポスター"
-         width="500" height="315" loading="eager" fetchpriority="high">
+     class="tournament-image"
+     alt="越谷のバドミントン大会｜誰でも参加OK｜第2回鶯バドミントン大会2025 告知ポスター"
+     width="500" height="315" loading="eager" fetchpriority="high">
 </div>  
 
 <div class="container_main02">
