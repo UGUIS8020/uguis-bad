@@ -251,13 +251,28 @@ img{
     justify-content: center; 
 }
 
-.container02{
+.tournament-container {
     margin: 0 auto;
     padding: 0;
-    background-color: #beaa73;        
+    background-color: #beaa73;
     display: flex;
-    justify-content: center;    
+    justify-content: center;
+    gap: 10px;       /* 画像の間隔 */
     width: fit-content;
+}
+
+/* スマホ表示（768px以下の画面幅） */
+@media (max-width: 768px) {
+    .tournament-container {
+        flex-direction: column; /* 縦並び */
+        align-items: center;    /* 中央寄せ */
+        width: 100%;            /* 横幅いっぱいにして安定表示 */
+    }
+
+    .tournament-container .tournament-image {
+        max-width: 90%;  /* スマホで画面幅に収まるように調整 */
+        height: auto;
+    }
 }
 
 .container03{
@@ -352,12 +367,24 @@ img{
          width="1200" height="630" loading="eager" fetchpriority="high">
 </div>     -->
 
-<div class="container02">
+<div class="tournament-container">
     <img src="{{ url_for('static', filename='images/2025/tournament2025_001.jpg') }}"
      class="tournament-image"
-     alt="越谷のバドミントン大会｜誰でも参加OK｜第2回鶯バドミントン大会2025 告知ポスター"
+     alt="第1回鶯バドミントン大会（2024年）集合写真｜越谷市で開催"
      width="500" height="315" loading="eager" fetchpriority="high">
 </div>  
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/tournament2025_002.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景1｜越谷市バドミントン"
+     width="500" height="315" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/tournament2025_003.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景2｜越谷市バドミントン"
+     width="500" height="315" loading="eager" fetchpriority="high">
+</div>
 
 <div class="container_main02">
     <div class="box003">
