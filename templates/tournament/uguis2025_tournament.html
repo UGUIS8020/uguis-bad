@@ -177,13 +177,9 @@
 
 /* 既存のスタイル */
 body{
-    background-color: #beaa73;  
-}
-
-h1 {    
-    text-align: center;
-    margin: 10px 5px;
-    font-size: 2.2em;
+    background-color: #beaa73; 
+    color: #ffffff; /* 必要に応じてテキストカラーも設定 */ 
+    
 }
 
 h2 {
@@ -438,41 +434,129 @@ img:not(.avatar-ig img) {
     }
 </style>
 
-<h1>第2回鶯杯2025</h1>
-<h1>バドミントン大会</h1>
+<div class="container my-5 text-center"> <!-- コンテナ全体を中央揃え -->
+    <h1>第2回鶯杯2025</h1> 
+</div>
+    <!-- トップ画像（1枚目） -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <img src="{{ url_for('static', filename='images/2025/tournament2025_03.jpg') }}" 
+                alt="トップ画像" 
+                class="img-fluid mx-auto d-block"
+                style="border: 4px solid black; padding: 10px;">
+        </div>
+    </div>
+    
+
 
 <div style="text-align: center;"> 
-  <img src="{{ url_for('static', filename='images/top008.jpg') }}"
+  <img src="{{ url_for('static', filename='images/2025/018.jpg') }}"
        class="tournament-image"
        alt="第2回鶯バドミントン大会（2025年）集合写真｜越谷市で開催"
-       width="400" height="261" loading="eager" fetchpriority="high"
+       width="400" height="300" loading="eager" fetchpriority="high"
        style="margin: 20px;">
 </div> 
 
-<div class="tournament-container">
-    <img src="{{ url_for('static', filename='images/2025/tournament2025_002.jpg') }}"
+<div class="tournament-container" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+    <img src="{{ url_for('static', filename='images/2025/015.jpg') }}"
      class="tournament-image"
-     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景1｜越谷市バドミントン"
-     width="500" height="315" loading="eager" fetchpriority="high">
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）入賞者1｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
 
-    <img src="{{ url_for('static', filename='images/2025/tournament2025_003.jpg') }}"
+    <img src="{{ url_for('static', filename='images/2025/016.jpg') }}"
      class="tournament-image"
-     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景2｜越谷市バドミントン"
-     width="500" height="315" loading="eager" fetchpriority="high">
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）入賞者2｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/017.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）入賞者3｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
 </div>
 
-<div class="container_main02">
-    <div class="box003">
-        <h3>ご質問、エントリーはLINEで受け付けております</h3>
-        <div class="d-flex flex-column align-items-center mb-1" >
-            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer"
-               class="btn"
-               aria-label="LINEで問い合わせる"
-               style="background-color:#00B900; color:#fff; font-size:1.5rem; width:100%; max-width:100%;">
-                <b>LINEで大会エントリー</b></a>
-        </div>   
-    </div>
-</div>   
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/001.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景1｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/002.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景2｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/003.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景3｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/004.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景4｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/005.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景5｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/006.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景6｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/007.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景7｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/008.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景8｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/009.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景9｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/010.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景10｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/014.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景11｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/012.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景12｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/013.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景13｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+
+    <img src="{{ url_for('static', filename='images/2025/011.jpg') }}"
+     class="tournament-image"
+     alt="第2回鶯バドミントン大会（2025年10月12日開催）試合風景14｜越谷市バドミントン"
+     width="400" height="300" loading="eager" fetchpriority="high">
+</div> 
 
 <div class="container05">                 
     <a href="{{ url_for('uguis2024_tournament') }}" class="btn btn-secondary my-3">前回、鶯杯2024大会のページはこちら</a>
