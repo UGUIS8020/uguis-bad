@@ -1998,6 +1998,10 @@ def uguis2024_tournament():
 def uguis2025_tournament():
     return render_template("tournament/uguis2025_tournament.html")
 
+@app.route("/tournament/uguis2026_tournament")
+def uguis2026_tournament():
+    return render_template("tournament/uguis2026_tournament.html")
+
 @app.route("/bad_manager")
 def bad_manager():
     return render_template("bad_manager.html")

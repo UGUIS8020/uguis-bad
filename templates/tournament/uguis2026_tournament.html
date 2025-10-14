@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+
+{% block title %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）{% endblock %}
+{% block og_title_content %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）{% endblock %}
+{% block description %}越谷でバドミントン大会を開催予定。誰でも参加OK（年齢・性別・レベル不問）！第3回鶯バドミントン大会は2026年秋、越谷市内で開催予定。男子・女子・ミックス参加可、予選リーグ→上位/下位トーナメント、詳細は後日発表。{% endblock %}
+{% block keywords %}越谷, バドミントン, 大会, 誰でも参加OK, 初心者歓迎, 鶯バドミントン, 越谷市, ミックスダブルス, 2026年{% endblock %}
+
+{% block extra_meta %}
+  {# 正規URL（canonical） #}
+  <link rel="canonical" href="https://uguis-bad.shibuya8020.com/tournament/uguis2026_tournament">
+
+  {# 検索エンジン向けのメタタグ #}
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+  <meta name="googlebot" content="index, follow">
+  <meta name="author" content="鶯バドミントンサークル">
+
+  {# Open Graph（Facebook等のSNS用） #}
+  <meta property="og:type" content="event">  
+  <meta property="og:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）">
+  <meta property="og:description" content="2026年秋 越谷市内で開催予定。年齢・性別・レベル不問、男子・女子・ミックス参加OK。リーグ戦→上位/下位トーナメントで最後まで楽しめます。詳細は後日発表。">
+  <meta property="og:url" content="https://uguis-bad.shibuya8020.com/tournament/uguis2026_tournament">
+  <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="第3回鶯バドミントン大会2026のイメージ画像">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:site_name" content="Uguis Badminton">
+
+  {# Twitter Card #}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）">
+  <meta name="twitter:description" content="越谷市内で開催予定。年齢・性別・レベル不問／男子・女子・ミックスOK。リーグ戦→トーナメントで最後まで楽しめる形式。">
+  <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg">
+  <meta name="twitter:image:alt" content="第3回鶯バドミントン大会2026のイメージ画像">
+
+  {# パンくずリスト用構造化データ #}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "ホーム",
+        "item": "https://uguis-bad.shibuya8020.com/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "第3回鶯バドミントン大会2026",
+        "item": "https://uguis-bad.shibuya8020.com/tournament/uguis2026_tournament"
+      }
+    ]
+  }
+  </script>
+
+  {# 地理的情報（ローカル検索向上） #}
+  <meta name="geo.region" content="JP-11">
+  <meta name="geo.placename" content="越谷市">
+  
+  {# その他のSEO向上タグ #}
+  <meta name="revisit-after" content="7 days">
+
+{% endblock %}
+
+{% block jsonld %}
+<!-- SportsEvent -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SportsEvent",
+  "name": "鶯杯其の参（第3回 鶯バドミントン大会）",
+  "description": "年齢・性別・レベル不問。男子・女子・ミックス参加OK。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。詳細は後日発表。",
+  "startDate": "2026-10-01T09:00:00+09:00",
+  "eventStatus": "https://schema.org/EventScheduled",
+  "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+  "image": ["https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg"],
+  "location": {
+    "@type": "Place",
+    "name": "越谷市内体育館（詳細は後日発表）",
+    "address": {
+      "@type": "PostalAddress",
+      "addressLocality": "越谷市",
+      "addressRegion": "埼玉県",
+      "addressCountry": "JP"
+    }
+  },
+  "organizer": {
+    "@type": "Person",
+    "name": "渋谷 正彦",
+    "telephone": "+81-70-6633-0363",
+    "email": "shibuyamasahiko@gmail.com"
+  }
+}
+</script>
+
+<!-- FAQPage（任意でSEO強化） -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "誰でも参加できますか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "はい。年齢・性別・レベル不問で、基礎打ちとルール理解があれば誰でも参加OKです。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "開催場所はどこですか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "越谷市内の体育館で開催予定です。詳細は後日発表いたします。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "参加費と申込方法は？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "参加費や申込方法の詳細は後日発表いたします。ページをブックマークしてお待ちください。"
+      }
+    }
+  ]
+}
+</script>
+{% endblock %}
+
+{% block content %}
+
+<style>
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .breadcrumb-wrapper {
+        margin: 5px;
+        padding: 8px 15px;
+    }
+    
+    .breadcrumb-custom {
+        font-size: 0.85rem;
+    }
+    
+    .breadcrumb-text-long {
+        display: none;
+    }
+    
+    .breadcrumb-text-short {
+        display: inline;
+    }
+}
+
+@media (min-width: 769px) {
+    .breadcrumb-text-long {
+        display: inline;
+    }
+    
+    .breadcrumb-text-short {
+        display: none;
+    }
+}
+
+/* 既存のスタイル */
+body{
+    background-color: #7c69b1; 
+    color: #ffffff;
+}
+
+h2 {
+    text-align: center;
+    margin: 0;
+    margin: 15px 0px 5px;
+    font-size: 1.6em;
+}
+
+h3 {
+    text-align: center;
+    margin: 3px;
+    padding: 0;
+    font-size: 1.2em;
+}
+
+img:not(.avatar-ig img) {
+    margin: 5px;
+}
+
+.boxtop{   
+    margin: 0;
+    background-color: #7c69b1;
+    font-size: 30px;
+    text-align: center;
+}
+
+.boxtop02{   
+    margin: 0;
+    background-color: #7c69b1;    
+    text-align: center;
+}
+
+.container_main{
+    margin: 0;
+    padding: 0;
+    background-color: #7c69b1;
+    display: flex;        
+    flex-wrap: nowrap;
+    justify-content: center;    
+}
+
+.container_main02{
+    margin: 0;
+    padding: 0;
+    background-color: #7c69b1;
+    display: flex;        
+    flex-wrap: nowrap;
+    justify-content: space-around;    
+}
+
+.container00{
+    margin: 0;
+    padding: 0;
+    background-color: #7c69b1;
+    display: left;
+    flex-wrap: wrap;
+    justify-content: center; 
+    width: 95px    
+}
+
+.container01{
+    background-color: #7c69b1;
+    display: left;
+    flex-wrap: wrap;
+    justify-content: center; 
+}
+
+.tournament-container {
+    margin: 0 auto;
+    padding: 0;
+    background-color: #7c69b1;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    width: fit-content;
+}
+
+/* スマホ表示（768px以下の画面幅） */
+@media (max-width: 768px) {
+    .tournament-container {
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+    }
+
+    .tournament-container .tournament-image {
+        max-width: 90%;
+        height: auto;
+    }
+}
+
+.container03{
+    margin: 0;
+    padding: 0;    
+    transform-origin: bottom left;
+    transform: rotate( 90deg ) translateX(-50px);   
+    font-family : Franklin Gothic;    
+    font-weight: normal;
+    color: #000000;
+    background-color: #7c69b1;         
+    width: 650px; 
+    height: 50px;        
+}
+
+.container04{
+    text-align: left;              
+    font-weight: normal;
+    color: #000000;
+    background-color: #7c69b1;         
+    width: 600px;    
+    margin:0 auto;
+    padding: 0;            
+}
+
+.container05{
+    text-align: center;
+    padding: 0;            
+    font-weight: normal;
+    color: #000000;
+    background-color: #7c69b1;            
+    margin:0 auto; 
+    padding: 0;       
+}
+
+.box001{
+    width:100px;
+    height:100px;
+    margin: 20px 30px;
+    background-color: #7c69b1;
+    color: #7c69b1;
+    font-size: 110px;
+    font-weight: bold;
+    text-align: center;
+    -webkit-text-stroke-width: 3px;
+    -webkit-text-stroke-color: black; 
+}
+
+.box002{
+    width:100px;
+    height:100px;
+    margin: 20px 30px;
+    background-color: #7c69b1;
+    color: #000000;
+    font-size: 110px;
+    font-weight: bold;
+    text-align: center;       
+}
+
+.box003{    
+    margin: 20px 30px;
+    background-color: #7c69b1;
+    color: #000000;
+    font-weight: bold;
+    text-align: center;      
+}
+
+.tournament-image {
+    max-width: 490px;
+    max-height: 500px;
+    width: auto;
+    height: auto;
+}
+
+/* 開催予定の告知ボックス */
+.coming-soon-wrapper {
+    background: white;
+    padding: 40px 60px;
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    max-width: 600px;
+    width: 90%;
+    margin: 30px auto;
+    border: 5px solid #4CAF50;
+    animation: coming-soon-pulse 2s ease-in-out infinite;
+}
+
+@media (max-width: 768px) {
+    .coming-soon-wrapper {
+        padding: 30px 20px;
+        border-radius: 15px;
+        border-width: 3px;
+    }
+}
+
+@keyframes coming-soon-pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    50% {
+        transform: scale(1.02);
+        box-shadow: 0 25px 70px rgba(76, 175, 80, 0.4);
+    }
+}
+
+.coming-soon-wrapper h2 {
+    color: #4CAF50;
+    font-size: 2.5em;
+    margin: 10px 0;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+    line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+    .coming-soon-wrapper h2 {
+        font-size: 1.5em;
+    }
+}
+
+.coming-soon-highlight {
+    background: linear-gradient(120deg, #81C784 0%, #4CAF50 100%);
+    padding: 10px 20px;
+    border-radius: 10px;
+    display: inline-block;
+    margin: 10px 0;
+    color: white;
+    font-weight: bold;
+}
+
+@media (max-width: 768px) {
+    .coming-soon-highlight {
+        padding: 8px 15px;
+        border-radius: 8px;
+    }
+}
+</style>
+
+<!-- シンプルなパンくずリスト（左上配置） -->
+<div style="text-align: left; margin: 5px 10px; font-size: 0.9rem; color: #333;">
+    <a href="{{ url_for('index') }}" style="color: #0066cc; text-decoration: none;">ホーム</a>
+    <span style="margin: 0 5px; color: #666;"> > </span>
+    <span style="color: #666;">第3回鶯バドミントン大会2026</span>
+</div>
+
+<div class="container my-5 text-center">
+    <h1>第3回鶯杯2026</h1> 
+</div>
+
+<!-- 開催予定の告知ボックス -->
+<div class="coming-soon-wrapper">
+    <h2>
+        <div class="coming-soon-highlight">2026年秋 開催予定！</div>
+    </h2>
+    <p style="color: #333; font-size: 1.1em; margin: 20px 0;">
+        詳細な日程・会場は<br>後日発表いたします
+    </p>
+    <p style="color: #666; font-size: 0.95em;">
+        このページをブックマークして<br>お待ちください
+    </p>
+</div>
+
+<!-- トップ画像（準備中の場合はコメントアウト） -->
+<!--
+<div class="row mb-4">
+    <div class="col-12">
+        <img src="{{ url_for('static', filename='images/2026/tournament2026_main.jpg') }}" 
+            alt="第3回鶯バドミントン大会2026" 
+            class="img-fluid mx-auto d-block"
+            style="border: 4px solid black; padding: 10px;">
+    </div>
+</div>
+-->
+
+<!-- 前回大会の写真参考（2025年大会の写真を参考として表示する場合） -->
+<div style="text-align: center; margin: 30px 0;">
+    <h3 style="color: #333;">前回大会（2025年）の様子</h3>
+    <p style="color: #666; font-size: 0.9em;">※2026年大会のイメージとしてご参照ください</p>
+</div>
+
+<div style="text-align: center;"> 
+  <img src="{{ url_for('static', filename='images/2025/018.jpg') }}"
+       class="tournament-image"
+       alt="鶯バドミントン大会 集合写真｜越谷市で開催"
+       width="400" height="300" loading="lazy"
+       style="margin: 20px;">
+</div> 
+
+<div class="tournament-container" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+    <img src="{{ url_for('static', filename='images/2025/015.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 入賞者1｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+
+    <img src="{{ url_for('static', filename='images/2025/016.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 入賞者2｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+
+    <img src="{{ url_for('static', filename='images/2025/017.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 入賞者3｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/001.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 試合風景1｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+
+    <img src="{{ url_for('static', filename='images/2025/002.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 試合風景2｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+</div>
+
+<div class="tournament-container">
+    <img src="{{ url_for('static', filename='images/2025/003.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 試合風景3｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+
+    <img src="{{ url_for('static', filename='images/2025/004.jpg') }}"
+     class="tournament-image"
+     alt="鶯バドミントン大会 試合風景4｜越谷市バドミントン"
+     width="400" height="300" loading="lazy">
+</div>
+
+<div class="container05">                 
+    <a href="{{ url_for('uguis2025_tournament') }}" class="btn btn-secondary my-3">前回、鶯杯2025大会のページはこちら</a>
+</div>
+
+<div class="container05"> 
+    <h2>大会要項（予定）</h2>
+</div>
+
+<div class="container04">
+    <h3>開催日時: 2026年秋（詳細は後日発表）</h3>
+    <h3>会場: 越谷市内体育館（詳細は後日発表）</h3>
+
+    <h3>参加資格</h3>     
+    <h3>基礎打ちができて、ルールがわかればだれでも参加OKです</h3>     
+    <h3>・年齢・性別不問</h3>
+    <h3>・男子ダブルス、女子ダブルス、ミックスダブルス全て参加可能</h3>
+    <h3>・バドミントン初級者以上でルールを理解している方</h3>          
+    <h3>※基礎打ちができない方、ルールが分からない方は参加をご遠慮ください</h3>
+    <h3>参加費:詳細は後日発表</h3>          
+</div>
+
+<div class="container05"> 
+    <h2>試合形式（未定）</h2>
+</div>
+<div class="container04">    
+
+    <h3>個人主催の大会のため、不手際があるかもしれません。</h3>
+    <h3>運営のお手伝いをお願いする場合がありますので、ご了承ください。</h3>
+    <h2>1日中バドミントンを楽しみたい方は、ぜひご参加ください！</h2>
+      
+    <h2>詳細は後日発表</h2>
+    <h3>主催者:渋谷 正彦 連絡先: <a href="tel:07066330363">070-6633-0363</a></h3>
+    <h3>e-mail: <a href="mailto:shibuyamasahiko@gmail.com">shibuyamasahiko@gmail.com</a></h3>
+    
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: rgba(255,255,255,0.9); border-radius: 10px;">
+        <p style="color: #333; font-size: 1.1em; font-weight: bold;">
+            最新情報は随時更新いたします<br>
+            このページをブックマークしてお待ちください
+        </p>
+    </div>
+</div>
+     
+{% endblock %}
