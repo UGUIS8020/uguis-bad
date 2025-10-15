@@ -127,14 +127,27 @@
         color: #495057;
     }
 
+    .image-wrap {
+  text-align: center;
+  margin: 20px auto;
+  width: 100%;
+  max-width: 480px; /* スマホでも中央で安定する */
+    }
+
+    .image-wrap img.tournament-image {
+    width: 100%;        /* 親幅に合わせて可変 */
+    height: auto;       /* 比率を維持 */
+    display: block;     /* 中央揺れ防止 */
+    border-radius: 6px; /* 任意 */
+    }
+
 </style>
 
-<div style="text-align: center;"> 
+<div class="image-wrap">
   <img src="{{ url_for('static', filename='images/top008.jpg') }}"
        class="tournament-image"
        alt="第2回鶯バドミントン大会（2025年）集合写真｜越谷市で開催"
-       width="400" height="261" loading="eager" fetchpriority="high"
-       style="margin: 20px;">
+       loading="eager" fetchpriority="high">
 </div>
 
 
