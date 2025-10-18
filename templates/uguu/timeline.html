@@ -138,6 +138,19 @@
                                 style="max-height: 600px; width: 100%; object-fit: contain;">
                         </div>
                         {% endif %}
+                        <!-- YouTube動画 -->
+                        {% if post.youtube_url %}
+                        <div class="ratio ratio-16x9 bg-light">
+                            <iframe 
+                                src="{{ post.youtube_url if post.youtube_url.startswith('https://www.youtube.com/embed/') else 'https://www.youtube.com/embed/' + post.youtube_url.split('v=')[-1].split('&')[0] if 'youtube.com' in post.youtube_url else 'https://www.youtube.com/embed/' + post.youtube_url.split('/')[-1] }}"
+                                title="YouTube video" 
+                                frameborder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                allowfullscreen
+                                loading="lazy">
+                            </iframe>
+                        </div>
+                        {% endif %}
                         
                         <!-- カードボディ -->
                         <div class="card-body">

@@ -53,6 +53,7 @@ class DynamoDB:
                                 'post_id': post.get('post_id'),
                                 'content': post.get('content'),
                                 'image_url': post.get('image_url'),
+                                'youtube_url': post.get('youtube_url'),  # ← 追加
                                 'created_at': post.get('created_at'),
                                 'updated_at': post.get('updated_at', post.get('created_at')),
                                 'user_id': user_id,
@@ -68,6 +69,7 @@ class DynamoDB:
                                 'post_id': post.get('post_id'),
                                 'content': post.get('content'),
                                 'image_url': post.get('image_url'),
+                                'youtube_url': post.get('youtube_url'),  # ← 追加
                                 'created_at': post.get('created_at'),
                                 'updated_at': post.get('updated_at', post.get('created_at')),
                                 'user_id': user_id,
@@ -157,7 +159,7 @@ class DynamoDB:
             print(traceback.format_exc())
             return None
 
-    def create_post(self, user_id, content, image_url=None):
+    def create_post(self, user_id, content, image_url=None, youtube_url=None):
         """新規投稿を作成"""
         try:
             post_id = str(uuid.uuid4())
@@ -170,6 +172,7 @@ class DynamoDB:
                 'user_id': user_id,
                 'content': content,
                 'image_url': image_url,
+                'youtube_url': youtube_url,  # YouTube URL追加
                 'created_at': timestamp,
                 'updated_at': timestamp
             }
