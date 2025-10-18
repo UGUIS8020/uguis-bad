@@ -35,11 +35,50 @@
         margin: 0 auto;
     }
     
-    /* レスポンシブ対応 */
+    /* スマホ表示時のみ画像を画面幅いっぱいに */
     @media (max-width: 768px) {
         .timeline-container {
             max-width: 100%;
-            padding: 0 10px;
+            padding: 0;
+        }
+        
+        /* スマホで画像を画面幅いっぱいに */
+        .mobile-full-width-media {
+            width: 100vw;
+            position: relative;
+            left: 50%;
+            right: 50%;
+            margin-left: -50vw;
+            margin-right: -50vw;
+        }
+        
+        .mobile-full-width-media img,
+        .mobile-full-width-media iframe {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+        }
+        
+        /* カードの余白調整 */
+        .timeline-container .card {
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+        }
+        
+        .timeline-container .card-header,
+        .timeline-container .card-body {
+            padding-left: 15px;
+            padding-right: 15px;
+        }
+    }
+    
+    /* PC表示時は通常の幅 */
+    @media (min-width: 769px) {
+        .mobile-full-width-media img {
+            width: 100%;
+            max-height: 600px;
+            object-fit: contain;
         }
     }
 </style>
@@ -47,15 +86,15 @@
 <div class="container-fluid">
     <div class="row">
         <!-- 左サイドバー -->
-        <div class="col-1 border-end">
+        <div class="col-1 border-end d-none d-md-block">
             
         </div>
 
         <!-- メインコンテンツエリア（中央配置） -->
-        <div class="col-10">
+        <div class="col-12 col-md-10">
             <div class="timeline-container">
                 <!-- 新規投稿ボタン -->
-                <div class="d-flex my-3">
+                <div class="d-flex my-3 px-3 px-md-0">
                     <a href="{{ url_for('post.create_post') }}" class="nav-link text-dark">
                         <i class="fas fa-pencil-alt"></i> 新規投稿
                     </a>
@@ -129,18 +168,18 @@
                             </div>
                         </div>
                         
-                        <!-- 画像（カードボディの前） -->
+                        <!-- 画像（スマホのみ画面幅いっぱい） -->
                         {% if post.image_url %}
-                        <div class="text-center bg-light">
+                        <div class="text-center bg-light mobile-full-width-media">
                             <img src="{{ post.image_url }}" 
                                 class="img-fluid" 
-                                alt="投稿画像"
-                                style="max-height: 600px; width: 100%; object-fit: contain;">
+                                alt="投稿画像">
                         </div>
                         {% endif %}
-                        <!-- YouTube動画 -->
+                        
+                        <!-- YouTube動画（スマホのみ画面幅いっぱい） -->
                         {% if post.youtube_url %}
-                        <div class="ratio ratio-16x9 bg-light">
+                        <div class="ratio ratio-16x9 bg-light mobile-full-width-media">
                             <iframe 
                                 src="{{ post.youtube_url if post.youtube_url.startswith('https://www.youtube.com/embed/') else 'https://www.youtube.com/embed/' + post.youtube_url.split('v=')[-1].split('&')[0] if 'youtube.com' in post.youtube_url else 'https://www.youtube.com/embed/' + post.youtube_url.split('/')[-1] }}"
                                 title="YouTube video" 
@@ -259,7 +298,7 @@
         </div>
 
         <!-- 右側の余白 -->
-        <div class="col-1">
+        <div class="col-1 d-none d-md-block">
         </div>
     </div>
 </div>
