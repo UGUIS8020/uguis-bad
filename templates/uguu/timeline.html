@@ -72,7 +72,7 @@
 {% endblock %}
 {% block content %}
 
-<style>
+<!-- <style>
    :root{
   --post-max-width: 600px;   /* PC時の投稿表示幅 */
   --shorts-fill-width: 150%; /* Shorts埋め込みの横方向拡大率（帯消し用） */
@@ -128,25 +128,29 @@
 
 /* ================== YouTube Shorts（9:16） ================== */
 /* ===== YouTube Shorts：固定サイズ・中央表示（PC基準、スマホ調整なし） ===== */
-.shorts-fixed{
-  width: 420px;                                /* ← 大きさはここで調整（例: 380〜480px） */
-  max-width: min(420px, var(--post-max-width));
-  aspect-ratio: 9 / 16;
+.shorts-fixed {
+  width: 400px;                 /* 枠の見かけ上の幅（統一） */
+  max-width: 100%;
+  aspect-ratio: 9 / 16;         /* 縦長比率固定 */
   margin: 0 auto;
   background: #000;
   position: relative;
-  overflow: hidden;
-  border-radius: var(--radius-pc);
+  overflow: hidden;             /* はみ出しトリミング */
+  border-radius: 8px;
 }
-.shorts-fixed > iframe{
+
+/* 横幅を2倍にして左右をカット＝縦長ショート化 */
+.shorts-fixed > iframe {
   position: absolute;
   inset: 0;
   height: 100%;
-  width: 177.78%;                              /* 16:9プレイヤーを縦枠にフィット */
+  width: 220%;                  /* ← 200〜230%で調整可能。中央トリミング */
   left: 50%;
   transform: translateX(-50%);
   border: 0;
+  object-fit: cover;
 }
+
 /* ================== YouTube 通常動画 ================== */
 .mobile-full-width-media {
   width: 400px;                          /* ← 横幅を固定（お好みで調整可） */
@@ -164,7 +168,68 @@
   display: block;
 }
     
+</style> -->
+
+{% block extra_css %}
+<style>
+#u-gram .ig-portrait-frame {
+  width: 400px !important;
+  max-width: 100% !important;
+  margin: 12px auto 16px auto !important; /* 上下に少し余白を追加 */
+  overflow: hidden;
+  border-radius: 8px;
+  padding: 8px;  /* ← 内側に黒背景の余白を入れるとより自然 */
+  box-sizing: border-box; /* paddingを含めてサイズ計算 */
+}
+
+#u-gram .ig-portrait-frame img,
+#u-gram .ig-portrait-frame video {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+  object-fit: contain;
+  max-height: 85vh;
+  border-radius: 4px; /* ← 角丸を少し付けると綺麗 */
+}
+
+/* YouTube Shorts を縦長（9:16）に見せる（中央トリミング） */
+#u-gram .shorts-fixed {
+  width: 400px;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  margin: 16px auto;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+#u-gram .shorts-fixed > iframe {
+  position: absolute !important;
+  top: 0 !important;
+  left: 50% !important;
+  height: 100% !important;
+  width: 177.78% !important;  /* 16:9 → 9:16 化の基準値。必要なら 180–220%で微調整 */
+  transform: translateX(-50%) !important;
+  border: 0 !important;
+}
+
+/* 通常のYouTube（16:9）を中央・固定幅で */
+#u-gram .mobile-full-width-media {
+  width: 400px;
+  max-width: 100%;
+  margin: 16px auto;
+  background: #000;
+  overflow: hidden;
+  border-radius: 8px;
+}
+#u-gram .mobile-full-width-media iframe {
+  display: block;
+  width: 100% !important;
+  height: 225px !important; /* 400px 幅の16:9 */
+  border: 0;
+}
 </style>
+{% endblock %}
 
 <div class="container-fluid">
     <div class="row">
@@ -179,12 +244,12 @@
                 <h1 class="visually-hidden">うぐすたぐらむ - 鶯バドミントンクラブ投稿タイムライン</h1>
                 
                 <!-- 新規投稿ボタン -->
-                <nav class="d-flex my-3 px-3 px-md-0" aria-label="投稿アクション">
-                    <a href="{{ url_for('post.create_post') }}" 
-                       class="nav-link text-dark"
-                       aria-label="新しい投稿を作成">
-                        <i class="fas fa-pencil-alt" aria-hidden="true"></i> 新規投稿
-                    </a>
+                <nav class="d-flex justify-content-center my-4" aria-label="投稿アクション">
+                <a href="{{ url_for('post.create_post') }}"
+                    class="btn btn-lg btn-warning fw-bold shadow post-button"
+                    aria-label="新しい投稿を作成">
+                    <i class="fas fa-pencil-alt me-2"></i> POST
+                </a>
                 </nav>
                 
                 <!-- 投稿一覧 -->

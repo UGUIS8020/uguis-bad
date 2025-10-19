@@ -49,6 +49,9 @@
     <!-- 自作CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
+    {# 各ページごとのCSSを後から上書きできるようにする #}
+    {% block extra_css %}{% endblock %}
+
     <!-- Font Awesome（遅延読み込み） -->
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" media="print" onload="this.onload=null;this.media='all'">
