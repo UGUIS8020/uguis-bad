@@ -163,16 +163,33 @@
                 <a href="{{ url_for('temp_register') }}" class="btn btn-warning">仮登録へ</a></p>
                 <p>募集中であれば参加できます。初参加の方はmailかLINEでご連絡いただけると助かります</p>
             </div>
-            {% endif %} 
-
-
-            
+            {% endif %}           
            
             
             
-        <div class="d-flex flex-column align-items-center gap-3 mb-2" >
-            <a href="https://line.me/ti/p/gErDAMJEId" target="_blank" rel="noopener noreferrer" class="btn" style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%;; max-width: 100%;"><b>LINEで連絡 ココをクリック</b></a>
-        </div>
+       
+        <div class="d-flex flex-column align-items-center gap-3 mb-4">
+        <!-- LINEボタン -->
+        <a href="https://line.me/ti/p/gErDAMJEId" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="btn" 
+        style="background-color: #00B900; color: white; font-size: 1.5rem; width: 100%; max-width: 100%;">
+            <b>LINEで連絡 ココをクリック</b>
+        </a>        
+        <!-- うぐすたぐらむボタン -->
+        <a href="{{ url_for('uguu.show_timeline') }}" 
+        class="btn" 
+        style="background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); 
+                color: white; 
+                font-size: 1.5rem; 
+                width: 100%; 
+                max-width: 100%;
+                border: none;
+                box-shadow: 0 4px 15px rgba(188, 24, 136, 0.3);">
+            <b><i class="fas fa-camera-retro me-2"></i>うぐすたぐらむ</b>
+        </a>
+    </div>
 
 
             <div class="schedule-title d-flex flex-column flex-md-row align-items-center justify-content-center text-center gap-2 mb-3">
