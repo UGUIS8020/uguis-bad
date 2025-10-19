@@ -73,119 +73,96 @@
 {% block content %}
 
 <style>
-    :root{
-    --post-max-width: 600px;      /* PC時の表示幅 */
-    --shorts-fill-width: 160%;    /* Shortsの横方向拡大率（177.78%でピッタリ、少し小さめなら150–170%） */
-    }
+   :root{
+  --post-max-width: 600px;   /* PC時の投稿表示幅 */
+  --shorts-fill-width: 150%; /* Shorts埋め込みの横方向拡大率（帯消し用） */
+  --radius-pc: 8px;
+  --radius-mobile: 10px;
+}
 
-    /* ========== Avatar ========== */
-    .avatar-ig{
-    --size: 40px;
-    --ring: 2px;
-    --gap: 1px;
-    display:inline-grid;
-    place-items:center;
-    width:calc(var(--size) + (var(--ring)+var(--gap))*2);
-    height:calc(var(--size) + (var(--ring)+var(--gap))*2);
-    border-radius:50%;
-    padding:calc(var(--ring) + var(--gap));
-    background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
-    }
-    .avatar-ig>img{
-    width:var(--size);
-    height:var(--size);
-    border-radius:50%;
-    object-fit:cover;
-    display:block;
-    background:#fff;
-    box-shadow:0 0 0 var(--gap) #fff;
-    }
+/* ================== Avatar ================== */
+.avatar-ig{
+  --size: 40px; --ring: 2px; --gap: 1px;
+  display:inline-grid; place-items:center;
+  width:calc(var(--size) + (var(--ring)+var(--gap))*2);
+  height:calc(var(--size) + (var(--ring)+var(--gap))*2);
+  border-radius:50%;
+  padding:calc(var(--ring) + var(--gap));
+  background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
+}
+.avatar-ig>img{
+  width:var(--size); height:var(--size);
+  border-radius:50%; object-fit:cover; display:block;
+  background:#fff; box-shadow:0 0 0 var(--gap) #fff;
+}
 
-    /* ========== Timeline container ========== */
-    .timeline-container{ max-width: var(--post-max-width); margin: 0 auto; }
-    @media (min-width:769px){
-    .timeline-container .card{ margin-bottom:2rem; }
-    }
-    @media (max-width: 768px){
-    /* フレーム自体を全幅(100vw)ではなく 92vw＋中央寄せに */
-    .shorts-frame{
-        width: 90vw;
-        max-height: 78vh;     /* 画面高を超えないように上限 */
-        left: 0; right: 0;
-        margin-left: auto; margin-right: auto;
-        border-radius: 12px;  /* 角丸はお好みで */
-    }
-    .timeline-container .card-header,
-    .timeline-container .card-body{ padding-left:15px; padding-right:15px; }
-    .timeline-container .card + .card{ border-top:8px solid #f0f0f0; }
-    }
+/* ================== Timeline ================== */
+.timeline-container{ max-width: var(--post-max-width); margin: 0 auto; }
+@media (min-width:769px){
+  .timeline-container .card{ margin-bottom:2rem; }
+}
+@media (max-width:768px){
+  .timeline-container .card-header,
+  .timeline-container .card-body{ padding-left:15px; padding-right:15px; }
+  .timeline-container .card + .card{ border-top:8px solid #f0f0f0; }
+}
 
-    /* ========== Legacy full-width media (横長に利用) ========== */
-    .mobile-full-width-media{
-    width:100vw;
-    position:relative;
-    left:50%; right:50%;
-    margin-left:-50vw; margin-right:-50vw;
-    min-height:60vh;
-    display:flex; align-items:center; justify-content:center;
-    background:#000;
-    }
-    .mobile-full-width-media img{
-    width:auto; height:auto; max-width:100%; max-height:95vh; object-fit:contain;
-    }
-    .mobile-full-width-media iframe{
-    width:100vw !important; height:95vh !important; max-width:100vw !important; border:none;
-    }
+/* ================== 縦写真/縦動画（4:5） ================== */
+.ig-portrait-frame{
+  width: 400px;                          /* 横幅を固定（ここで調整可能） */
+  max-width: 100%;
+  margin: 0 auto;                        /* 中央寄せ */
+  background: #000;                      /* 背景を黒に（好みに応じて変更可） */
+  overflow: hidden;
+  border-radius: 8px;                    /* 少し角丸 */
+}
 
-    /* PC向けの補助（従来ブロック用） */
-    @media (min-width:769px){
-    .mobile-full-width-media{ background:#000; display:flex; align-items:center; justify-content:center; }
-    .mobile-full-width-media img{ width:100%; max-height:600px; object-fit:contain; }
-    .mobile-full-width-media iframe{ width:100%; height:450px; }
-    }
+.ig-portrait-frame > img,
+.ig-portrait-frame > video{
+  display: block;
+  width: 100%;                           /* 横幅にフィット */
+  height: auto;                          /* 縦横比を保持 */
+  object-fit: contain;                   /* トリミングせず全体を表示 */
+  max-height: 85vh;                      /* 画面の縦に収まるよう制限 */
+}
 
-    /* ========== Instagram風：縦写真/縦動画（4:5） ========== */
-    .ig-portrait-frame{
-    width:100vw; aspect-ratio:4/5;
-    position:relative; left:50%; right:50%; margin-left:-50vw; margin-right:-50vw;
-    background:#000; overflow:hidden;
-    }
-    .ig-portrait-frame > img,
-    .ig-portrait-frame > video{
-    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
-    }
+/* ================== YouTube Shorts（9:16） ================== */
+/* ===== YouTube Shorts：固定サイズ・中央表示（PC基準、スマホ調整なし） ===== */
+.shorts-fixed{
+  width: 420px;                                /* ← 大きさはここで調整（例: 380〜480px） */
+  max-width: min(420px, var(--post-max-width));
+  aspect-ratio: 9 / 16;
+  margin: 0 auto;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-pc);
+}
+.shorts-fixed > iframe{
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 177.78%;                              /* 16:9プレイヤーを縦枠にフィット */
+  left: 50%;
+  transform: translateX(-50%);
+  border: 0;
+}
+/* ================== YouTube 通常動画 ================== */
+.mobile-full-width-media {
+  width: 400px;                          /* ← 横幅を固定（お好みで調整可） */
+  max-width: 100%;
+  margin: 0 auto;                        /* ← 中央寄せ */
+  background: #000;
+  overflow: hidden;
+  border-radius: 8px;
+}
 
-    /* ========== YouTube Shorts（9:16） ========== */
-    .shorts-frame{
-    width:100vw; aspect-ratio:9/16;
-    position:relative; left:50%; right:50%; margin-left:-50vw; margin-right:-50vw;
-    background:#000; overflow:hidden;
-    }
-    .shorts-frame > iframe,
-    .shorts-frame > video{
-    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
-    }
-
-    /* 16:9プレイヤーを外側でトリミングして縦いっぱいに見せる */
-    .shorts-frame.crop{ position:relative; overflow:hidden; }
-    .shorts-frame.crop iframe{
-    width: 145%;                    /* ← 例: 150% にダウン（現状より小さめ） */
-    transform: translateX(-50%) scale(0.9); /* ほんの少し縮小 */
-    transform-origin: center center;
-  }
-    /* 念のための強制 */
-    .shorts-frame iframe{ width:100% !important; height:100% !important; }
-
-    /* ========== PCは中央に収める（縦表示系） ========== */
-    @media (min-width:769px){
-    .ig-portrait-frame,
-    .shorts-frame{
-        width:var(--post-max-width);
-        left:50%; right:auto;
-        margin-left:calc(-1 * var(--post-max-width) / 2); margin-right:0;
-        border-radius:8px;
-    }
-    }
+.mobile-full-width-media iframe {
+  width: 100%;                           /* ← 枠にフィット */
+  height: 225px;                         /* ← 16:9 比率で 400px幅に対応 */
+  border: none;
+  display: block;
+}
     
 </style>
 
@@ -197,7 +174,7 @@
 
         <!-- メインコンテンツエリア -->
         <main class="col-12 col-md-10" role="main">
-            <div class="timeline-container">
+            <div id="u-gram" class="timeline-container">
                 <!-- ページ見出し（SEO用・非表示） -->
                 <h1 class="visually-hidden">うぐすたぐらむ - 鶯バドミントンクラブ投稿タイムライン</h1>
                 
@@ -213,7 +190,7 @@
                 <!-- 投稿一覧 -->
                 <section class="posts" aria-label="投稿一覧">
                     {% for post in posts %}
-                    <article class="card mb-4 mt-2 shadow-sm" 
+                    <article class="card shadow-sm" 
                              itemscope 
                              itemtype="https://schema.org/SocialMediaPosting"
                              aria-label="{{ post.display_name }}さんの投稿">
@@ -313,13 +290,12 @@
                         {% if post.youtube_url %}
                         {% set y = post.youtube_url %}
                         {% if 'shorts' in y %}
-                            {# Shorts専用：縦長9:16で表示 #}
+                            {# Shorts専用：固定サイズで表示 #}
                             {% set vid = y.split('/shorts/')[-1].split('?')[0] %}
-                            <div class="shorts-frame crop">
+                            <div class="shorts-fixed">
                             <iframe
                                 src="https://www.youtube.com/embed/{{ vid }}?playsinline=1&rel=0&modestbranding=1"
                                 title="{{ post.display_name }}さんが共有したYouTubeショート"
-                                frameborder="0"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                 allowfullscreen
                                 loading="lazy">
@@ -330,14 +306,13 @@
                             <div class="bg-light mobile-full-width-media">
                             <iframe
                                 src="{% if y.startswith('https://www.youtube.com/embed/') %}
-                                    {{ y }}
+                                        {{ y }}
                                     {% elif 'youtube.com' in y %}
-                                    {{ 'https://www.youtube.com/embed/' + y.split('v=')[-1].split('&')[0] }}
+                                        {{ 'https://www.youtube.com/embed/' + y.split('v=')[-1].split('&')[0] }}
                                     {% else %}
-                                    {{ 'https://www.youtube.com/embed/' + y.split('/')[-1] }}
+                                        {{ 'https://www.youtube.com/embed/' + y.split('/')[-1] }}
                                     {% endif %}"
                                 title="{{ post.display_name }}さんが共有したYouTube動画"
-                                frameborder="0"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowfullscreen
                                 loading="lazy">
