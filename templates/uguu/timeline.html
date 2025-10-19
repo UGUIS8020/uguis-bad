@@ -73,170 +73,116 @@
 {% block content %}
 
 <style>
+    :root{
+    --post-max-width: 600px;      /* PC時の表示幅 */
+    --shorts-fill-width: 160%;    /* Shortsの横方向拡大率（177.78%でピッタリ、少し小さめなら150–170%） */
+    }
+
+    /* ========== Avatar ========== */
     .avatar-ig{
-        --size: 40px;
-        --ring: 2px;
-        --gap: 1px;
-        display:inline-grid; 
-        place-items:center;
-        width:calc(var(--size) + (var(--ring)+var(--gap))*2);
-        height:calc(var(--size) + (var(--ring)+var(--gap))*2);
-        border-radius:50%;
-        padding:calc(var(--ring) + var(--gap));
-        background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
+    --size: 40px;
+    --ring: 2px;
+    --gap: 1px;
+    display:inline-grid;
+    place-items:center;
+    width:calc(var(--size) + (var(--ring)+var(--gap))*2);
+    height:calc(var(--size) + (var(--ring)+var(--gap))*2);
+    border-radius:50%;
+    padding:calc(var(--ring) + var(--gap));
+    background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
     }
     .avatar-ig>img{
-        width:var(--size); 
-        height:var(--size);
-        border-radius:50%; 
-        object-fit:cover; 
-        display:block;
-        background:#fff; 
-        box-shadow:0 0 0 var(--gap) #fff;
+    width:var(--size);
+    height:var(--size);
+    border-radius:50%;
+    object-fit:cover;
+    display:block;
+    background:#fff;
+    box-shadow:0 0 0 var(--gap) #fff;
     }
-    
-    .timeline-container {
-        max-width: 600px;
-        margin: 0 auto;
-    }
-    
-    /* PC表示時の投稿間隔 */
-    @media (min-width: 769px) {
-        .timeline-container .card {
-            margin-bottom: 2rem;
-        }
-    }
-    
-    @media (max-width: 768px) {
-        .timeline-container {
-            max-width: 100%;
-            padding: 0;
-        }
-        
-        .mobile-full-width-media {
-            width: 100vw;
-            position: relative;
-            left: 50%;
-            right: 50%;
-            margin-left: -50vw;
-            margin-right: -50vw;
-            min-height: 60vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-        }
-        
-        /* 画像用のスタイル */
-        .mobile-full-width-media img {
-            width: auto;
-            height: auto;
-            max-width: 100%;
-            max-height: 95vh;
-            object-fit: contain;
-        }
-        
-        /* YouTube動画用のスタイル */
-        .mobile-full-width-media iframe {
-            width: 100vw !important;
-            height: 95vh !important;
-            max-width: 100vw !important;
-            border: none;
-        }
-        
-        .timeline-container .card {
-            border-radius: 0;
-            border-left: none;
-            border-right: none;
-            margin-bottom: 0 !important;
-        }
-        
-        .timeline-container .card-header,
-        .timeline-container .card-body {
-            padding-left: 15px;
-            padding-right: 15px;
-        }
-        
-        /* 投稿間の区切り線 */
-        .timeline-container .card + .card {
-            border-top: 8px solid #f0f0f0;
-        }
-    }
-    
-    /* PC向けの共通スタイル（既存） */
-    @media (min-width: 769px) {
-    .mobile-full-width-media {
-        background: #000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .mobile-full-width-media img {
-        width: 100%;
-        max-height: 600px;
-        object-fit: contain;
-    }
-    .mobile-full-width-media iframe {
-        width: 100%;
-        height: 450px;
-    }
-    }  /* ← 必ずここで閉じる */
 
-    /* ===== ここから縦表示系（スマホ/PC共通で効かせる） ===== */
+    /* ========== Timeline container ========== */
+    .timeline-container{ max-width: var(--post-max-width); margin: 0 auto; }
+    @media (min-width:769px){
+    .timeline-container .card{ margin-bottom:2rem; }
+    }
+    @media (max-width: 768px){
+    /* フレーム自体を全幅(100vw)ではなく 92vw＋中央寄せに */
+    .shorts-frame{
+        width: 90vw;
+        max-height: 78vh;     /* 画面高を超えないように上限 */
+        left: 0; right: 0;
+        margin-left: auto; margin-right: auto;
+        border-radius: 12px;  /* 角丸はお好みで */
+    }
+    .timeline-container .card-header,
+    .timeline-container .card-body{ padding-left:15px; padding-right:15px; }
+    .timeline-container .card + .card{ border-top:8px solid #f0f0f0; }
+    }
 
-    /* Instagram風：縦写真/縦動画（4:5） */
-    .ig-portrait-frame{
+    /* ========== Legacy full-width media (横長に利用) ========== */
+    .mobile-full-width-media{
     width:100vw;
-    aspect-ratio:4/5;
     position:relative;
     left:50%; right:50%;
     margin-left:-50vw; margin-right:-50vw;
+    min-height:60vh;
+    display:flex; align-items:center; justify-content:center;
     background:#000;
-    overflow:hidden;
+    }
+    .mobile-full-width-media img{
+    width:auto; height:auto; max-width:100%; max-height:95vh; object-fit:contain;
+    }
+    .mobile-full-width-media iframe{
+    width:100vw !important; height:95vh !important; max-width:100vw !important; border:none;
+    }
+
+    /* PC向けの補助（従来ブロック用） */
+    @media (min-width:769px){
+    .mobile-full-width-media{ background:#000; display:flex; align-items:center; justify-content:center; }
+    .mobile-full-width-media img{ width:100%; max-height:600px; object-fit:contain; }
+    .mobile-full-width-media iframe{ width:100%; height:450px; }
+    }
+
+    /* ========== Instagram風：縦写真/縦動画（4:5） ========== */
+    .ig-portrait-frame{
+    width:100vw; aspect-ratio:4/5;
+    position:relative; left:50%; right:50%; margin-left:-50vw; margin-right:-50vw;
+    background:#000; overflow:hidden;
     }
     .ig-portrait-frame > img,
     .ig-portrait-frame > video{
-    position:absolute; inset:0;
-    width:100%; height:100%;
-    object-fit:cover;   /* 画面いっぱいに表示（多少トリミング） */
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
     }
 
-    /* YouTubeショート（9:16） */
+    /* ========== YouTube Shorts（9:16） ========== */
     .shorts-frame{
-    width:100vw;
-    aspect-ratio:9/16;
-    position:relative;
-    left:50%; right:50%;
-    margin-left:-50vw; margin-right:-50vw;
-    background:#000;
-    overflow:hidden;
+    width:100vw; aspect-ratio:9/16;
+    position:relative; left:50%; right:50%; margin-left:-50vw; margin-right:-50vw;
+    background:#000; overflow:hidden;
     }
     .shorts-frame > iframe,
     .shorts-frame > video{
-    position:absolute; inset:0;
-    width:100%; height:100%;
-    object-fit:cover;
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
     }
 
-    /* プレイヤー自体を拡大して左右の帯をカット（中央トリミング） */
+    /* 16:9プレイヤーを外側でトリミングして縦いっぱいに見せる */
     .shorts-frame.crop{ position:relative; overflow:hidden; }
     .shorts-frame.crop iframe{
-    position:absolute; top:0; left:50%;
-    height:100%;
-    width:177.78%;              /* = 100 * (16 / 9) */
-    transform:translateX(-50%);
-    border:0;
-    }
+    width: 145%;                    /* ← 例: 150% にダウン（現状より小さめ） */
+    transform: translateX(-50%) scale(0.9); /* ほんの少し縮小 */
+    transform-origin: center center;
+  }
     /* 念のための強制 */
     .shorts-frame iframe{ width:100% !important; height:100% !important; }
 
-    /* PCだけ中央600pxに収める */
+    /* ========== PCは中央に収める（縦表示系） ========== */
     @media (min-width:769px){
     .ig-portrait-frame,
     .shorts-frame{
-        width:600px;
+        width:var(--post-max-width);
         left:50%; right:auto;
-        margin-left:-300px; margin-right:0;
+        margin-left:calc(-1 * var(--post-max-width) / 2); margin-right:0;
         border-radius:8px;
     }
     }
