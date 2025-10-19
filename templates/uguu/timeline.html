@@ -243,14 +243,7 @@
                 <!-- ページ見出し（SEO用・非表示） -->
                 <h1 class="visually-hidden">うぐすたぐらむ - 鶯バドミントンクラブ投稿タイムライン</h1>
                 
-                <!-- 新規投稿ボタン -->
-                <nav class="d-flex justify-content-center my-4" aria-label="投稿アクション">
-                <a href="{{ url_for('post.create_post') }}"
-                    class="btn btn-lg btn-warning fw-bold shadow post-button"
-                    aria-label="新しい投稿を作成">
-                    <i class="fas fa-pencil-alt me-2"></i> POST
-                </a>
-                </nav>
+               
                 
                 <!-- 投稿一覧 -->
                 <section class="posts" aria-label="投稿一覧">
@@ -267,7 +260,7 @@
                                     <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}"
                                        aria-label="{{ post.display_name }}さんのプロフィールを見る">
                                         <span class="avatar-ig" 
-                                              style="--size:40px;--ring:2px;--gap:1px;" 
+                                              style="--size:35px;--ring:2px;--gap:1px;" 
                                               title="{{ post.display_name }}">
                                             <img
                                                 src="{{ post.profile_image_url or url_for('static', filename='images/default.jpg') }}"
