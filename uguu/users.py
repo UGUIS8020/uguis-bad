@@ -6,7 +6,6 @@ from .dynamo import db
 users = Blueprint('users', __name__)
 
 @users.route('/user/<user_id>')
-
 def user_profile(user_id):
     try:
         print(f"[DEBUG] Start loading profile for user_id: {user_id}")
@@ -20,18 +19,31 @@ def user_profile(user_id):
             flash('ユーザーが見つかりませんでした。', 'error')
             return redirect(url_for('index'))
             
-        # 投稿を取得する前のログ
-        print(f"[DEBUG] Attempting to get posts for user_id: {user_id}")
-            
         # ユーザーの投稿を取得
         user_posts = db.get_posts_by_user(user_id)
         print(f"[DEBUG] Retrieved {len(user_posts) if user_posts else 0} posts")
+        
+        # 統計情報を計算
+        posts_count = len(user_posts) if user_posts else 0
+        followers_count = 0  # 将来実装
+        following_count = 0  # 将来実装
+        
+        # 投稿を新しい順にソート
+        if user_posts:
+            user_posts = sorted(
+                user_posts,
+                key=lambda x: x.get('created_at', ''),
+                reverse=True
+            )
         
         print(f"[DEBUG] Rendering profile template")
         return render_template(
             'users/profile.html',
             user=user,
-            posts=user_posts
+            posts=user_posts,
+            posts_count=posts_count,
+            followers_count=followers_count,
+            following_count=following_count
         )
         
     except Exception as e:

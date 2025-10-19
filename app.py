@@ -1871,37 +1871,7 @@ def delete_image(filename):
     except Exception as e:
         print(f"Error deleting {filename}: {e}")
         return "Error deleting the image", 500
-    
-
-# プロフィール表示用
-@app.route('/user/<string:user_id>')
-def user_profile(user_id):
-    try:
-        table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(Key={'user#user_id': user_id})
-        user = response.get('Item')
-
-        if not user:
-            abort(404)
-
-        # 投稿データの取得を追加
-        posts_table = app.dynamodb.Table('posts')
-        posts_response = posts_table.query(
-            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
-            ExpressionAttributeValues={
-                ':pk': f"USER#{user_id}",
-                ':sk_prefix': 'METADATA#'
-            }
-        )
-        posts = posts_response.get('Items', [])
-
-        return render_template('user_profile.html', user=user, posts=posts)
-
-    except Exception as e:
-        app.logger.error(f"Error loading profile: {str(e)}")
-        flash('プロフィールの読み込み中にエラーが発生しました', 'error')
-        return redirect(url_for('index'))
-    
+        
 @app.route("/remove_participant_from_date", methods=['POST'])
 @login_required
 def remove_participant_from_date():
@@ -2612,6 +2582,18 @@ def auto_collect():
         return {"success": True, "total": total}
     except Exception as e:
         return {"success": False, "error": str(e)}, 500
+    
+@app.route('/debug/routes')
+def show_routes():
+    """全ルート一覧を表示（開発時のみ）"""
+    import urllib
+    output = []
+    for rule in app.url_map.iter_rules():
+        methods = ','.join(rule.methods)
+        line = urllib.parse.unquote(f"{rule.endpoint:30s} {methods:20s} {rule}")
+        output.append(line)
+    
+    return '<br>'.join(sorted(output))
 
 
 from uguu.timeline import uguu

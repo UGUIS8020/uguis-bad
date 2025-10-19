@@ -371,6 +371,63 @@ class DynamoDB:
         except Exception as e:
             print(f"Error checking like status: {e}")
             return False
+    
+    def get_user_by_id(self, user_id):
+        """ユーザー情報を取得"""
+        try:
+            print(f"Fetching user: {user_id}")
+            response = self.users_table.get_item(
+                Key={'user#user_id': user_id}
+            )
+            user = response.get('Item')
+            print(f"User found: {user is not None}")
+            return user
+        except Exception as e:
+            print(f"Error getting user by id: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return None
+
+    def get_posts_by_user(self, user_id):
+        """特定ユーザーの投稿を取得"""
+        try:
+            print(f"Fetching posts for user: {user_id}")
+            
+            # postsテーブルから該当ユーザーの投稿を検索
+            response = self.posts_table.scan(
+                FilterExpression="begins_with(SK, :metadata) AND user_id = :user_id",
+                ExpressionAttributeValues={
+                    ':metadata': 'METADATA#',
+                    ':user_id': user_id
+                }
+            )
+            
+            posts = response.get('Items', [])
+            print(f"Found {len(posts)} posts for user {user_id}")
+            
+            # 投稿データを整形
+            enriched_posts = []
+            for post in posts:
+                enriched_post = {
+                    'post_id': post.get('post_id'),
+                    'content': post.get('content'),
+                    'image_url': post.get('image_url'),
+                    'youtube_url': post.get('youtube_url'),
+                    'created_at': post.get('created_at'),
+                    'updated_at': post.get('updated_at', post.get('created_at')),
+                    'user_id': user_id,
+                    'likes_count': post.get('likes_count', 0),
+                    'replies_count': post.get('replies_count', 0)
+                }
+                enriched_posts.append(enriched_post)
+            
+            return enriched_posts
+            
+        except Exception as e:
+            print(f"Error getting posts by user: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return []
 
 # 重要: インスタンスを作成
 db = DynamoDB()

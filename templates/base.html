@@ -261,7 +261,7 @@ body {
 
           <li class="nav-item ms-2">
             <a class="nav-link fw-bold text-warning d-flex align-items-center fs-6"
-            href="{{ url_for('account', user_id=(current_user.user_id or current_user.id)) }}">
+            href="{{ url_for('users.user_profile', user_id=current_user.id) }}">
             <span class="avatar-ig" style="--size:35px;--ring:3px;--gap:2px;">
                 <img
                 src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
