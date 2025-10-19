@@ -172,6 +172,11 @@
 
 {% block extra_css %}
 <style>
+body {
+    padding-top: 60px;  /* ナビバーの実際の高さに合わせて調整 */
+    padding-bottom: 60px;  /* フッターが固定なら下にも */
+}
+
 #u-gram .ig-portrait-frame {
   width: 400px !important;
   max-width: 100% !important;
