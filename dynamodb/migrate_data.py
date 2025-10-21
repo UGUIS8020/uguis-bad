@@ -26,7 +26,7 @@ app = create_app()
 dynamodb = app.dynamodb
 
 # 既存テーブルと新しいテーブルの名前
-source_table_name = 'bad-schedule'  # 元のテーブル名
+source_table_name = 'bad_schedule'  # 元のテーブル名
 destination_table_name = 'bad_schedules'  # 新しいテーブル名
 
 def migrate_data():

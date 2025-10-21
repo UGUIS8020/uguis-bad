@@ -16,7 +16,7 @@ aws_credentials = {
 class ScheduleManager:
     def __init__(self):
         self.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-        self.table = self.dynamodb.Table('bad-schedule')  # テーブル名を修正
+        self.table = self.dynamodb.Table('bad_schedule')  # テーブル名を修正
 
     def add_schedule(self, venue, date, start_time, end_time, day_of_week):
         """スケジュールを追加する"""

@@ -17,6 +17,7 @@ class DynamoDB:
         )
         self.posts_table = self.dynamodb.Table('posts')
         self.users_table = self.dynamodb.Table('bad-users')
+        self.schedule_table = self.dynamodb.Table('bad_schedules')
         print("DynamoDB tables initialized")
 
     def get_posts(self, limit=20):
@@ -428,6 +429,159 @@ class DynamoDB:
             import traceback
             print(traceback.format_exc())
             return []
+        
+    def get_user_participation_history(self, user_id):
+        """
+        特定ユーザーの参加履歴を取得
+        
+        Args:
+            user_id: ユーザーID
+            
+        Returns:
+            list: 参加日のリスト（日付順にソート済み）
+        """
+        try:
+            print(f"[DEBUG] 参加履歴取得開始 user_id: {user_id}")
+            
+            # bad-scheduleテーブルから、このユーザーが参加したスケジュールを取得
+            response = self.schedule_table.scan(
+                FilterExpression=Attr('participants').contains(user_id)
+            )
+            
+            schedules = response.get('Items', [])
+            print(f"[DEBUG] 取得したスケジュール数: {len(schedules)}")
+            
+            if schedules:
+                print(f"[DEBUG] 最初のスケジュール例: {schedules[0]}")
+            
+            # 参加日を抽出してソート
+            participation_dates = []
+            for schedule in schedules:
+                print(f"[DEBUG] スケジュール date: {schedule.get('date')}, participants: {schedule.get('participants')}")
+                date_str = schedule.get('date')
+                if date_str:
+                    try:
+                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                        participation_dates.append(date_obj)
+                    except ValueError as ve:
+                        print(f"[DEBUG] 日付パースエラー: {date_str}, error: {ve}")
+                        continue
+            
+            # 日付順にソート
+            participation_dates.sort()
+            
+            print(f"[DEBUG] 抽出した参加日数: {len(participation_dates)}")
+            
+            return participation_dates
+            
+        except Exception as e:
+            print(f"[ERROR] 参加履歴の取得エラー: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return []
+    
+    def calculate_uguu_points(self, user_id):
+        """
+        うぐポイントを計算
+        
+        Args:
+            user_id: ユーザーID
+            
+        Returns:
+            dict: {
+                'uguu_points': int,  # 現在のうぐポイント
+                'total_participation': int,  # 総参加回数
+                'last_participation_date': str,  # 最終参加日
+                'current_streak_start': str  # 現在の連続記録開始日
+            }
+        """
+        try:
+            # 参加履歴を取得
+            participation_dates = self.get_user_participation_history(user_id)
+            
+            if not participation_dates:
+                return {
+                    'uguu_points': 0,
+                    'total_participation': 0,
+                    'last_participation_date': None,
+                    'current_streak_start': None
+                }
+            
+            # 総参加回数
+            total_participation = len(participation_dates)
+            
+            # うぐポイントを計算
+            uguu_points = 1  # 最初の参加で1ポイント
+            current_streak_start = participation_dates[0]
+            
+            for i in range(1, len(participation_dates)):
+                previous_date = participation_dates[i - 1]
+                current_date = participation_dates[i]
+                
+                # 前回の参加日からの日数差を計算
+                days_diff = (current_date - previous_date).days
+                
+                if days_diff <= 60:
+                    # 60日以内なら継続
+                    uguu_points += 1
+                else:
+                    # 60日超えたらリセット
+                    uguu_points = 1
+                    current_streak_start = current_date
+            
+            return {
+                'uguu_points': uguu_points,
+                'total_participation': total_participation,
+                'last_participation_date': participation_dates[-1].strftime('%Y-%m-%d'),
+                'current_streak_start': current_streak_start.strftime('%Y-%m-%d')
+            }
+            
+        except Exception as e:
+            print(f"[ERROR] うぐポイント計算エラー: {str(e)}")
+            return {
+                'uguu_points': 0,
+                'total_participation': 0,
+                'last_participation_date': None,
+                'current_streak_start': None
+            }
+    
+    def get_user_stats(self, user_id):
+        """
+        ユーザーの統計情報を取得（うぐポイント含む）
+        
+        Args:
+            user_id: ユーザーID
+            
+        Returns:
+            dict: ユーザーの統計情報
+        """
+        try:
+            # ユーザー情報を取得
+            user = self.get_user_by_id(user_id)
+            
+            if not user:
+                return None
+            
+            # うぐポイント情報を計算
+            uguu_stats = self.calculate_uguu_points(user_id)
+            
+            # 統計情報をまとめる
+            stats = {
+                'user_id': user_id,
+                'display_name': user.get('display_name', '名前なし'),
+                'uguu_points': uguu_stats['uguu_points'],
+                'total_participation': uguu_stats['total_participation'],
+                'last_participation_date': uguu_stats['last_participation_date'],
+                'current_streak_start': uguu_stats['current_streak_start'],
+                'followers_count': 0,  # 将来実装
+                'following_count': 0   # 将来実装
+            }
+            
+            return stats
+            
+        except Exception as e:
+            print(f"[ERROR] ユーザー統計取得エラー: {str(e)}")
+            return None
 
 # 重要: インスタンスを作成
 db = DynamoDB()
