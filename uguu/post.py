@@ -108,7 +108,7 @@ def edit_post(post_id):
     post_data = db.get_post(post_id)
     if not post_data or post_data['user_id'] != current_user.id:  # current_userを使用
         flash('投稿が見つからないか、編集権限がありません')
-        return redirect(url_for('uguu.show_timeline'))  # 正しいURLに修正
+        return redirect(url_for('uguu.show_timeline')) 
         
     if request.method == 'POST':
         content = request.form.get('content')
