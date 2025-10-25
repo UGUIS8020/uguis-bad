@@ -1116,6 +1116,10 @@ def join_schedule(schedule_id):
 
         # 参加者リストの更新
         participants = schedule.get('participants', [])
+        
+        # ★★★ 「たら」参加者リストの取得 ★★★
+        tara_participants = schedule.get('tara_participants', [])
+        
         if current_user.id in participants:
             participants.remove(current_user.id)
             message = "参加をキャンセルしました"
@@ -1124,6 +1128,12 @@ def join_schedule(schedule_id):
             participants.append(current_user.id)
             message = "参加登録が完了しました！"
             is_joining = True
+            
+            # ★★★ 重要：参加した場合、「たら」リストから自動的に削除 ★★★
+            if current_user.id in tara_participants:
+                tara_participants.remove(current_user.id)
+                app.logger.info(f"✓ ユーザー {current_user.id} の「たら」を自動削除しました")
+            
             if is_joining and not previously_joined(schedule_id, current_user.id):
                 increment_practice_count(current_user.id)
                 try:
@@ -1140,16 +1150,17 @@ def join_schedule(schedule_id):
                 except Exception as e:
                     app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
 
-        # DynamoDB の更新
+        # ★★★ DynamoDB の更新（tara_participantsも含める） ★★★
         schedule_table.update_item(
             Key={
                 'schedule_id': schedule_id,
                 'date': date
             },
-            UpdateExpression="SET participants = :participants, participants_count = :count",
+            UpdateExpression="SET participants = :participants, participants_count = :count, tara_participants = :tara",
             ExpressionAttributeValues={
                 ':participants': participants,
-                ':count': len(participants)
+                ':count': len(participants),
+                ':tara': tara_participants  # ★ 追加
             }
         )
 
@@ -1162,7 +1173,8 @@ def join_schedule(schedule_id):
             'message': message,
             'is_joining': is_joining,
             'participants': participants,
-            'participants_count': len(participants)
+            'participants_count': len(participants),
+            'tara_participants': tara_participants  # ★ 追加（オプション）
         })
 
     except ClientError as e:
