@@ -483,6 +483,9 @@ class DynamoDB:
     def calculate_uguu_points(self, user_id):
         """
         うぐポイントを計算
+        - 基本100ポイント
+        - 連続参加で200ポイントボーナス
+        - 月間5/10/15/20回参加ごとに1000ポイントボーナス
         
         Args:
             user_id: ユーザーID
@@ -492,10 +495,16 @@ class DynamoDB:
                 'uguu_points': int,  # 現在のうぐポイント
                 'total_participation': int,  # 総参加回数
                 'last_participation_date': str,  # 最終参加日
-                'current_streak_start': str  # 現在の連続記録開始日
+                'current_streak_start': str,  # 現在の連続記録開始日
+                'current_streak_count': int,  # 現在の連続参加回数
+                'monthly_bonuses': dict,  # 月ごとのボーナス獲得状況
             }
         """
         try:
+            # collections.defaultdictをインポート
+            from collections import defaultdict
+            from datetime import datetime
+            
             # 参加履歴を取得
             participation_dates = self.get_user_participation_history(user_id)
             
@@ -504,15 +513,18 @@ class DynamoDB:
                     'uguu_points': 0,
                     'total_participation': 0,
                     'last_participation_date': None,
-                    'current_streak_start': None
+                    'current_streak_start': None,
+                    'current_streak_count': 0,
+                    'monthly_bonuses': {}
                 }
             
             # 総参加回数
             total_participation = len(participation_dates)
             
-            # うぐポイントを計算
-            uguu_points = 1  # 最初の参加で1ポイント
+            # 連続参加ポイント計算
+            uguu_points = 100  # 最初の参加で100ポイント
             current_streak_start = participation_dates[0]
+            current_streak_count = 1  # 連続参加カウンター
             
             for i in range(1, len(participation_dates)):
                 previous_date = participation_dates[i - 1]
@@ -522,27 +534,76 @@ class DynamoDB:
                 days_diff = (current_date - previous_date).days
                 
                 if days_diff <= 60:
-                    # 60日以内なら継続
-                    uguu_points += 1
+                    # 60日以内なら連続参加
+                    current_streak_count += 1
+                    
+                    # 連続2回目以降は200ポイント
+                    if current_streak_count >= 2:
+                        uguu_points += 200
+                    else:
+                        uguu_points += 100
                 else:
                     # 60日超えたらリセット
-                    uguu_points = 1
+                    uguu_points += 100  # リセット後の最初の参加は100ポイント
+                    current_streak_count = 1
                     current_streak_start = current_date
+            
+            # 月間参加ボーナス計算
+            monthly_participation = defaultdict(int)
+            monthly_bonuses = {}
+            
+            # 月ごとの参加回数をカウント
+            for date in participation_dates:
+                month_key = date.strftime('%Y-%m')
+                monthly_participation[month_key] += 1
+            
+            # 月ごとのボーナス計算
+            for month, count in monthly_participation.items():
+                monthly_bonuses[month] = {
+                    'participation_count': count,
+                    'bonus_points': 0
+                }
+                
+                # 5回達成ボーナス
+                if count >= 5:
+                    monthly_bonuses[month]['bonus_points'] += 1000
+                
+                # 10回達成ボーナス
+                if count >= 10:
+                    monthly_bonuses[month]['bonus_points'] += 1000
+                
+                # 15回達成ボーナス
+                if count >= 15:
+                    monthly_bonuses[month]['bonus_points'] += 1000
+                
+                # 20回達成ボーナス
+                if count >= 20:
+                    monthly_bonuses[month]['bonus_points'] += 1000
+                
+                # 月間ボーナスを総ポイントに追加
+                uguu_points += monthly_bonuses[month]['bonus_points']
             
             return {
                 'uguu_points': uguu_points,
                 'total_participation': total_participation,
                 'last_participation_date': participation_dates[-1].strftime('%Y-%m-%d'),
-                'current_streak_start': current_streak_start.strftime('%Y-%m-%d')
+                'current_streak_start': current_streak_start.strftime('%Y-%m-%d'),
+                'current_streak_count': current_streak_count,
+                'monthly_bonuses': monthly_bonuses
             }
             
         except Exception as e:
             print(f"[ERROR] うぐポイント計算エラー: {str(e)}")
+            # デバッグのために例外の詳細を出力
+            import traceback
+            traceback.print_exc()
             return {
                 'uguu_points': 0,
                 'total_participation': 0,
                 'last_participation_date': None,
-                'current_streak_start': None
+                'current_streak_start': None,
+                'current_streak_count': 0,
+                'monthly_bonuses': {}
             }
     
     def get_user_stats(self, user_id):
@@ -556,6 +617,9 @@ class DynamoDB:
             dict: ユーザーの統計情報
         """
         try:
+            # datetimeモジュールをインポート
+            from datetime import datetime
+            
             # ユーザー情報を取得
             user = self.get_user_by_id(user_id)
             
@@ -565,6 +629,13 @@ class DynamoDB:
             # うぐポイント情報を計算
             uguu_stats = self.calculate_uguu_points(user_id)
             
+            # 現在の月のボーナス情報を取得
+            current_month = datetime.now().strftime('%Y-%m')
+            current_month_bonus = uguu_stats['monthly_bonuses'].get(current_month, {
+                'participation_count': 0,
+                'bonus_points': 0
+            })
+            
             # 統計情報をまとめる
             stats = {
                 'user_id': user_id,
@@ -573,14 +644,21 @@ class DynamoDB:
                 'total_participation': uguu_stats['total_participation'],
                 'last_participation_date': uguu_stats['last_participation_date'],
                 'current_streak_start': uguu_stats['current_streak_start'],
+                'current_streak_count': uguu_stats['current_streak_count'],
+                'current_month_participation': current_month_bonus['participation_count'],
+                'current_month_bonus': current_month_bonus['bonus_points'],
+                'monthly_bonuses': uguu_stats['monthly_bonuses'],
                 'followers_count': 0,  # 将来実装
                 'following_count': 0   # 将来実装
             }
             
             return stats
-            
+                
         except Exception as e:
             print(f"[ERROR] ユーザー統計取得エラー: {str(e)}")
+            # デバッグのために例外の詳細を出力
+            import traceback
+            traceback.print_exc()
             return None
 
 # 重要: インスタンスを作成
