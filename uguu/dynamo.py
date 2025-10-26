@@ -430,55 +430,26 @@ class DynamoDB:
             print(traceback.format_exc())
             return []
         
-    def get_user_participation_history(self, user_id):
-        """
-        特定ユーザーの参加履歴を取得
-        
-        Args:
-            user_id: ユーザーID
-            
-        Returns:
-            list: 参加日のリスト（日付順にソート済み）
-        """
-        try:
-            print(f"[DEBUG] 参加履歴取得開始 user_id: {user_id}")
-            
-            # bad-scheduleテーブルから、このユーザーが参加したスケジュールを取得
-            response = self.schedule_table.scan(
-                FilterExpression=Attr('participants').contains(user_id)
+    def get_user_participation_history(self, user_id: str):
+        table = self.dynamodb.Table("bad_participation_history")
+        items = []
+        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        items.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id),
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
             )
-            
-            schedules = response.get('Items', [])
-            print(f"[DEBUG] 取得したスケジュール数: {len(schedules)}")
-            
-            if schedules:
-                print(f"[DEBUG] 最初のスケジュール例: {schedules[0]}")
-            
-            # 参加日を抽出してソート
-            participation_dates = []
-            for schedule in schedules:
-                print(f"[DEBUG] スケジュール date: {schedule.get('date')}, participants: {schedule.get('participants')}")
-                date_str = schedule.get('date')
-                if date_str:
-                    try:
-                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                        participation_dates.append(date_obj)
-                    except ValueError as ve:
-                        print(f"[DEBUG] 日付パースエラー: {date_str}, error: {ve}")
-                        continue
-            
-            # 日付順にソート
-            participation_dates.sort()
-            
-            print(f"[DEBUG] 抽出した参加日数: {len(participation_dates)}")
-            
-            return participation_dates
-            
-        except Exception as e:
-            print(f"[ERROR] 参加履歴の取得エラー: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            return []
+            items.extend(resp.get("Items", []))
+
+        dates = []
+        for it in items:
+            try:
+                dates.append(datetime.strptime(it["date"], "%Y-%m-%d"))
+            except Exception:
+                pass
+        dates.sort()
+        return dates
     
     def calculate_uguu_points(self, user_id):
         """
@@ -501,14 +472,23 @@ class DynamoDB:
             }
         """
         try:
-            # collections.defaultdictをインポート
             from collections import defaultdict
             from datetime import datetime
+            
+            # デバッグ情報追加：ユーザーIDを出力
+            print(f"[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
             
             # 参加履歴を取得
             participation_dates = self.get_user_participation_history(user_id)
             
+            # デバッグ情報追加：参加履歴の詳細を出力
+            print(f"[DEBUG] 参加履歴取得結果 - 件数: {len(participation_dates) if participation_dates else 0}")
+            if participation_dates:
+                for i, date in enumerate(participation_dates):
+                    print(f"[DEBUG] 参加日 {i+1}: {date.strftime('%Y-%m-%d')}")
+            
             if not participation_dates:
+                print(f"[DEBUG] 参加履歴なし - user_id: {user_id}")
                 return {
                     'uguu_points': 0,
                     'total_participation': 0,
@@ -533,6 +513,8 @@ class DynamoDB:
                 # 前回の参加日からの日数差を計算
                 days_diff = (current_date - previous_date).days
                 
+                print(f"[DEBUG] 連続チェック - 前回: {previous_date.strftime('%Y-%m-%d')}, 今回: {current_date.strftime('%Y-%m-%d')}, 日数差: {days_diff}日")
+                
                 if days_diff <= 60:
                     # 60日以内なら連続参加
                     current_streak_count += 1
@@ -556,6 +538,10 @@ class DynamoDB:
             for date in participation_dates:
                 month_key = date.strftime('%Y-%m')
                 monthly_participation[month_key] += 1
+            
+            # デバッグ情報追加：月別参加回数を出力
+            for month, count in monthly_participation.items():
+                print(f"[DEBUG] 月別参加回数 - {month}: {count}回")
             
             # 月ごとのボーナス計算
             for month, count in monthly_participation.items():
@@ -583,18 +569,28 @@ class DynamoDB:
                 # 月間ボーナスを総ポイントに追加
                 uguu_points += monthly_bonuses[month]['bonus_points']
             
-            return {
+            # 本日の日付を確認し、直近の参加が今日かどうかチェック
+            today = datetime.now().date()
+            last_participation = participation_dates[-1].date() if participation_dates else None
+            
+            print(f"[DEBUG] 日付確認 - 今日: {today}, 最終参加日: {last_participation}")
+            
+            # 計算結果を出力
+            result = {
                 'uguu_points': uguu_points,
                 'total_participation': total_participation,
-                'last_participation_date': participation_dates[-1].strftime('%Y-%m-%d'),
-                'current_streak_start': current_streak_start.strftime('%Y-%m-%d'),
+                'last_participation_date': participation_dates[-1].strftime('%Y-%m-%d') if participation_dates else None,
+                'current_streak_start': current_streak_start.strftime('%Y-%m-%d') if current_streak_start else None,
                 'current_streak_count': current_streak_count,
                 'monthly_bonuses': monthly_bonuses
             }
             
+            print(f"[DEBUG] うぐポイント計算結果: {result}")
+            
+            return result
+            
         except Exception as e:
             print(f"[ERROR] うぐポイント計算エラー: {str(e)}")
-            # デバッグのために例外の詳細を出力
             import traceback
             traceback.print_exc()
             return {
