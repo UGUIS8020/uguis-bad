@@ -371,15 +371,20 @@
                         </h5>
                         {% if schedule.participants_info %}
                         <div class="row">
-                            {% for participant in schedule.participants_info %}
-                            <div class="col-md-3 col-sm-4 mb-1">
+                        {% for participant in schedule.participants_info %}
+                        <div class="col-md-3 col-sm-4 mb-1">
                             <div class="card">
-                                <div class="card-body py-2">
-                                <span class="participant-name">{{ participant.display_name }}</span>
-                                </div>
+                            <div class="card-body py-2">
+                                <a
+                                href="{{ url_for('users.user_profile', user_id=participant.get('user_id') or participant.get('user#user_id')) }}"
+                                class="participant-name text-decoration-none text-dark"
+                                >
+                                {{ participant.display_name }}
+                                </a>
                             </div>
                             </div>
-                            {% endfor %}
+                        </div>
+                        {% endfor %}
                         </div>
                         {% else %}
                         <p class="text-muted">まだ参加者がいません</p>
@@ -387,23 +392,28 @@
 
                         {% if schedule.tara_participants_info %}
                         <h5 class="mb-3 mt-4">
-                            <i class="bi bi-question-circle text-warning"></i>
-                            たら ({{ schedule.tara_count }}人)
+                        <i class="bi bi-question-circle text-warning"></i>
+                        たら ({{ schedule.tara_count }}人)
                         </h5>
                         <div class="row">
-                            {% for tara_participant in schedule.tara_participants_info %}
-                            <div class="col-md-3 col-sm-4 mb-1">
+                        {% for tara_participant in schedule.tara_participants_info %}
+                        <div class="col-md-3 col-sm-4 mb-1">
                             <div class="card border-warning">
-                                <div class="card-body py-2">
-                                <span class="participant-name text-warning">{{ tara_participant.display_name }}</span>
-                                </div>
+                            <div class="card-body py-2">
+                                <a
+                                href="{{ url_for('users.user_profile', user_id=tara_participant.get('user_id') or tara_participant.get('user#user_id')) }}"
+                                class="participant-name text-warning text-decoration-none"
+                                >
+                                {{ tara_participant.display_name }}
+                                </a>
                             </div>
                             </div>
-                            {% endfor %}
+                        </div>
+                        {% endfor %}
                         </div>
                         {% else %}
                         <h5 class="mb-2 mt-4">
-                            <i class="bi bi-question-circle text-warning"></i>たら (0人)
+                        <i class="bi bi-question-circle text-warning"></i>たら (0人)
                         </h5>
                         <p class="text-muted">たらはいません</p>
                         {% endif %}

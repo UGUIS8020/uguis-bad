@@ -4,6 +4,7 @@ from datetime import datetime
 import uuid
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key, Attr
+from collections import defaultdict
 
 load_dotenv()
 
@@ -18,6 +19,7 @@ class DynamoDB:
         self.posts_table = self.dynamodb.Table('posts')
         self.users_table = self.dynamodb.Table('bad-users')
         self.schedule_table = self.dynamodb.Table('bad_schedules')
+        self.part_history    = self.dynamodb.Table("bad-users-history")
         print("DynamoDB tables initialized")
 
     def get_posts(self, limit=20):
@@ -431,25 +433,87 @@ class DynamoDB:
             return []
         
     def get_user_participation_history(self, user_id: str):
-        table = self.dynamodb.Table("bad_participation_history")
+        """
+        bad-users-history からユーザーの参加日を昇順で返す
+        PK=user_id, SK=date (YYYY-MM-DD) を想定
+        キャンセルされた参加は除外
+        """
+        from datetime import datetime
+        table = self.part_history
         items = []
-        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+
+        # user_id に対する全件取得
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id),
+            ProjectionExpression="#d, #s",  # dateとstatusを取得
+            ExpressionAttributeNames={
+                "#d": "date", 
+                "#s": "status"  # statusも取得するように追加
+            },
+            ScanIndexForward=True
+        )
         items.extend(resp.get("Items", []))
+
         while "LastEvaluatedKey" in resp:
             resp = table.query(
                 KeyConditionExpression=Key("user_id").eq(user_id),
-                ExclusiveStartKey=resp["LastEvaluatedKey"]
+                ProjectionExpression="#d, #s",
+                ExpressionAttributeNames={
+                    "#d": "date",
+                    "#s": "status"
+                },
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+                ScanIndexForward=True
             )
             items.extend(resp.get("Items", []))
 
+        # 現在の日付（未来の参加を除外するため）
+        today = datetime.now().date()
+        
         dates = []
         for it in items:
             try:
-                dates.append(datetime.strptime(it["date"], "%Y-%m-%d"))
-            except Exception:
+                # キャンセルされた参加は除外
+                if "status" in it and it["status"] == 'cancelled':
+                    print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
+                    continue
+                    
+                # 日付文字列をdatetimeオブジェクトに変換
+                date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
+                
+                # 未来の日付は除外
+                if date_obj.date() > today:
+                    print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
+                    continue
+                    
+                dates.append(date_obj)
+            except Exception as e:
+                print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
                 pass
+
+        # 日付順にソート
         dates.sort()
+        print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
         return dates
+    
+    def cancel_participation(self, user_id: str, date: str):
+        """参加をキャンセル"""
+        try:
+            # 参加レコードを取得して更新
+            self.part_history.update_item(
+                Key={
+                    'user_id': user_id,
+                    'date': date
+                },
+                UpdateExpression='SET status = :s',
+                ExpressionAttributeValues={
+                    ':s': 'cancelled'
+                }
+            )
+            return True
+        except Exception as e:
+            print(f"[ERROR] 参加キャンセルエラー: {str(e)}")
+            return False
     
     def calculate_uguu_points(self, user_id):
         """
@@ -457,37 +521,17 @@ class DynamoDB:
         - 基本100ポイント
         - 連続参加で200ポイントボーナス
         - 月間5/10/15/20回参加ごとに1000ポイントボーナス
-        
-        Args:
-            user_id: ユーザーID
-            
-        Returns:
-            dict: {
-                'uguu_points': int,  # 現在のうぐポイント
-                'total_participation': int,  # 総参加回数
-                'last_participation_date': str,  # 最終参加日
-                'current_streak_start': str,  # 現在の連続記録開始日
-                'current_streak_count': int,  # 現在の連続参加回数
-                'monthly_bonuses': dict,  # 月ごとのボーナス獲得状況
-            }
         """
         try:
             from collections import defaultdict
             from datetime import datetime
             
-            # デバッグ情報追加：ユーザーIDを出力
             print(f"[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
             
-            # 参加履歴を取得
-            participation_dates = self.get_user_participation_history(user_id)
+            # 参加履歴を取得（日付文字列の配列）
+            date_strings = self.get_user_participation_history(user_id)
             
-            # デバッグ情報追加：参加履歴の詳細を出力
-            print(f"[DEBUG] 参加履歴取得結果 - 件数: {len(participation_dates) if participation_dates else 0}")
-            if participation_dates:
-                for i, date in enumerate(participation_dates):
-                    print(f"[DEBUG] 参加日 {i+1}: {date.strftime('%Y-%m-%d')}")
-            
-            if not participation_dates:
+            if not date_strings:
                 print(f"[DEBUG] 参加履歴なし - user_id: {user_id}")
                 return {
                     'uguu_points': 0,
@@ -497,6 +541,18 @@ class DynamoDB:
                     'current_streak_count': 0,
                     'monthly_bonuses': {}
                 }
+            
+            # 日付文字列をdatetimeオブジェクトに変換
+            participation_dates = []
+            for date_str in date_strings:
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                    participation_dates.append(date_obj)
+                except ValueError:
+                    print(f"[WARN] 不正な日付形式: {date_str}")
+            
+            # 日付順に確実にソート
+            participation_dates.sort()
             
             # 総参加回数
             total_participation = len(participation_dates)
@@ -518,14 +574,18 @@ class DynamoDB:
                 if days_diff <= 60:
                     # 60日以内なら連続参加
                     current_streak_count += 1
+                    print(f"[DEBUG] 連続参加 - カウント: {current_streak_count}")
                     
                     # 連続2回目以降は200ポイント
                     if current_streak_count >= 2:
                         uguu_points += 200
+                        print(f"[DEBUG] ボーナスポイント加算: 200ポイント")
                     else:
                         uguu_points += 100
+                        print(f"[DEBUG] 通常ポイント加算: 100ポイント")
                 else:
                     # 60日超えたらリセット
+                    print(f"[DEBUG] 連続リセット - 60日超過: {days_diff}日")
                     uguu_points += 100  # リセット後の最初の参加は100ポイント
                     current_streak_count = 1
                     current_streak_start = current_date
@@ -552,30 +612,28 @@ class DynamoDB:
                 
                 # 5回達成ボーナス
                 if count >= 5:
-                    monthly_bonuses[month]['bonus_points'] += 1000
+                    monthly_bonuses[month]['bonus_points'] += 500
+                    print(f"[DEBUG] 月間5回達成ボーナス: {month} +1000ポイント")
                 
                 # 10回達成ボーナス
                 if count >= 10:
                     monthly_bonuses[month]['bonus_points'] += 1000
+                    print(f"[DEBUG] 月間10回達成ボーナス: {month} +1000ポイント")
                 
                 # 15回達成ボーナス
                 if count >= 15:
-                    monthly_bonuses[month]['bonus_points'] += 1000
+                    monthly_bonuses[month]['bonus_points'] += 1500
+                    print(f"[DEBUG] 月間15回達成ボーナス: {month} +1000ポイント")
                 
                 # 20回達成ボーナス
                 if count >= 20:
-                    monthly_bonuses[month]['bonus_points'] += 1000
+                    monthly_bonuses[month]['bonus_points'] += 2000
+                    print(f"[DEBUG] 月間20回達成ボーナス: {month} +1000ポイント")
                 
                 # 月間ボーナスを総ポイントに追加
                 uguu_points += monthly_bonuses[month]['bonus_points']
             
-            # 本日の日付を確認し、直近の参加が今日かどうかチェック
-            today = datetime.now().date()
-            last_participation = participation_dates[-1].date() if participation_dates else None
-            
-            print(f"[DEBUG] 日付確認 - 今日: {today}, 最終参加日: {last_participation}")
-            
-            # 計算結果を出力
+            # 結果を返す
             result = {
                 'uguu_points': uguu_points,
                 'total_participation': total_participation,
@@ -602,60 +660,103 @@ class DynamoDB:
                 'monthly_bonuses': {}
             }
     
-    def get_user_stats(self, user_id):
-        """
-        ユーザーの統計情報を取得（うぐポイント含む）
-        
-        Args:
-            user_id: ユーザーID
-            
-        Returns:
-            dict: ユーザーの統計情報
-        """
-        try:
-            # datetimeモジュールをインポート
-            from datetime import datetime
-            
-            # ユーザー情報を取得
-            user = self.get_user_by_id(user_id)
-            
-            if not user:
-                return None
-            
-            # うぐポイント情報を計算
-            uguu_stats = self.calculate_uguu_points(user_id)
-            
-            # 現在の月のボーナス情報を取得
-            current_month = datetime.now().strftime('%Y-%m')
-            current_month_bonus = uguu_stats['monthly_bonuses'].get(current_month, {
-                'participation_count': 0,
-                'bonus_points': 0
+    # 参加履歴の書き込み（登録/更新時に呼ぶ。ビューからは呼ばない）
+    def record_participation(self, date_str: str, schedule_id: str, participants: list[str]):
+        tbl = self.dynamodb.Table("bad-users-history")
+        for uid in set(participants or []):
+            # すでに同日の記録があるか確認
+            resp = tbl.query(
+                KeyConditionExpression=Key("user_id").eq(uid),
+                FilterExpression="#d = :d",
+                ExpressionAttributeNames={"#d": "date"},
+                ExpressionAttributeValues={":d": date_str}
+            )
+            if resp.get("Count", 0) > 0:
+                continue  # 同日データがあればスキップ
+
+            tbl.put_item(Item={
+                "user_id": uid,
+                "joined_at": datetime.utcnow().isoformat() + "Z",
+                "date": date_str,
+                "schedule_id": schedule_id
             })
-            
-            # 統計情報をまとめる
-            stats = {
-                'user_id': user_id,
-                'display_name': user.get('display_name', '名前なし'),
-                'uguu_points': uguu_stats['uguu_points'],
-                'total_participation': uguu_stats['total_participation'],
-                'last_participation_date': uguu_stats['last_participation_date'],
-                'current_streak_start': uguu_stats['current_streak_start'],
-                'current_streak_count': uguu_stats['current_streak_count'],
-                'current_month_participation': current_month_bonus['participation_count'],
-                'current_month_bonus': current_month_bonus['bonus_points'],
-                'monthly_bonuses': uguu_stats['monthly_bonuses'],
-                'followers_count': 0,  # 将来実装
-                'following_count': 0   # 将来実装
+
+    def get_user_participation_history(self, user_id: str):
+        from datetime import datetime
+        
+        # 現在の日付
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        items, resp = [], self.part_history.query(
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        items.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = self.part_history.query(
+                KeyConditionExpression=Key("user_id").eq(user_id),
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
+        
+        # 日付のセットを作成し、未来の日付を除外
+        dates = sorted({it["date"] for it in items if "date" in it and it["date"] <= today})
+        
+        print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
+        for i, date in enumerate(dates):
+            print(f"[DEBUG] 参加日 {i+1}: {date}")
+        
+        return dates  # 'YYYY-MM-DD' の文字列配列
+
+    # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
+    def get_user_stats(self, user_id: str):
+        dates = self.get_user_participation_history(user_id)  # 昇順
+        if not dates:
+            return {
+                "uguu_points": 0,
+                "total_participation": 0,
+                "last_participation_date": None,
+                "current_streak_start": None,
+                "current_streak_count": 0,
+                "monthly_bonuses": {}
             }
-            
-            return stats
-                
-        except Exception as e:
-            print(f"[ERROR] ユーザー統計取得エラー: {str(e)}")
-            # デバッグのために例外の詳細を出力
-            import traceback
-            traceback.print_exc()
-            return None
+
+        # 文字列→date
+        d_objs = [datetime.strptime(d, "%Y-%m-%d").date() for d in dates]
+        total = len(d_objs)
+
+        # 連続ポイント（60日以内継続を同一ストリーク）
+        points = 100
+        streak_start = d_objs[0]
+        streak_count = 1
+        for prev, cur in zip(d_objs, d_objs[1:]):
+            diff = (cur - prev).days
+            if diff <= 60:
+                streak_count += 1
+                points += 200 if streak_count >= 2 else 100
+            else:
+                points += 100
+                streak_start = cur
+                streak_count = 1
+
+        # 月間ボーナス
+        monthly = defaultdict(int)
+        for d in d_objs:
+            monthly[d.strftime("%Y-%m")] += 1
+
+        monthly_bonuses = {}
+        for m, cnt in monthly.items():
+            bonus = 1000 * sum(cnt >= t for t in (5, 10, 15, 20))
+            monthly_bonuses[m] = {"participation_count": cnt, "bonus_points": bonus}
+            points += bonus
+
+        return {
+            "uguu_points": points,
+            "total_participation": total,
+            "last_participation_date": d_objs[-1].strftime("%Y-%m-%d"),
+            "current_streak_start": streak_start.strftime("%Y-%m-%d"),
+            "current_streak_count": streak_count,
+            "monthly_bonuses": dict(monthly_bonuses)
+        }
 
 # 重要: インスタンスを作成
 db = DynamoDB()

@@ -63,10 +63,21 @@
                                         <td>{{ user.user_name | truncate(10) }}</td>
                                         <td>{{ user.email | truncate(20) }}</td>
                                         <td>{{ user.phone | truncate(15) }}</td> 
-                                        <td>{{ user.emergency_phone | truncate(15) }}</td>                                       
+                                        <td>{{ user.emergency_phone | truncate(15) }}</td>                                                                              
                                         <td>
                                             
-                                            <a href="{{ url_for('account', user_id=user.user_id) }}" class="btn btn-secondary">変更</a>
+                                                <!-- マイページボタン -->
+                                        <a href="{{ url_for('users.user_profile', user_id=user.user_id) }}" 
+                                        class="btn btn-primary btn-sm mb-1">
+                                            マイページ
+                                        </a>
+
+                                        <!-- 変更ボタン -->
+                                        <a href="{{ url_for('account', user_id=user.user_id) }}" 
+                                        class="btn btn-secondary btn-sm">
+                                            変更
+                                        </a>
+                                    </td>
                                                
                                             
                                         </td>
