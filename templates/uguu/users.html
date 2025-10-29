@@ -207,10 +207,16 @@
                 
                 <!-- 本人の場合：編集ボタン -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
-                <div class="profile-actions">
+                <div class="profile-actions text-center">
                     <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
-                    class="btn btn-outline-secondary btn-sm">
+                    class="btn btn-outline-secondary btn-sm d-block mb-3">
                         <i class="fas fa-edit me-1"></i>プロフィールを編集
+                    </a>
+                    <a href="{{ url_for('logout') }}" 
+                    class="btn btn-outline-danger btn-sm d-block"
+                    onclick="return confirm('ログアウトしますか？')">
+                        <i class="fas fa-sign-out-alt me-1"></i>
+                        ログアウト
                     </a>
                 </div>
                 {% else %}

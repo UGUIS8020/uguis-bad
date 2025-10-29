@@ -514,136 +514,228 @@ class DynamoDB:
         except Exception as e:
             print(f"[ERROR] 参加キャンセルエラー: {str(e)}")
             return False
+        
+    def get_user_participation_history_with_timestamp(self, user_id):
+        """
+        参加履歴をタイムスタンプ付きで取得
+        
+        Returns:
+            [
+                {
+                    'event_date': '2025-10-28',  # イベント日
+                    'registered_at': '2025-10-26 15:30:00'  # 参加ボタンを押した日時
+                },
+                ...
+            ]
+        """
+        # データベースから取得する実装
+        pass
     
+    def _is_early_registration(self, record):
+        """
+        事前参加の判定とポイント計算
+        
+        Returns:
+            int: 参加ポイント (0, 100, or 200)
+        """
+        event_date = record['event_date']
+        registered_at = record['registered_at']
+        
+        # 7日前の23:59:59を計算
+        seven_days_before = event_date - timedelta(days=7)
+        seven_days_deadline = seven_days_before.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        # 前々日の23:59:59を計算
+        two_days_before = event_date - timedelta(days=2)
+        two_days_deadline = two_days_before.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        # ポイント判定
+        if registered_at <= seven_days_deadline:
+            points = 200
+            registration_type = "✓✓ 超早期登録(7日前)"
+        elif registered_at <= two_days_deadline:
+            points = 100
+            registration_type = "✓ 事前登録(前々日)"
+        else:
+            points = 0
+            registration_type = "✗ 当日登録"
+        
+        print(f"    参加ポイント判定 - イベント日: {event_date.strftime('%Y-%m-%d')}, "
+            f"登録日時: {registered_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"      7日前締切: {seven_days_deadline.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"      前々日締切: {two_days_deadline.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"      → {registration_type}: +{points}P")
+        
+        return points
+
     def calculate_uguu_points(self, user_id):
         """
         うぐポイントを計算
-        - 基本100ポイント
-        - 連続参加で200ポイントボーナス
-        - 月間5/10/15/20回参加ごとに1000ポイントボーナス
+        - 参加ポイント: 
+        - 7日前までの登録: 200ポイント
+        - 前々日の23:59までの登録: 100ポイント
+        - それ以降: 0ポイント
+        - 連続ポイント: 60日以内の連続参加で100ポイント
+        - 月間ボーナス: 5/10/15/20回参加ごとにボーナス
         """
         try:
             from collections import defaultdict
-            from datetime import datetime
+            from datetime import datetime, timedelta
             
-            print(f"[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
+            print(f"\n[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
+            print("=" * 80)
             
-            # 参加履歴を取得（日付文字列の配列）
-            date_strings = self.get_user_participation_history(user_id)
+            # 参加履歴を取得
+            participation_history = self.get_user_participation_history_with_timestamp(user_id)
             
-            if not date_strings:
+            if not participation_history:
                 print(f"[DEBUG] 参加履歴なし - user_id: {user_id}")
                 return {
                     'uguu_points': 0,
+                    'participation_points': 0,
+                    'streak_points': 0,
+                    'monthly_bonus_points': 0,
                     'total_participation': 0,
                     'last_participation_date': None,
                     'current_streak_start': None,
                     'current_streak_count': 0,
-                    'monthly_bonuses': {}
+                    'monthly_bonuses': {},
+                    'early_registration_count': 0,
+                    'super_early_registration_count': 0  # 7日前登録の回数
                 }
             
-            # 日付文字列をdatetimeオブジェクトに変換
-            participation_dates = []
-            for date_str in date_strings:
+            # 参加履歴を処理
+            participation_records = []
+            for record in participation_history:
                 try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                    participation_dates.append(date_obj)
-                except ValueError:
-                    print(f"[WARN] 不正な日付形式: {date_str}")
+                    event_date = datetime.strptime(record['event_date'], '%Y-%m-%d')
+                    registered_at = datetime.strptime(record['registered_at'], '%Y-%m-%d %H:%M:%S')
+                    
+                    participation_records.append({
+                        'event_date': event_date,
+                        'registered_at': registered_at
+                    })
+                except (ValueError, KeyError) as e:
+                    print(f"[WARN] 不正なレコード形式: {record}, エラー: {e}")
             
-            # 日付順に確実にソート
-            participation_dates.sort()
+            # イベント日付順にソート
+            participation_records.sort(key=lambda x: x['event_date'])
             
             # 総参加回数
-            total_participation = len(participation_dates)
+            total_participation = len(participation_records)
             
-            # 連続参加ポイント計算
-            uguu_points = 100  # 最初の参加で100ポイント
-            current_streak_start = participation_dates[0]
-            current_streak_count = 1  # 連続参加カウンター
+            # ポイント内訳の初期化
+            participation_points = 0
+            streak_points = 0
+            early_registration_count = 0  # 前々日までの登録回数
+            super_early_registration_count = 0  # 7日前までの登録回数
             
-            for i in range(1, len(participation_dates)):
-                previous_date = participation_dates[i - 1]
-                current_date = participation_dates[i]
+            # 連続参加カウンター
+            current_streak_start = participation_records[0]['event_date']
+            current_streak_count = 1
+            
+            # 最初の参加の処理
+            first_record = participation_records[0]
+            first_points = self._is_early_registration(first_record)
+            participation_points += first_points
+            if first_points == 200:
+                super_early_registration_count += 1
+                early_registration_count += 1
+            elif first_points == 100:
+                early_registration_count += 1
+            print(f"[DEBUG] 初回参加 - 参加ポイント: +{first_points}P")
+            
+            # 2回目以降の参加を処理
+            for i in range(1, len(participation_records)):
+                previous_record = participation_records[i - 1]
+                current_record = participation_records[i]
                 
                 # 前回の参加日からの日数差を計算
-                days_diff = (current_date - previous_date).days
+                days_diff = (current_record['event_date'] - previous_record['event_date']).days
                 
-                print(f"[DEBUG] 連続チェック - 前回: {previous_date.strftime('%Y-%m-%d')}, 今回: {current_date.strftime('%Y-%m-%d')}, 日数差: {days_diff}日")
+                print(f"\n[DEBUG] === 参加 {i+1}回目 ===")
+                print(f"[DEBUG] 連続チェック - 前回: {previous_record['event_date'].strftime('%Y-%m-%d')}, "
+                    f"今回: {current_record['event_date'].strftime('%Y-%m-%d')}, 日数差: {days_diff}日")
                 
+                # 参加ポイントの判定
+                current_points = self._is_early_registration(current_record)
+                participation_points += current_points
+                if current_points == 200:
+                    super_early_registration_count += 1
+                    early_registration_count += 1
+                elif current_points == 100:
+                    early_registration_count += 1
+                
+                # 連続ポイントの判定
                 if days_diff <= 60:
-                    # 60日以内なら連続参加
                     current_streak_count += 1
-                    print(f"[DEBUG] 連続参加 - カウント: {current_streak_count}")
-                    
-                    # 連続2回目以降は200ポイント
-                    if current_streak_count >= 2:
-                        uguu_points += 200
-                        print(f"[DEBUG] ボーナスポイント加算: 200ポイント")
-                    else:
-                        uguu_points += 100
-                        print(f"[DEBUG] 通常ポイント加算: 100ポイント")
+                    streak_points += 100
+                    print(f"[DEBUG] 連続参加 - カウント: {current_streak_count}, 連続ポイント: +100P")
                 else:
-                    # 60日超えたらリセット
-                    print(f"[DEBUG] 連続リセット - 60日超過: {days_diff}日")
-                    uguu_points += 100  # リセット後の最初の参加は100ポイント
+                    print(f"[DEBUG] 連続リセット - 60日超過: {days_diff}日, 連続ポイント: +0P")
                     current_streak_count = 1
-                    current_streak_start = current_date
+                    current_streak_start = current_record['event_date']
             
             # 月間参加ボーナス計算
             monthly_participation = defaultdict(int)
             monthly_bonuses = {}
+            monthly_bonus_points = 0
             
-            # 月ごとの参加回数をカウント
-            for date in participation_dates:
-                month_key = date.strftime('%Y-%m')
+            for record in participation_records:
+                month_key = record['event_date'].strftime('%Y-%m')
                 monthly_participation[month_key] += 1
             
-            # デバッグ情報追加：月別参加回数を出力
-            for month, count in monthly_participation.items():
+            print(f"\n[DEBUG] === 月間ボーナス計算 ===")
+            for month, count in sorted(monthly_participation.items()):
                 print(f"[DEBUG] 月別参加回数 - {month}: {count}回")
             
-            # 月ごとのボーナス計算
             for month, count in monthly_participation.items():
                 monthly_bonuses[month] = {
                     'participation_count': count,
                     'bonus_points': 0
                 }
                 
-                # 5回達成ボーナス
                 if count >= 5:
                     monthly_bonuses[month]['bonus_points'] += 500
-                    print(f"[DEBUG] 月間5回達成ボーナス: {month} +1000ポイント")
-                
-                # 10回達成ボーナス
                 if count >= 10:
                     monthly_bonuses[month]['bonus_points'] += 1000
-                    print(f"[DEBUG] 月間10回達成ボーナス: {month} +1000ポイント")
-                
-                # 15回達成ボーナス
                 if count >= 15:
                     monthly_bonuses[month]['bonus_points'] += 1500
-                    print(f"[DEBUG] 月間15回達成ボーナス: {month} +1000ポイント")
-                
-                # 20回達成ボーナス
                 if count >= 20:
                     monthly_bonuses[month]['bonus_points'] += 2000
-                    print(f"[DEBUG] 月間20回達成ボーナス: {month} +1000ポイント")
                 
-                # 月間ボーナスを総ポイントに追加
-                uguu_points += monthly_bonuses[month]['bonus_points']
+                if monthly_bonuses[month]['bonus_points'] > 0:
+                    print(f"[DEBUG] {month} - {count}回参加 → ボーナス: {monthly_bonuses[month]['bonus_points']}P")
+                
+                monthly_bonus_points += monthly_bonuses[month]['bonus_points']
             
-            # 結果を返す
+            # 総ポイント計算
+            uguu_points = participation_points + streak_points + monthly_bonus_points
+            
             result = {
                 'uguu_points': uguu_points,
+                'participation_points': participation_points,
+                'streak_points': streak_points,
+                'monthly_bonus_points': monthly_bonus_points,
                 'total_participation': total_participation,
-                'last_participation_date': participation_dates[-1].strftime('%Y-%m-%d') if participation_dates else None,
+                'early_registration_count': early_registration_count,  # 前々日以前の登録
+                'super_early_registration_count': super_early_registration_count,  # 7日前以前の登録
+                'last_participation_date': participation_records[-1]['event_date'].strftime('%Y-%m-%d') if participation_records else None,
                 'current_streak_start': current_streak_start.strftime('%Y-%m-%d') if current_streak_start else None,
                 'current_streak_count': current_streak_count,
                 'monthly_bonuses': monthly_bonuses
             }
             
-            print(f"[DEBUG] うぐポイント計算結果: {result}")
+            print(f"\n[DEBUG] === 最終結果 ===")
+            print(f"  参加ポイント: {participation_points}P")
+            print(f"    └ 7日前登録: {super_early_registration_count}回")
+            print(f"    └ 前々日登録: {early_registration_count - super_early_registration_count}回")
+            print(f"    └ 当日登録: {total_participation - early_registration_count}回")
+            print(f"  連続ポイント: {streak_points}P")
+            print(f"  月間ボーナス: {monthly_bonus_points}P")
+            print(f"  ━━━━━━━━━━━━━━━━━━")
+            print(f"  合計: {uguu_points}P")
+            print("=" * 80)
             
             return result
             
@@ -653,7 +745,12 @@ class DynamoDB:
             traceback.print_exc()
             return {
                 'uguu_points': 0,
+                'participation_points': 0,
+                'streak_points': 0,
+                'monthly_bonus_points': 0,
                 'total_participation': 0,
+                'early_registration_count': 0,
+                'super_early_registration_count': 0,
                 'last_participation_date': None,
                 'current_streak_start': None,
                 'current_streak_count': 0,
