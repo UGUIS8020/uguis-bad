@@ -16,40 +16,7 @@
 
 {% block content %}
 <style>
-    /* プロフィール画像（Instagram風） */
-    .profile-avatar {
-        --size: 150px;
-        --ring: 4px;
-        --gap: 4px;
-        display: inline-grid;
-        place-items: center;
-        width: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
-        height: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
-        border-radius: 50%;
-        padding: calc(var(--ring) + var(--gap));
-        background: conic-gradient(
-            #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75
-        );
-    }
-    
-    .profile-avatar > img {
-        width: var(--size);
-        height: var(--size);
-        object-fit: cover;
-        border-radius: 50%;
-        display: block;
-        background: #fff;
-        box-shadow: 0 0 0 var(--gap) #fff;
-    }
-    
-    /* スマホ用に小さく */
-    @media (max-width: 768px) {
-        .profile-avatar {
-            --size: 100px;
-            --ring: 3px;
-            --gap: 3px;
-        }
-    }
+      
     
     /* 統計情報 */
     .profile-stats {
@@ -170,54 +137,167 @@
     }
 </style>
 
-<div class="profile-header">
-    <!-- プロフィール情報 -->
-    <div class="profile-info">
-        <!-- プロフィール画像 -->
-        <div>
-            <span class="profile-avatar">
-                <img
-                    src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-                    alt="{{ user.display_name }}さんのプロフィール画像"
-                    loading="lazy"
-                    decoding="async"
-                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-            </span>
-        </div>
-        
-        <!-- プロフィール詳細 -->
-        <div class="flex-grow-1">
-            <!-- ユーザー名 -->
-            <div class="mb-3">
-                <h1 class="h3 mb-2">{{ user.display_name }}</h1>
+<!-- プロフィール画像（本人はクリックで編集ページへ） -->
+<div class="profile-avatar-container text-center">
+  {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+    <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}"
+       class="profile-avatar-link" aria-label="プロフィール画像を変更">
+      <span class="profile-avatar">
+        <img
+          src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+          alt="{{ user.display_name }}さんのプロフィール画像"
+          loading="lazy" decoding="async"
+          onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+      </span>
+      <span class="camera-icon" aria-hidden="true">
+        <i class="fas fa-camera"></i>
+      </span>
+    </a>
+  {% else %}
+    <span class="profile-avatar">
+      <img
+        src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+        alt="{{ user.display_name }}さんのプロフィール画像"
+        loading="lazy" decoding="async"
+        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+    </span>
+  {% endif %}
+</div>
 
-                <!-- プロフィール画像 -->               
-                    
-                    <!-- 本人の場合：画像変更ボタン -->
-                    {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
-                    <div class="mt-3">
-                        <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}" 
-                        class="btn btn-outline-primary btn-sm">
-                            <i class="fas fa-camera me-1"></i>画像を変更
-                        </a>
-                    </div>
-                    {% endif %}
-                </div>
+        <style>
+        /* クリック可能エリアの外枠 */
+        .profile-avatar-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        }
+
+        /* 本人のみリンク化（位置基準のためrelative） */
+        .profile-avatar-link {
+        position: relative;
+        display: inline-block;
+        text-decoration: none;
+        outline: none;
+        }
+
+        /* Instagram風リング（既存CSSを統合） */
+        .profile-avatar {
+        --size: 150px;
+        --ring: 4px;
+        --gap: 4px;
+
+        display: inline-grid;
+        place-items: center;
+        width: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+        height: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+        border-radius: 50%;
+        padding: calc(var(--ring) + var(--gap));
+        background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75);
+        }
+
+        /* 中の画像（既存CSS） */
+        .profile-avatar > img {
+        width: var(--size);
+        height: var(--size);
+        object-fit: cover;
+        border-radius: 50%;
+        display: block;
+        background: #fff;
+        box-shadow: 0 0 0 var(--gap) #fff; /* リングと画像の間に白い余白 */
+        }
+
+        /* カメラアイコン（スマホでも常時表示して編集可能を示す） */
+        .camera-icon {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        background: rgba(0,0,0,0.6);
+        color: #fff;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 0.9rem;
+        pointer-events: none; /* クリックは画像リンクへ */
+        }
+
+        /* キーボードフォーカス（アクセシビリティ） */
+        .profile-avatar-link:focus-visible {
+        box-shadow: 0 0 0 3px rgba(13,110,253,0.45);
+        border-radius: 9999px;
+        }
+
+        /* PCでのわずかなフィードバック（スマホには影響なし） */
+        @media (hover: hover) and (pointer: fine) {
+        .profile-avatar-link:hover .profile-avatar > img {
+            transform: scale(1.03);
+            transition: transform 0.2s ease;
+        }
+        }
+
+        /* スマホ用に小さく（既存CSSを踏襲） */
+        @media (max-width: 768px) {
+        .profile-avatar {
+            --size: 100px;
+            --ring: 3px;
+            --gap: 3px;
+        }
+        .camera-icon {
+            right: 6px;
+            bottom: 6px;
+            width: 30px;
+            height: 30px;
+            font-size: 0.8rem;
+        }
+        }
+
+        /* 統計情報（既存CSS＋レスポンシブ微調整） */
+        .profile-stats {
+        display: flex;
+        gap: 2rem;
+        margin: 1.5rem 0;
+        flex-wrap: wrap;
+        }
+        .stat-item {
+        text-align: center;
+        min-width: 120px;
+        }
+        .stat-number {
+        font-size: 1.5rem;
+        font-weight: bold;
+        display: block;
+        }
+        .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        }
+        .profile-actions {
+            display: inline-block;
+            text-align: center;
+            width: auto;
+        }
+        .profile-actions .btn {
+            min-width: 180px;
+        }
+        </style>
 
                 
                 <!-- 本人の場合：編集ボタン -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
-                <div class="profile-actions text-center">
-                    <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
-                    class="btn btn-outline-secondary btn-sm d-block mb-3">
-                        <i class="fas fa-edit me-1"></i>プロフィールを編集
-                    </a>
-                    <a href="{{ url_for('logout') }}" 
-                    class="btn btn-outline-danger btn-sm d-block"
-                    onclick="return confirm('ログアウトしますか？')">
-                        <i class="fas fa-sign-out-alt me-1"></i>
-                        ログアウト
-                    </a>
+                <div class="text-center">
+                    <div class="profile-actions">
+                        <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
+                        class="btn btn-outline-secondary btn-sm d-block mb-3">
+                            <i class="fas fa-edit me-1"></i>プロフィールを編集
+                        </a>
+                        <a href="{{ url_for('logout') }}" 
+                        class="btn btn-outline-danger btn-sm d-block"
+                        onclick="return confirm('ログアウトしますか？')">
+                            <i class="fas fa-sign-out-alt me-1"></i>
+                            ログアウト
+                        </a>
+                    </div>
                 </div>
                 {% else %}
                 <!-- 他人の場合：フォローボタン（将来実装） -->
@@ -301,23 +381,51 @@
                     <span class="stat-label">うぐポイント</span>
                 </div>
                 
-                <!-- ポイント参加ボタン（本人のみ表示） -->
+               <!-- ポイント参加ボタン（本人のみ表示） -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
                 <div class="mt-3 text-center">
-                    <button class="btn btn-success btn-sm" 
+                    <button class="btn btn-point-pay px-4 py-2"
                             data-bs-toggle="modal" 
                             data-bs-target="#pointParticipationModal"
                             {% if participation_points|default(0) < 1 %}disabled{% endif %}>
-                        <i class="fas fa-ticket-alt me-1"></i>
+                        <i class="fas fa-ticket-alt me-2"></i>
                         ポイントで支払う
                     </button>
                     {% if participation_points|default(0) < 1 %}
-                    <div class="text-danger small mt-1">
+                    <div class="text-danger small mt-2">
                         ポイントが不足しています（現在: {{ participation_points|default(0) }}P）
                     </div>
                     {% endif %}
                 </div>
                 {% endif %}
+
+                <style>
+                .btn-point-pay {
+                    background-color: #28a745; /* 緑 */
+                    color: #fff;
+                    border: none;
+                    border-radius: 25px;
+                    font-weight: 600;
+                    font-size: 0.95rem;
+                    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+                    transition: all 0.25s ease-in-out;
+                }
+                .btn-point-pay:hover {
+                    background-color: #218838;
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.25);
+                }
+                .btn-point-pay:active {
+                    transform: translateY(0);
+                    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+                }
+                .btn-point-pay:disabled {
+                    background-color: #ccc;
+                    color: #666;
+                    cursor: not-allowed;
+                    box-shadow: none;
+                }
+                </style>
       
             
             <!-- 自己紹介 -->
