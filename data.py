@@ -13,7 +13,7 @@ dynamodb = boto3.resource(
 table = dynamodb.Table("bad_schedules")
 
 # ここを、りささんの正しい user_id に差し替え
-uid = "2212429d-713d-4b6a-8ae1-c47a1acef892"
+uid = "5e03ccca-7164-4b40-bc29-5cccbf187745"
 
 
 items = []

@@ -496,7 +496,18 @@
     </div>
 
 <script>
+    let isJoining = false;
+    let isTaraJoining = false;
+
     async function joinSchedule(button) {
+
+            // ↓↓↓ この4行を追加 ↓↓↓
+        if (isJoining) {
+            console.log('参加処理中です');
+            return;
+        }
+        // ↑↑↑ ここまで追加 ↑↑↑
+        
         const scheduleId = button.getAttribute('data-schedule-id');
         const scheduleDate = button.getAttribute('data-schedule-date');
 
@@ -504,6 +515,14 @@
             alert('スケジュール情報が不足しています。');
             return;
         }
+
+        // ↓↓↓ この4行を追加 ↓↓↓
+        isJoining = true;
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = '処理中...';
+        // ↑↑↑ ここまで追加 ↑↑↑
+
 
         try {
             const response = await fetch(`/schedule/${scheduleId}/join`, {
@@ -518,6 +537,11 @@
             if (!response.ok) {
                 const errorData = await response.json();
                 alert(errorData.message || 'エラーが発生しました');
+                // ↓↓↓ ここにリセット処理を追加 ↓↓↓
+                isJoining = false;
+                button.disabled = false;
+                button.textContent = originalText;
+                // ↑↑↑ ここまで追加 ↑↑↑
                 return;
             }
 
@@ -533,11 +557,22 @@
         } catch (error) {
             console.error('Fetch error:', error);
             alert('通信エラーが発生しました');
+            // ↓↓↓ この3行を追加 ↓↓↓
+            isJoining = false;
+            button.disabled = false;
+            button.textContent = originalText;
+            // ↑↑↑ ここまで追加 ↑↑↑
         }
     }
 
     // ★ 「たら」参加機能を追加
     async function taraSchedule(button) {
+
+        if (isTaraJoining) {
+            console.log('「たら」参加処理中です');
+            return;
+        }
+
         const scheduleId = button.getAttribute('data-schedule-id');
         const scheduleDate = button.getAttribute('data-schedule-date');
 
@@ -545,6 +580,14 @@
             alert('スケジュール情報が不足しています。');
             return;
         }
+
+        // ↓↓↓ この4行を追加 ↓↓↓
+        isTaraJoining = true;
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = '処理中...';
+        // ↑↑↑ ここまで追加 ↑↑↑
+
 
         try {
             const response = await fetch('/tara_join', {
@@ -577,6 +620,13 @@
         } catch (error) {
             console.error('「たら」参加処理エラー:', error);
             alert('通信エラーが発生しました');
+
+            // ↓↓↓ この3行を追加 ↓↓↓
+            isTaraJoining = false;
+            button.disabled = false;
+            button.textContent = originalText;
+            // ↑↑↑ ここまで追加 ↑↑↑
+
         }
     }
 </script>

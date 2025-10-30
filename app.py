@@ -2046,33 +2046,40 @@ def update_skill_score():
         }), 500
     
 @app.route('/api/user_info/<user_id>')
-def get_user_info(user_id):
+def get_user_info(self, user_id: str):
+    """
+    ユーザー情報を取得（生年月日を含む）
+    """
     try:
-        table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(Key={'user#user_id': user_id})
-        item = response.get('Item')
-
-        if not item:
-            return jsonify({'error': 'ユーザーが見つかりません'}), 404
-
-        # 戦闘力を処理
-        raw_score = item.get('skill_score')
-        if isinstance(raw_score, Decimal):
-            skill_score = int(raw_score)
-        elif isinstance(raw_score, (int, float)):
-            skill_score = int(raw_score)
-        else:
-            skill_score = None
-
-        return jsonify({
-            'user_id': item.get('user#user_id'),
-            'display_name': item.get('display_name', '名前なし'),
-            'skill_score': skill_score
-        })
-
+        response = self.table.get_item(
+            Key={'user#user_id': user_id}
+        )
+        
+        if 'Item' not in response:
+            print(f"[WARN] ユーザー情報が見つかりません - user_id: {user_id}")
+            return None
+        
+        item = response['Item']
+        
+        # 生年月日を取得（date_of_birthフィールド）
+        birth_date = item.get('date_of_birth', None)
+        
+        user_info = {
+            'user_id': user_id,
+            'birth_date': birth_date,
+            'display_name': item.get('display_name', ''),
+            'skill_score': item.get('skill_score', 0)
+        }
+        
+        print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
+        
+        return user_info
+        
     except Exception as e:
-        app.logger.error(f"/api/user_info エラー: {e}")
-        return jsonify({'error': 'サーバーエラー'}), 500
+        print(f"[ERROR] ユーザー情報取得エラー: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
     
 @app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
 @login_required
@@ -2607,6 +2614,64 @@ def show_routes():
     
     return '<br>'.join(sorted(output))
 
+# @app.route('/uguu/point-participation', methods=['POST'])
+# @login_required
+# def point_participation():
+#     """ポイント消費での参加登録"""
+#     try:
+#         data = request.get_json()
+#         user_id = data.get('user_id')
+#         schedule_id = data.get('schedule_id')
+#         points_cost = data.get('points_cost', 600)
+        
+#         # 本人確認
+#         if current_user.id != user_id:
+#             return jsonify({'error': '本人のみ実行できます'}), 403
+        
+#         # 現在のポイントを取得
+#         stats = db.get_user_stats(user_id)  # ← uguu_db を db に変更
+#         current_points = stats.get('uguu_points', 0)
+        
+#         # ポイント不足チェック
+#         if current_points < points_cost:
+#             return jsonify({
+#                 'error': f'ポイントが不足しています（現在: {current_points}P、必要: {points_cost}P）'
+#             }), 400
+        
+#         # スケジュール情報を取得
+#         schedule = db.get_schedule_by_id(schedule_id)  # ← uguu_db を db に変更
+#         if not schedule:
+#             return jsonify({'error': 'スケジュールが見つかりません'}), 404
+        
+#         event_date = schedule['date']
+        
+#         # すでに参加済みかチェック
+#         if db.check_user_participation(user_id, event_date):  # ← uguu_db を db に変更
+#             return jsonify({'error': 'すでに参加登録済みです'}), 400
+        
+#         # 参加登録
+#         success = db.register_participation(  # ← uguu_db を db に変更
+#             user_id=user_id,
+#             schedule_id=schedule_id,
+#             event_date=event_date,
+#             payment_method='point',
+#             points_used=points_cost
+#         )
+        
+#         if success:
+#             return jsonify({
+#                 'message': '参加登録が完了しました',
+#                 'remaining_points': current_points - points_cost
+#             }), 200
+#         else:
+#             return jsonify({'error': '参加登録に失敗しました'}), 500
+            
+#     except Exception as e:
+#         print(f"[ERROR] ポイント参加エラー: {str(e)}")
+#         import traceback
+#         traceback.print_exc()
+#         return jsonify({'error': str(e)}), 500
+
 
 from uguu.timeline import uguu
 from uguu.users import users
@@ -2621,35 +2686,3 @@ app.register_blueprint(bp_game, url_prefix='/game')
 
 if __name__ == "__main__":
     app.run(debug=True)
-
-# if __name__ == "__main__":
-#     # ← ここでコンテキストを張ってからデバッグ関数を呼ぶ
-#     import json
-#     from flask import current_app
-#     from botocore.exceptions import ClientError
-
-#     def _debug_bad_items_schema():
-#         table = current_app.bad_table
-#         cli = table.meta.client
-#         try:
-#             desc = cli.describe_table(TableName=table.name)
-#         except ClientError as e:
-#             print("describe_table ERROR:", e)
-#             return
-
-#         print("TABLE NAME:", table.name)
-#         print("REGION:", cli.meta.region_name)
-#         ks = desc["Table"]["KeySchema"]
-#         print("Table KeySchema:", ks)
-
-#         gsis = desc["Table"].get("GlobalSecondaryIndexes", [])
-#         print("GSI count:", len(gsis))
-#         for g in gsis:
-#             print(" - GSI Name:", g["IndexName"], "Status:", g["IndexStatus"])
-#             print("   KeySchema:", g["KeySchema"])
-
-#     with app.app_context():
-#         _debug_bad_items_schema()
-
-#     app.run(debug=True)
-
