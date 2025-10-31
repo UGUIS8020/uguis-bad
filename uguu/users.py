@@ -79,45 +79,57 @@ def user_profile(user_id):
 def point_participation():
     """ポイント支払い処理"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
+        # ---- ここからトレース（必ず残すと原因切り分けが速い）----
+        print("[TRACE] /point-participation hit")
+        data = request.get_json(silent=True) or {}
+        print(f"[TRACE] payload={data}")
+        user_id = str(data.get('user_id') or "")
         event_date = data.get('event_date')
-        points_cost = data.get('points_cost', 600)
-        
-        # 本人確認
-        if current_user.id != user_id:
+        points_cost = int(data.get('points_cost') or 600)
+        print(f"[TRACE] current_user.id={current_user.id} / user_id={user_id} / event_date={event_date} / cost={points_cost}")
+
+        # 本人確認（型ずれ防止のため文字列比較）
+        if str(current_user.id) != user_id:
+            print("[TRACE] blocked: not owner")
             return jsonify({'error': '本人のみ実行できます'}), 403
-        
+
+        # event_date の形式チェック（YYYY-MM-DDに正規化）
         if not event_date:
             return jsonify({'error': 'イベント日が指定されていません'}), 400
-        
-        # 現在のポイントを取得
-        stats = db.get_user_stats(user_id)
-        current_points = stats.get('uguu_points', 0)
-        
-        # ポイント不足チェック
+        try:
+            # 余計な時刻が来ても日付だけへ丸める
+            event_date = str(event_date)[:10]
+            datetime.strptime(event_date, "%Y-%m-%d")
+        except Exception:
+            return jsonify({'error': 'イベント日の形式が不正です（YYYY-MM-DD）'}), 400
+
+        # 現在ポイント
+        stats = db.get_user_stats(user_id) or {}
+        current_points = int(stats.get('uguu_points', 0))
+        print(f"[TRACE] current_points={current_points}")
+
+        # 残高チェック
         if current_points < points_cost:
-            return jsonify({
-                'error': f'ポイントが不足しています（現在: {current_points}P、必要: {points_cost}P）'
-            }), 400
-        
-        # 支払い記録を保存
-        success = db.record_payment(
+            return jsonify({'error': f'ポイント不足（現在: {current_points}P / 必要: {points_cost}P）'}), 400
+
+        # 支払い記録（bad-users-history に points#spend#... を作成）
+        ok = db.record_payment(
             user_id=user_id,
             event_date=event_date,
             points_used=points_cost
         )
-        
-        if success:
+        print(f"[TRACE] record_payment -> {ok}")
+
+        if ok:
+            # ここで ledger から再計算して返したい場合は db.calc_total_points_spent を呼ぶ
             return jsonify({
                 'message': 'ポイント支払いが完了しました',
                 'remaining_points': current_points - points_cost
             }), 200
-        else:
-            return jsonify({'error': 'ポイント支払いに失敗しました'}), 500
-            
+
+        return jsonify({'error': 'ポイント支払いに失敗しました'}), 500
+
     except Exception as e:
-        print(f"[ERROR] ポイント支払いエラー: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        print(f"[ERROR] ポイント支払いエラー: {e}")
+        import traceback; traceback.print_exc()
+        return jsonify({'error': '内部エラー'}), 500

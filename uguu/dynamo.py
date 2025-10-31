@@ -1,9 +1,10 @@
 import boto3
 import os
-from datetime import datetime, timedelta
-import uuid
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from uuid import uuid4
 from dotenv import load_dotenv
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Key
 
 
 load_dotenv()
@@ -856,52 +857,63 @@ class DynamoDB:
             return None
             
 
-    def get_upcoming_schedules(self, limit: int = 10):
-        """今後の予定を取得"""
+    def get_upcoming_schedules(self, limit: int = 10, today_only: bool = False):
+        """今後の予定を取得（today_only=True で当日の最初の1件だけ）"""
         try:
-            from datetime import datetime
-            today = datetime.now().date().strftime('%Y-%m-%d')
-            print(f"[DEBUG] get_upcoming_schedules - today: {today}")
-            
-            # 全スケジュールを取得
+            # === タイムゾーン設定 ===
+            JST = ZoneInfo("Asia/Tokyo")
+            today_date = datetime.now(JST).date()
+            today_str = today_date.strftime('%Y-%m-%d')
+            print(f"[DEBUG] get_upcoming_schedules - today(JST): {today_str}")
+
+            # === スケジュール取得 ===
             response = self.schedule_table.scan()
             schedules = response.get('Items', [])
-            
-            # ページネーション対応
+
             while 'LastEvaluatedKey' in response:
                 response = self.schedule_table.scan(
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
                 schedules.extend(response.get('Items', []))
-            
+
             print(f"[DEBUG] 全スケジュール取得: {len(schedules)}件")
-            
-            # 今後のスケジュールのみフィルタしてソート
+
             upcoming = []
             for schedule in schedules:
                 try:
-                    schedule_date = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
-                    if schedule_date >= datetime.now().date():
-                        upcoming.append({
+                    s_date = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
+
+                    cond = (s_date == today_date) if today_only else (s_date >= today_date)
+                    if cond:
+                        item = {
                             'schedule_id': schedule.get('schedule_id'),
                             'date': schedule['date'],
                             'day_of_week': schedule.get('day_of_week', ''),
                             'start_time': schedule.get('start_time', ''),
                             'end_time': schedule.get('end_time', '')
-                        })
-                        print(f"[DEBUG] 今後の予定: {schedule['date']}")
+                        }
+                        upcoming.append(item)
+                        print(f"[DEBUG] 対象の予定: {item['date']} {item.get('start_time','')}")
                 except Exception as e:
                     print(f"[WARN] スケジュール処理エラー: {schedule} - {e}")
                     continue
-            
-            # 日付順にソート
-            upcoming.sort(key=lambda x: x['date'])
-            
-            # limit件数まで
+
+            # === 当日のみ ===
+            if today_only:
+                if not upcoming:
+                    print("[DEBUG] 本日の予定なし")
+                    return []
+                upcoming.sort(key=lambda x: x.get('start_time', '00:00'))
+                result = [upcoming[0]]
+                print(f"[DEBUG] 本日の予定（1件）: {result[0]['date']} {result[0].get('start_time','')}")
+                return result
+
+            # === 未来分 ===
+            upcoming.sort(key=lambda x: (x['date'], x.get('start_time', '')))
             result = upcoming[:limit]
             print(f"[DEBUG] 今後の予定（{limit}件まで）: {len(result)}件")
             return result
-            
+
         except Exception as e:
             print(f"[ERROR] 今後の予定取得エラー: {str(e)}")
             import traceback
@@ -916,183 +928,146 @@ class DynamoDB:
         return self.get_point_transactions(user_id, transaction_type='payment') 
 
         
-    def record_payment(self, user_id: str, event_date: str, points_used: int, 
-                  payment_type: str = 'event_participation', description: str = None):
+    def record_payment(self, user_id: str, event_date: str, points_used: int,
+                   payment_type: str = 'event_participation', description: str = None):
         """
-        ポイント支払いの記録を保存
+        ポイント支払い（消化）を bad-users-history に記録
         """
         try:
-            from datetime import datetime
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
+            now = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
+            tx_id = str(uuid4())
+            # SK=joined_at を「タイプ#時刻#txid」で時系列＆一意
+            joined_at = f'points#spend#{now}#{tx_id}'
+
             item = {
-                'user#user_id': user_id,  # ← PK を user#user_id に変更
-                'SK': f'transaction#{now}#payment',
-                'user_id': user_id,
-                'transaction_type': 'payment',
-                'transaction_date': now,
-                'event_date': event_date,
-                'points': -points_used,
-                'points_used': points_used,
+                'user_id': user_id,          # PK
+                'joined_at': joined_at,      # SK
+                'tx_id': tx_id,
+                'kind': 'spend',             # earn|spend|adjust
+                'delta_points': -int(points_used),   # 残高計算はこの合計でOK
+                'points_used': int(points_used),     # 互換のため残すなら
                 'payment_type': payment_type,
-                'description': description or f"{event_date}の参加費",
-                'entity_type': 'point_transaction',
-                'version': 1
-            }
-            
-            self.users_table.put_item(Item=item)
-            
-            print(f"[SUCCESS] 支払い記録保存 - user_id: {user_id}, event_date: {event_date}, points: {points_used}P")
-            return True
-            
-        except Exception as e:
-            print(f"[ERROR] 支払い記録エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-        
-    def record_point_earned(self, user_id: str, event_date: str, 
-                       points: int, earn_type: str, 
-                       details: dict = None, description: str = None):
-        """
-        ポイント獲得の記録を保存（将来実装用）
-        
-        Args:
-            user_id: ユーザーID
-            event_date: イベント日
-            points: 獲得ポイント
-            earn_type: 獲得種別（participation/streak/milestone/monthly）
-            details: 詳細情報（連続回数、ボーナス情報など）
-            description: 説明
-            
-        Usage:
-            # 参加ポイント
-            record_point_earned(user_id, '2025-10-28', 20, 'participation', 
-                            description='2025-10-28の参加')
-            
-            # 連続ボーナス
-            record_point_earned(user_id, '2025-10-28', 50, 'streak',
-                            details={'streak_count': 2},
-                            description='連続2回目')
-            
-            # マイルストーン達成
-            record_point_earned(user_id, '2025-10-28', 500, 'milestone',
-                            details={'milestone': 5},
-                            description='🎉連続5回達成ボーナス')
-        """
-        try:
-            from datetime import datetime
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            item = {
-                'PK': f'user#{user_id}',
-                'SK': f'transaction#{now}#earned',  # 時系列ソート可能
-                'user_id': user_id,
-                'transaction_type': 'earned',
-                'transaction_date': now,
                 'event_date': event_date,
-                'points': points,  # プラスで統一
-                'earn_type': earn_type,
-                'details': details or {},
-                'description': description or f"ポイント獲得",
-                'entity_type': 'point_transaction',
-                'version': 1
+                'reason': description or f"{event_date}の参加費",
+                'created_at': now,
+                'entity_type': 'point_transaction',  # 任意（監査用）
+                'version': 1,
             }
-            
-            self.users_table.put_item(Item=item)
-            
-            print(f"[SUCCESS] 獲得記録保存 - user_id: {user_id}, event_date: {event_date}, points: +{points}P, type: {earn_type}")
+
+            # 上書き防止
+            self.part_history.put_item(
+                Item=item,
+                ConditionExpression='attribute_not_exists(user_id) AND attribute_not_exists(joined_at)'
+            )
+
+            print(f"[SUCCESS] 支払い記録保存 - user_id={user_id}, event_date={event_date}, points={points_used}P")
             return True
-            
+
         except Exception as e:
-            print(f"[ERROR] 獲得記録エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"[ERROR] 支払い記録エラー: {e}")
+            import traceback; traceback.print_exc()
             return False
         
-    def get_point_transactions(self, user_id: str, limit: int = 50, 
-                           transaction_type: str = None):
-        """
-        ポイント取引履歴を取得（bad-users-historyから）
-        """
+    def record_point_earned(self, user_id: str, event_date: str,
+                        points: int, earn_type: str,
+                        details: dict = None, description: str = None):
+        """ポイント獲得を bad-users-history に記録（earn系は正の delta_points）"""
         try:
-            from boto3.dynamodb.conditions import Key
-            
-            # bad-users-historyテーブルから取得
-            response = self.part_history.query(
-                KeyConditionExpression=Key('user_id').eq(user_id),
-                ScanIndexForward=False,  # 新しい順
-                Limit=limit
+            now = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
+            tx_id = str(uuid4())
+            joined_at = f'points#earn#{now}#{tx_id}'
+
+            item = {
+                'user_id': user_id,          # PK
+                'joined_at': joined_at,      # SK
+                'tx_id': tx_id,
+                'kind': 'earn',              # earn|spend|adjust
+                'delta_points': int(points), # 正の値
+                'points': int(points),       # 互換フィールド（任意）
+                'earn_type': earn_type,      # participation/streak/milestone/monthly 等
+                'event_date': event_date,
+                'details': details or {},
+                'reason': description or "ポイント獲得",
+                'created_at': now,
+                'entity_type': 'point_transaction',
+                'version': 1,
+            }
+
+            self.part_history.put_item(
+                Item=item,
+                ConditionExpression='attribute_not_exists(user_id) AND attribute_not_exists(joined_at)'
             )
-            
-            transactions = []
-            for item in response.get('Items', []):
-                # entity_typeまたはdateで支払い記録を識別
-                if item.get('entity_type') == 'payment' or str(item.get('date', '')).startswith('payment#'):
-                    # タイプフィルタ
-                    if transaction_type and transaction_type != 'payment':
-                        continue
-                    
-                    transactions.append({
-                        'date': item.get('payment_date', item.get('joined_at')),
-                        'type': 'payment',
-                        'points': item.get('points_used', 0),
-                        'description': item.get('description', ''),
-                        'event_date': item.get('event_date'),
-                        'details': {},
-                        'payment_type': item.get('payment_type')
-                    })
-            
-            print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(transactions)}")
-            return transactions
-            
+            print(f"[SUCCESS] 獲得記録保存 - user_id={user_id}, +{points}P, type={earn_type}")
+            return True
+
         except Exception as e:
-            print(f"[ERROR] 取引履歴取得エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"[ERROR] 獲得記録エラー: {e}")
+            import traceback; traceback.print_exc()
+            return False
+        
+    def get_point_transactions(self, user_id: str, limit: int = 50, transaction_type: str = None):
+        try:
+            prefix = 'points#spend#' if (transaction_type in (None, 'payment', 'spend')) else 'points#'
+            resp = self.part_history.query(
+                KeyConditionExpression=Key('user_id').eq(user_id) & Key('joined_at').begins_with(prefix),
+                ScanIndexForward=False,
+                Limit=limit,
+                ConsistentRead=True,  # 直前の書き込みを確実に拾う
+            )
+
+            txs = []
+            for it in resp.get('Items', []):
+                if not it.get('joined_at','').startswith('points#spend#'):
+                    continue
+                used = int(it.get('points_used') or -int(it.get('delta_points', 0)) or 0)
+                txs.append({
+                    'date': it.get('created_at'),        # 支払日時
+                    'type': 'payment',
+                    'points_used': used,                  # ← 集計はこのキーに寄せる
+                    'points': used,                       # 互換のため残す（UIで使用可）
+                    'delta_points': int(it.get('delta_points', 0)),  # -800 など
+                    'description': it.get('reason', ''),
+                    'event_date': it.get('event_date'),
+                    'payment_type': it.get('payment_type'),
+                    'tx_id': it.get('tx_id'),
+                })
+
+            print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type=payment")
+            return txs
+
+        except Exception as e:
+            print(f"[ERROR] 取引履歴取得エラー: {e}")
+            import traceback; traceback.print_exc()
             return []
 
     def get_point_balance_summary(self, user_id: str):
-        """
-        ポイント収支サマリー
-        
-        Returns:
-            {
-                'total_earned': 8930,  # 総獲得（記録ベース or 計算ベース）
-                'total_spent': 600,    # 総支払い
-                'current_balance': 8330,  # 現在残高
-                'using_calculated_earned': True  # 獲得が計算ベースかどうか
-            }
-        """
         try:
-            # 支払い履歴から集計
-            payments = self.get_user_payment_history(user_id)
-            total_spent = sum(p.get('points_used', 0) for p in payments)
-            
-            # 獲得履歴を試みる
-            earned_records = self.get_point_transactions(user_id, transaction_type='earned')
-            
+            # 消費
+            total_spent = self.calc_total_points_spent(user_id)
+
+            # 獲得（まずは記録ベース）
+            earned_records = self.get_point_transactions(user_id, transaction_type='earned', limit=1000)
             if earned_records:
-                # 記録ベース
-                total_earned = sum(r['points'] for r in earned_records)
+                total_earned = sum(int(r.get('points', 0)) for r in earned_records)
                 using_calculated = False
             else:
-                # 計算ベース（後方互換性）
+                # フォールバック：既存の計算ロジック
                 stats = self.get_user_stats(user_id)
-                total_earned = (stats['participation_points'] + 
-                            stats['streak_points'] + 
-                            stats['monthly_bonus_points'])
+                total_earned = (
+                    int(stats.get('participation_points', 0)) +
+                    int(stats.get('streak_points', 0)) +
+                    int(stats.get('monthly_bonus_points', 0))
+                )
                 using_calculated = True
-            
+
             return {
                 'total_earned': total_earned,
                 'total_spent': total_spent,
                 'current_balance': total_earned - total_spent,
                 'using_calculated_earned': using_calculated
             }
-            
         except Exception as e:
-            print(f"[ERROR] 収支サマリーエラー: {str(e)}")
+            print(f"[ERROR] 収支サマリーエラー: {e}")
             return None
 
     # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
@@ -1365,6 +1340,13 @@ class DynamoDB:
                 'monthly_bonuses': {},
                 'is_junior_high': False
             }
+        
+    def calc_total_points_spent(self, user_id: str) -> int:
+        """消費合計（正の数: 800Pなど）"""
+        txs = self.get_point_transactions(user_id, transaction_type='spend', limit=1000)
+        total = sum(int(t.get('points_used', 0)) for t in txs)
+        print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(txs)}")
+        return total
         
 
 class PointTransaction:

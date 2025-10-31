@@ -161,10 +161,24 @@
         loading="lazy" decoding="async"
         onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
     </span>
-  {% endif %}
+  {% endif %}  
 </div>
 
+<!-- 名前を表示 -->
+<div class="profile-name" style="text-align: center; font-size: 1.5rem; margin-top: 1rem; font-weight: 600;">
+  {{ user.display_name }}
+</div>
+  
+
         <style>
+
+        .profile-name {
+        text-align: center;
+        font-size: 1.5rem;
+        margin-top: 1rem;
+        font-weight: 600;
+        }
+
         /* クリック可能エリアの外枠 */
         .profile-avatar-container {
         display: flex;
@@ -313,38 +327,38 @@
                 display: flex;
                 justify-content: center;
                 gap: 40px;
-                margin-bottom: 1.5rem;
+                margin-bottom: 0.8rem; /* ← 1.5rem → 0.8rem に変更して上下を詰める */
                 flex-wrap: wrap;
             }
+
             .stat-item {
                 text-align: center;
             }
+
             .stat-number {
                 font-size: 1.5rem;
                 font-weight: bold;
                 display: block;
             }
+
             .stat-label {
                 font-size: 0.9rem;
                 color: #6c757d;
             }
 
-            /* 2段構成 */
+            /* 2段構成：上段と下段の間をさらに詰める */
             .profile-stats-group {
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 0.3rem; /* ← 全体の間を少しだけ詰める */
+                gap: 0.3rem; /* ← 全体の上下間隔も軽く調整（以前より詰まり気味に） */
             }
 
-            /* 上段と下段の間だけをさらに詰める */
-            .profile-stats-group .profile-stats + .profile-stats {
-                margin-top: -0.3rem; /* ← ここで上段との距離をさらに詰める */
-            }
-
+            /* モバイル用調整 */
             @media (max-width: 576px) {
                 .profile-stats {
                     gap: 20px;
+                    margin-bottom: 0.5rem; /* ← モバイルはさらに詰める */
                 }
                 .stat-number {
                     font-size: 1.2rem;
@@ -371,33 +385,37 @@
 
                 <!-- 下段：参加回数 -->
                 <!-- 下段：参加情報 -->
-                <div class="profile-stats">
-                <div class="stat-item">
+                <div class="profile-stats-group text-center">
+                <div class="profile-stats justify-content-center">
+                    <div class="stat-item">
                     <span class="stat-number">{{ past_participation_count|default(0, true) }}</span>
                     <span class="stat-label">参加回数</span>
-                </div>
-                <div class="stat-item">
+                    </div>
+                    <div class="stat-item">
                     <span class="stat-number">{{ participation_points|default(0, true) }}</span>
                     <span class="stat-label">うぐポイント</span>
+                    </div>
                 </div>
-                
-               <!-- ポイント参加ボタン（本人のみ表示） -->
+
+                <!-- 改行して「うぐポイントで参加」ボタン -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
                 <div class="mt-3 text-center">
                     <button class="btn btn-point-pay px-4 py-2"
                             data-bs-toggle="modal" 
                             data-bs-target="#pointParticipationModal"
                             {% if participation_points|default(0) < 1 %}disabled{% endif %}>
-                        <i class="fas fa-ticket-alt me-2"></i>
-                        ポイントで支払う
+                    <i class="fas fa-ticket-alt me-2"></i>
+                    うぐポイントで参加
                     </button>
+
                     {% if participation_points|default(0) < 1 %}
                     <div class="text-danger small mt-2">
-                        ポイントが不足しています（現在: {{ participation_points|default(0) }}P）
+                    ポイントが不足しています（現在: {{ participation_points|default(0) }}P）
                     </div>
                     {% endif %}
                 </div>
                 {% endif %}
+                </div>
 
                 <style>
                 .btn-point-pay {
@@ -545,19 +563,23 @@
                 </div>
                 
                 <div class="mb-3">
-                    <label for="event-select" class="form-label">参加する練習日を選択</label>
-                    <select class="form-select" id="event-select" required>
-                        <option value="">選択してください</option>
-                        {% if upcoming_schedules %}
-                            {% for schedule in upcoming_schedules %}
-                            <option value="{{ schedule.schedule_id }}" data-date="{{ schedule.date }}">
-                                {{ schedule.date }} ({{ schedule.day_of_week }}) 
-                                {{ schedule.start_time }}～{{ schedule.end_time }}
-                            </option>
-                            {% endfor %}
-                        {% endif %}
-                    </select>
-                </div>
+                    <label class="form-label d-block">参加する練習日</label>
+
+                    {% if upcoming_schedules %}
+                        {% set s = upcoming_schedules|first %}
+                        <div class="p-3 border rounded bg-light">
+                        <div class="fw-bold">{{ s.date }}（{{ s.day_of_week }}）{{ s.start_time }}～{{ s.end_time }}</div>
+                        </div>
+
+                        <!-- hidden で schedule_id / event_date を埋め込む -->
+                        <input type="hidden" id="event-schedule-id" value="{{ s.schedule_id }}">
+                        <input type="hidden" id="event-date" value="{{ s.date }}">
+                    {% else %}
+                        <div class="alert alert-secondary mb-0">
+                        予約できる練習日は現在ありません。
+                        </div>
+                    {% endif %}
+                    </div>
                 
                 <div class="alert alert-warning small">
                     <i class="fas fa-exclamation-triangle me-1"></i>
@@ -566,8 +588,9 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-                <button type="button" class="btn btn-success" id="confirmPointParticipation">
-                    <span id="confirm-button-text">600P</span>で参加する
+                <button type="button" class="btn btn-success" id="confirmPointParticipation"
+                        {% if not upcoming_schedules %}disabled{% endif %}>
+                <span id="confirm-button-text">600P</span>で参加する
                 </button>
             </div>
         </div>
@@ -575,70 +598,78 @@
 </div>
 
 <script>
-// ポイント入力値が変更されたらボタンのテキストを更新
 document.getElementById('points-cost')?.addEventListener('input', function() {
-    const points = this.value;
-    document.getElementById('confirm-button-text').textContent = points + 'P';
+  const points = this.value;
+  document.getElementById('confirm-button-text').textContent = points + 'P';
 });
 
 document.getElementById('confirmPointParticipation')?.addEventListener('click', async function() {
-    const selectElement = document.getElementById('event-select');
-    const scheduleId = selectElement.value;
-    const eventDate = selectElement.options[selectElement.selectedIndex].getAttribute('data-date'); // ← 追加
-    const pointsCost = parseInt(document.getElementById('points-cost').value);
-    const currentPoints = {{ participation_points|default(0) }};
-    
-    if (!scheduleId) {
-        alert('参加する練習日を選択してください');
-        return;
+  // hiddenから取得
+  const scheduleIdEl = document.getElementById('event-schedule-id');
+  const eventDateEl = document.getElementById('event-date');
+  const scheduleId = scheduleIdEl ? scheduleIdEl.value : '';
+  const eventDate = eventDateEl ? eventDateEl.value : '';
+  const pointsCost = parseInt(document.getElementById('points-cost').value);
+  const currentPoints = {{ participation_points|default(0) }};
+
+  // バリデーション
+  if (!scheduleId || !eventDate) {
+    alert('参加できる練習日がありません');
+    return;
+  }
+  if (!pointsCost || pointsCost <= 0) {
+    alert('消費ポイントは100以上を入力してください');
+    return;
+  }
+  if (pointsCost % 100 !== 0) {
+    alert('消費ポイントは100P単位で入力してください');
+    return;
+  }
+  if (pointsCost > currentPoints) {
+    alert(`ポイントが不足しています（現在: ${currentPoints}P、必要: ${pointsCost}P）`);
+    return;
+  }
+  if (!confirm(`${pointsCost}ポイントを消費して参加しますか？`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch('/uguu/point-participation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: '{{ user["user#user_id"] }}',
+        schedule_id: scheduleId,
+        event_date: eventDate,
+        points_cost: pointsCost
+      })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      alert(`うぐポイントでの支払いが完了しました！（残りポイント: ${result.remaining_points}P）`);
+      location.reload();
+    } else {
+      alert('エラー: ' + (result.error || '支払いに失敗しました'));
     }
-    
-    // バリデーション
-    if (!pointsCost || pointsCost <= 0) {
-        alert('消費ポイントは100以上を入力してください');
-        return;
-    }
-    
-    if (pointsCost % 100 !== 0) {
-        alert('消費ポイントは100P単位で入力してください');
-        return;
-    }
-    
-    if (pointsCost > currentPoints) {
-        alert(`ポイントが不足しています（現在: ${currentPoints}P、必要: ${pointsCost}P）`);
-        return;
-    }
-    
-    if (!confirm(`${pointsCost}ポイントを消費して参加登録しますか？`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/uguu/point-participation', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                user_id: '{{ user["user#user_id"] }}',
-                schedule_id: scheduleId,
-                event_date: eventDate,  // ← 追加
-                points_cost: pointsCost
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            alert(`参加登録が完了しました！（残りポイント: ${result.remaining_points}P）`);
-            location.reload();
-        } else {
-            alert('エラー: ' + (result.error || '参加登録に失敗しました'));
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('通信エラーが発生しました');
-    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('通信エラーが発生しました');
+  }
+});
+
+</script>
+
+<script>
+fetch("{{ url_for('users.point_participation') }}", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    user_id: "{{ current_user.id }}",
+    event_date: selectedDate, // "2025-11-03"
+    points_cost: 600
+  })
 });
 </script>
 
