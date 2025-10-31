@@ -64,6 +64,7 @@ def user_profile(user_id):
             following_count=0,
             is_admin=is_admin,
             admin_participation_dates=admin_participation_dates,
+            days_until_reset=user_stats.get('days_until_reset'),
             upcoming_schedules=upcoming_schedules
         )
 

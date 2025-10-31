@@ -1124,6 +1124,12 @@ def join_schedule(schedule_id):
             participants.remove(current_user.id)
             message = "参加をキャンセルしました"
             is_joining = False
+            
+            # ★★★ ここに追加：bad-users-historyのstatusを更新 ★★★
+            db.cancel_participation(current_user.id, date)
+            app.logger.info(f"✓ ユーザー {current_user.id} の参加履歴をキャンセル済みに更新しました (date={date})")
+            # ★★★ ここまで追加 ★★★
+            
         else:
             participants.append(current_user.id)
             message = "参加登録が完了しました！"
@@ -1144,7 +1150,8 @@ def join_schedule(schedule_id):
                             "joined_at": datetime.utcnow().isoformat(),
                             "schedule_id": schedule_id,
                             "date": date,
-                            "location": schedule.get("location", "未設定")
+                            "location": schedule.get("location", "未設定"),
+                            "status": "registered"  # ★★★ これも追加 ★★★
                         }
                     )
                 except Exception as e:
