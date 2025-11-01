@@ -399,40 +399,49 @@
 
                 <!-- うぐポイント表示の下に追加 -->
                 <div class="card mb-3">
-                    <div class="card-body">
-                        <h5 class="card-title">うぐポイント</h5>
-                        <p class="display-4">{{ participation_points }}P</p>
-                        
-                        {% if days_until_reset is not none %}
-                            {% if days_until_reset <= 0 %}
-                                <!-- 失効している場合 -->
-                                <div class="alert alert-danger" role="alert">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <strong>ポイントが失効しています</strong><br>
-                                    次回参加でリセットされ、新たにポイントが貯まります
-                                </div>
-                            {% elif days_until_reset <= 10 %}
-                                <!-- 10日以下：危険 -->
-                                <div class="alert alert-danger" role="alert">
-                                    <i class="fas fa-exclamation-circle"></i>
-                                    <strong>危険！</strong> ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
-                                </div>
-                            {% elif days_until_reset <= 20 %}
-                                <!-- 20日以下：注意 -->
-                                <div class="alert alert-warning" role="alert">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
-                                </div>
-                            {% else %}
-                                <!-- 21日以上：通常 -->
-                                <div class="alert alert-info" role="alert">
-                                    <i class="fas fa-info-circle"></i>
-                                    次回参加まで {{ days_until_reset }}日
-                                </div>
-                            {% endif %}
-                        {% endif %}
-                    </div>
-                </div>              
+  <div class="card-body d-flex flex-column flex-md-row gap-3 align-items-stretch">
+
+    <!-- 左：参加回数 -->
+    <div class="ug-stat-box text-center d-flex flex-column justify-content-center px-3 py-2">
+      <div class="stat-item mb-0">
+        <span class="stat-number d-block">{{ past_participation_count|default(0, true) }}</span>
+        <span class="stat-label">参加回数</span>
+      </div>
+    </div>
+
+    <!-- 右：うぐポイント -->
+    <div class="flex-grow-1">
+      <h5 class="card-title mb-2">うぐポイント</h5>
+      <p class="display-4 mb-3">{{ participation_points }}P</p>
+
+      {% if days_until_reset is not none %}
+        {% if days_until_reset <= 0 %}
+          <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>ポイントが失効しています</strong><br>
+            次回参加でリセットされ、新たにポイントが貯まります
+          </div>
+        {% elif days_until_reset <= 10 %}
+          <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-circle"></i>
+            <strong>危険！</strong> ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
+          </div>
+        {% elif days_until_reset <= 20 %}
+          <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
+          </div>
+        {% else %}
+          <div class="alert alert-info" role="alert">
+            <i class="fas fa-info-circle"></i>
+            次回参加まで {{ days_until_reset }}日
+          </div>
+        {% endif %}
+      {% endif %}
+    </div>
+
+  </div>
+</div>          
 
                 <!-- 改行して「うぐポイントで参加」ボタン -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
