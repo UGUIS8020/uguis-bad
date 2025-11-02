@@ -2,9 +2,18 @@ from flask import Blueprint, render_template, flash, redirect, url_for, jsonify,
 from flask_login import login_required, current_user
 from .dynamo import db
 from datetime import datetime, date
-
+import boto3
+import os
 # Blueprintの作成
 users = Blueprint('users', __name__)
+
+# DynamoDB (管理人付与ポイント用)
+dynamodb = boto3.resource(
+    "dynamodb",
+    region_name=os.getenv("AWS_REGION", "ap-northeast-1"),
+)
+UGU_POINTS_TABLE = os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points")
+UGU_PARTICIPATION_TABLE = "bad-users-history" 
 
 @users.route('/user/<user_id>')
 def user_profile(user_id):
@@ -134,3 +143,66 @@ def point_participation():
         print(f"[ERROR] ポイント支払いエラー: {e}")
         import traceback; traceback.print_exc()
         return jsonify({'error': '内部エラー'}), 500
+    
+@users.route("/admin/users/<user_id>/add-point", methods=["POST"])
+@login_required
+def add_point(user_id):
+    # 管理者だけ
+    if not getattr(current_user, "administrator", False):
+        flash("権限がありません", "danger")
+        return redirect(url_for("users.user_profile", user_id=user_id))
+
+    # フォームから取得
+    points = int(request.form.get("points", "0"))
+    reason = request.form.get("reason", "").strip()
+    effective_at_str = request.form.get("effective_at", "").strip()
+
+    # 日時パース
+    if effective_at_str:
+        try:
+            effective_at = datetime.strptime(effective_at_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            # datetime-local の場合
+            effective_at = datetime.strptime(effective_at_str, "%Y-%m-%dT%H:%M")
+    else:
+        # 指定がなければ「いま」を有効日時にする
+        effective_at = datetime.utcnow()
+
+    now_utc = datetime.utcnow()
+    point_id = f"POINT#{now_utc.isoformat()}"
+
+    # ① ポイントテーブルに書く
+    points_table = dynamodb.Table(UGU_POINTS_TABLE)
+    points_item = {
+        "user_id": user_id,
+        "point_id": point_id,
+        "points": points,
+        "reason": reason or "管理人付与",
+        "created_at": now_utc.isoformat(),
+        "effective_at": effective_at.isoformat(),
+        "created_by": getattr(current_user, "email", "admin"),
+        "source": "admin_manual",
+    }
+    points_table.put_item(Item=points_item)
+
+    # ② 40日ルール用に「参加したことにする」ダミー行を履歴に追加
+    participation_table = dynamodb.Table(UGU_PARTICIPATION_TABLE)
+
+    # 参加日として使うのは有効日時の日付
+    event_date_str = effective_at.strftime("%Y-%m-%d")
+    joined_at_str = effective_at.isoformat()
+
+    participation_item = {
+        "user_id": user_id,
+        "date": event_date_str,                        # ← get_user_participation_history_with_timestamp が見る日付
+        "joined_at": joined_at_str,                    # ← sort key がこれならここがキーになる
+        "schedule_id": f"MANUALPOINT#{point_id}",      # ダミー
+        "location": "管理人ポイント付与",
+        "status": "active",
+        "action": "admin_manual_point",                # ログでわかるようにしておく
+        "source": "admin_manual_point",
+    }
+    participation_table.put_item(Item=participation_item)
+
+    flash("ポイントを付与しました。", "success")
+    return redirect(url_for("users.user_profile", user_id=user_id))
