@@ -1141,7 +1141,10 @@ class DynamoDB:
     def get_user_stats(self, user_id: str):
         """
         うぐポイントを計算（中学生は半分のポイント）
-        40日間参加がないと全ポイントリセット
+        
+        【重要な仕様】
+        - 参加回数表示：40日ルール適用外（全履歴をカウント）
+        - ポイント計算：40日ルール適用（40日以上空いたらリセット）
         """
         try:
             from collections import defaultdict
@@ -1169,6 +1172,7 @@ class DynamoDB:
                     'streak_points': 0,
                     'monthly_bonus_points': 0,
                     'cumulative_bonus_points': 0,
+                    'points_used': 0,
                     'total_participation': 0,
                     'last_participation_date': None,
                     'current_streak_start': None,
@@ -1177,8 +1181,10 @@ class DynamoDB:
                     'monthly_bonuses': {},
                     'early_registration_count': 0,
                     'super_early_registration_count': 0,
+                    'direct_registration_count': 0,
                     'is_junior_high': is_junior_high,
-                    'is_reset': False
+                    'is_reset': False,
+                    'days_until_reset': None
                 }
             
             # 参加履歴を処理
@@ -1197,10 +1203,37 @@ class DynamoDB:
                     print(f"[WARN] 不正なレコード形式: {record}, エラー: {e}")
             
             participation_records.sort(key=lambda x: x['event_date'])
+
+            total_participation_all_time = len(participation_records)
+            print(f"\n[DEBUG] 📊 全参加回数（表示用）: {total_participation_all_time}回")
+
+            # ===== 【ここに追加】全履歴からの早期登録カウント =====
+            all_time_early_count = 0
+            all_time_super_early_count = 0
+            all_time_direct_count = 0
+
+            for record in participation_records:  # 全履歴
+                base_points = self._is_early_registration(record)
+                if base_points == 100:
+                    all_time_super_early_count += 1
+                    all_time_early_count += 1
+                elif base_points == 50:
+                    all_time_early_count += 1
+                elif base_points == 20:
+                    all_time_direct_count += 1
+
+            print(f"[DEBUG] 全履歴の早期登録: 7日前={all_time_super_early_count}回, 6-3日前={all_time_early_count - all_time_super_early_count}回, 2-前日={all_time_direct_count}回")
+
+            # ===== 40日ルールチェック：ポイント計算用のリセット判定 =====
+            print(f"\n[DEBUG] === 40日ルールチェック（ポイント計算用） ===")
             
-            # ===== 40日ルールチェック：リセット判定 =====
-            print(f"\n[DEBUG] === 40日ルールチェック ===")
-            last_reset_index = 0  # 有効な参加履歴の開始インデックス
+            # ===== 【重要】全参加回数を保存（40日ルール適用前） =====
+            total_participation_all_time = len(participation_records)
+            print(f"\n[DEBUG] 📊 全参加回数（表示用）: {total_participation_all_time}回")
+            
+            # ===== 40日ルールチェック：ポイント計算用のリセット判定 =====
+            print(f"\n[DEBUG] === 40日ルールチェック（ポイント計算用） ===")
+            last_reset_index = 0  # ポイント計算の開始位置
             is_reset = False
             
             for i in range(1, len(participation_records)):
@@ -1211,30 +1244,31 @@ class DynamoDB:
                 if days_diff > 40:
                     print(f"[DEBUG] ⚠️ 40日以上の空白期間検出（{days_diff}日）")
                     print(f"[DEBUG]   {previous_date.strftime('%Y-%m-%d')} → {current_date.strftime('%Y-%m-%d')}")
-                    print(f"[DEBUG]   → {current_date.strftime('%Y-%m-%d')}以降のみ有効")
-                    last_reset_index = i  # この位置以降のみ有効
+                    print(f"[DEBUG]   → ポイントは{current_date.strftime('%Y-%m-%d')}以降のみ計算")
+                    last_reset_index = i  # この位置以降のみポイント計算
                     is_reset = True
             
+            # ポイント計算用の履歴を作成（40日ルール適用後）
             if last_reset_index > 0:
-                print(f"[DEBUG] 💥 ポイントリセット：{participation_records[last_reset_index]['event_date'].strftime('%Y-%m-%d')}以降の{len(participation_records) - last_reset_index}回の参加のみ計算")
-                participation_records = participation_records[last_reset_index:]  # 有効な期間のみに絞る
+                participation_records_for_points = participation_records[last_reset_index:]
+                print(f"[DEBUG] 💥 ポイントリセット：{participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')}以降の{len(participation_records_for_points)}回のみポイント計算")
+                print(f"[DEBUG] 📊 参加回数表示：全{total_participation_all_time}回（リセット前も含む）")
             else:
-                print(f"[DEBUG] ✅ リセットなし：全ての参加履歴（{len(participation_records)}回）が有効")
+                participation_records_for_points = participation_records
+                print(f"[DEBUG] ✅ リセットなし：全ての参加履歴（{total_participation_all_time}回）が有効")
             
-            total_participation = len(participation_records)
-            
-            # 参加日のセットを作成（連続チェック用）
+            # 参加日のセットを作成（連続チェック用）- ポイント計算用の履歴から作成
             user_participated_dates = set()
-            for record in participation_records:
+            for record in participation_records_for_points:
                 user_participated_dates.add(record['event_date'].strftime('%Y-%m-%d'))
             
-            # ===== 参加ポイント（係数適用） =====
+            # ===== 参加ポイント（係数適用、40日ルール適用後） =====
             participation_points = 0
             early_registration_count = 0
             super_early_registration_count = 0
             direct_registration_count = 0
 
-            for record in participation_records:
+            for record in participation_records_for_points:
                 base_points = self._is_early_registration(record)
                 points = int(base_points * point_multiplier)
                 participation_points += points
@@ -1247,21 +1281,22 @@ class DynamoDB:
                 elif base_points == 20:
                     direct_registration_count += 1
 
-            print(f"\n[DEBUG] 参加ポイント合計: {participation_points}P")
+            print(f"\n[DEBUG] === 参加ポイント（40日ルール適用後） ===")
+            print(f"[DEBUG] 参加ポイント合計: {participation_points}P")
             if is_junior_high:
                 print(f"  └ 中学生係数 {point_multiplier}倍 適用済み")
             print(f"  └ 7日前登録: {super_early_registration_count}回 × {int(100 * point_multiplier)}P")
             print(f"  └ 6～3日前登録: {early_registration_count - super_early_registration_count}回 × {int(50 * point_multiplier)}P")
             print(f"  └ 2～前日登録: {direct_registration_count}回 × {int(20 * point_multiplier)}P")
-            print(f"  └ 当日登録: {total_participation - early_registration_count - direct_registration_count}回 × 0P")
+            print(f"  └ 当日登録: {len(participation_records_for_points) - early_registration_count - direct_registration_count}回 × 0P")
             
-            # ===== 連続ポイント（スケジュールベース、係数適用） =====            
+            # ===== 連続ポイント（スケジュールベース、係数適用、40日ルール適用後） =====            
             today = datetime.now().date()
             all_schedules = self.get_all_past_schedules(today)
             
             # リセット後の最初の日付以降のスケジュールのみ対象
             if last_reset_index > 0:
-                reset_date = participation_records[0]['event_date'].strftime('%Y-%m-%d')
+                reset_date = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
                 all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
                 print(f"\n[DEBUG] === 連続参加チェック（{reset_date}以降のスケジュールのみ） ===")
             else:
@@ -1341,13 +1376,13 @@ class DynamoDB:
             print(f"[DEBUG] 現在の連続: {current_streak}回")
             print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
             
-            # ===== 月間ボーナス（係数適用） =====
+            # ===== 月間ボーナス（係数適用、40日ルール適用後） =====
             monthly_participation = defaultdict(int)
-            for record in participation_records:
+            for record in participation_records_for_points:
                 month_key = record['event_date'].strftime("%Y-%m")
                 monthly_participation[month_key] += 1
             
-            print(f"\n[DEBUG] === 月間ボーナス計算 ===")
+            print(f"\n[DEBUG] === 月間ボーナス計算（40日ルール適用後） ===")
             for month, count in sorted(monthly_participation.items()):
                 print(f"[DEBUG] 月別参加回数 - {month}: {count}回")
             
@@ -1378,13 +1413,13 @@ class DynamoDB:
                 
                 monthly_bonus_points += bonus
             
-            # ===== 累計参加ボーナス（40日ルール適用済み） =====
-            print(f"\n[DEBUG] === 累計参加ボーナス計算 ===")
+            # ===== 累計参加ボーナス（40日ルール適用後） =====
+            print(f"\n[DEBUG] === 累計参加ボーナス計算（40日ルール適用後） ===")
             cumulative_count = 0
             cumulative_bonus_points = 0
             cumulative_milestones = []
 
-            for record in participation_records:
+            for record in participation_records_for_points:
                 event_date = record['event_date']
                 cumulative_count += 1
                 
@@ -1400,19 +1435,19 @@ class DynamoDB:
                     print(f"[DEBUG] {event_date.strftime('%Y-%m-%d')} - 累計{cumulative_count}回達成 → +{bonus}P 🎊")
 
             print(f"[DEBUG] 累計参加ボーナス合計: {cumulative_bonus_points}P")
-            print(f"[DEBUG] 現在の累計: {cumulative_count}回")
+            print(f"[DEBUG] ポイント計算用累計: {cumulative_count}回（40日ルール適用後）")
             if cumulative_milestones:
                 print(f"[DEBUG] 達成マイルストーン数: {len(cumulative_milestones)}個")
             
-            # ===== ポイント消費の集計 =====
-            print(f"\n[DEBUG] === ポイント消費チェック ===")
+            # ===== ポイント消費の集計（40日ルール適用後） =====
+            print(f"\n[DEBUG] === ポイント消費チェック（40日ルール適用後） ===")
             total_points_used = 0
 
             # 新しい支払い記録から集計（リセット後のもののみ）
             payments = self.get_user_payment_history(user_id)
             
             if last_reset_index > 0:
-                reset_date_str = participation_records[0]['event_date'].strftime('%Y-%m-%d')
+                reset_date_str = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
                 payments = [p for p in payments if p.get('event_date', '9999-99-99') >= reset_date_str]
                 print(f"[DEBUG] {reset_date_str}以降の支払いのみ集計")
             
@@ -1426,13 +1461,14 @@ class DynamoDB:
 
             print(f"[DEBUG] 合計ポイント消費: {total_points_used}P")
 
+            # ===== 失効カウントダウン（全履歴の最終参加日から計算） =====
             days_until_reset = None
             last_participation_date_obj = None
 
-            if participation_records:
+            if participation_records:  # 全履歴の最後を使用
                 last_participation_date_obj = participation_records[-1]['event_date']
-                today = datetime.now()
-                days_since_last = (today - last_participation_date_obj).days
+                today_datetime = datetime.now()
+                days_since_last = (today_datetime - last_participation_date_obj).days
                 days_until_reset = 40 - days_since_last
                 
                 print(f"\n[DEBUG] === 失効カウントダウン ===")
@@ -1451,29 +1487,39 @@ class DynamoDB:
             uguu_points = participation_points + streak_points + monthly_bonus_points + cumulative_bonus_points - total_points_used
 
             result = {
-                'uguu_points': uguu_points,
-                'participation_points': participation_points,
-                'streak_points': streak_points,
-                'monthly_bonus_points': monthly_bonus_points,
-                'cumulative_bonus_points': cumulative_bonus_points,
-                'points_used': total_points_used,
-                'total_participation': total_participation,
-                'early_registration_count': early_registration_count,
-                'super_early_registration_count': super_early_registration_count,
-                'direct_registration_count': direct_registration_count,
-                'last_participation_date': participation_records[-1]['event_date'].strftime('%Y-%m-%d') if participation_records else None,
-                'current_streak_start': streak_start if streak_start else None,
-                'current_streak_count': current_streak,
-                'cumulative_count': cumulative_count,
-                'monthly_bonuses': monthly_bonuses,
-                'is_junior_high': is_junior_high,
-                'is_reset': is_reset,
-                'days_until_reset': days_until_reset
-            }
+            'uguu_points': uguu_points,
+            'participation_points': participation_points,
+            'streak_points': streak_points,
+            'monthly_bonus_points': monthly_bonus_points,
+            'cumulative_bonus_points': cumulative_bonus_points,
+            'points_used': total_points_used,
+            'total_participation': total_participation_all_time,
+            
+            # ポイント計算用の早期登録カウント（40日ルール適用後）
+            'early_registration_count': early_registration_count,
+            'super_early_registration_count': super_early_registration_count,
+            'direct_registration_count': direct_registration_count,
+            
+            # 【追加】全履歴の早期登録カウント（40日ルール適用外）
+            'all_time_early_registration_count': all_time_early_count,
+            'all_time_super_early_registration_count': all_time_super_early_count,
+            'all_time_direct_registration_count': all_time_direct_count,
+            
+            'last_participation_date': participation_records[-1]['event_date'].strftime('%Y-%m-%d') if participation_records else None,
+            'current_streak_start': streak_start if streak_start else None,
+            'current_streak_count': current_streak,
+            'cumulative_count': cumulative_count,
+            'monthly_bonuses': monthly_bonuses,
+            'is_junior_high': is_junior_high,
+            'is_reset': is_reset,
+            'days_until_reset': days_until_reset
+        }
 
             print(f"\n[DEBUG] === 最終結果 ===")
+            print(f"  📊 表示用参加回数: {total_participation_all_time}回（全履歴）")
             if is_reset:
-                print(f"  ⚠️ 40日ルールによりリセット適用済み")
+                print(f"  ⚠️ ポイントは40日ルールによりリセット適用済み")
+                print(f"  💰 ポイント計算用参加: {len(participation_records_for_points)}回")
             if is_junior_high:
                 print(f"  【中学生モード】係数: {point_multiplier}倍")
             print(f"  参加ポイント: {participation_points}P")
@@ -1482,7 +1528,7 @@ class DynamoDB:
             print(f"  累計ボーナス: {cumulative_bonus_points}P")
             print(f"  ポイント消費: -{total_points_used}P")
             print(f"  ━━━━━━━━━━━━━━━━━━")
-            print(f"  合計: {uguu_points}P")
+            print(f"  合計うぐポイント: {uguu_points}P")
             print("=" * 80)
 
             return result
@@ -1497,16 +1543,19 @@ class DynamoDB:
                 'streak_points': 0,
                 'monthly_bonus_points': 0,
                 'cumulative_bonus_points': 0,
+                'points_used': 0,
                 'total_participation': 0,
                 'early_registration_count': 0,
                 'super_early_registration_count': 0,
+                'direct_registration_count': 0,
                 'last_participation_date': None,
                 'current_streak_start': None,
                 'current_streak_count': 0,
                 'cumulative_count': 0,
                 'monthly_bonuses': {},
                 'is_junior_high': False,
-                'is_reset': False
+                'is_reset': False,
+                'days_until_reset': None
             }
         
     def calc_total_points_spent(self, user_id: str) -> int:
