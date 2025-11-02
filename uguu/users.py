@@ -4,6 +4,10 @@ from .dynamo import db
 from datetime import datetime, date
 import boto3
 import os
+
+print("[DEBUG] AWS_REGION =", os.getenv("AWS_REGION"))
+print("[DEBUG] DYNAMO_UGU_POINTS_TABLE =", os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points"))
+
 # Blueprintの作成
 users = Blueprint('users', __name__)
 
