@@ -45,6 +45,7 @@ from wtforms.validators import (
 )
 
 # --- アプリ内モジュール ---
+from utils import db
 from utils.db import (
     get_schedule_table,
     get_schedules_with_formatting,
