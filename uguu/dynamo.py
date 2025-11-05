@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
+from utils.points import record_spend
 
 dynamodb = boto3.resource(
     "dynamodb",
@@ -1001,45 +1002,37 @@ class DynamoDB:
         return self.get_point_transactions(user_id, transaction_type='payment') 
 
         
-    def record_payment(self, user_id: str, event_date: str, points_used: int,
-                   payment_type: str = 'event_participation', description: str = None):
+    def record_spend(history_table, *, user_id: str, points_used: int,
+                 event_date: str, payment_type: str = "event_participation",
+                 reason: str | None = None, created_by: str | None = None):
         """
-        ポイント支払い（消化）を bad-users-history に記録
+        bad-users-history に消費(spend)トランザクションを1件保存する。
         """
-        try:
-            now = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
-            tx_id = str(uuid4())
-            # SK=joined_at を「タイプ#時刻#txid」で時系列＆一意
-            joined_at = f'points#spend#{now}#{tx_id}'
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        tx_id = str(uuid4())
+        joined_at = f"points#spend#{now}#{tx_id}"
 
-            item = {
-                'user_id': user_id,          # PK
-                'joined_at': joined_at,      # SK
-                'tx_id': tx_id,
-                'kind': 'spend',             # earn|spend|adjust
-                'delta_points': -int(points_used),   # 残高計算はこの合計でOK
-                'points_used': int(points_used),     # 互換のため残すなら
-                'payment_type': payment_type,
-                'event_date': event_date,
-                'reason': description or f"{event_date}の参加費",
-                'created_at': now,
-                'entity_type': 'point_transaction',  # 任意（監査用）
-                'version': 1,
-            }
+        item = {
+            "user_id": user_id,
+            "joined_at": joined_at,
+            "tx_id": tx_id,
+            "kind": "spend",                     # earn|spend|adjust
+            "delta_points": -int(points_used),   # 残高計算用（負）
+            "points_used": int(points_used),     # 互換のため（正）
+            "payment_type": payment_type,
+            "event_date": event_date,
+            "reason": reason or f"{event_date}の参加費",
+            "created_at": now,
+            "entity_type": "point_transaction",
+            "version": 1,
+        }
 
-            # 上書き防止
-            self.part_history.put_item(
-                Item=item,
-                ConditionExpression='attribute_not_exists(user_id) AND attribute_not_exists(joined_at)'
-            )
-
-            print(f"[SUCCESS] 支払い記録保存 - user_id={user_id}, event_date={event_date}, points={points_used}P")
-            return True
-
-        except Exception as e:
-            print(f"[ERROR] 支払い記録エラー: {e}")
-            import traceback; traceback.print_exc()
-            return False
+        # 一意化（同じPK/SKの重複防止）
+        history_table.put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(joined_at)"
+        )
+        return item
         
     def record_point_earned(self, user_id: str, event_date: str,
                         points: int, earn_type: str,
@@ -1075,6 +1068,25 @@ class DynamoDB:
 
         except Exception as e:
             print(f"[ERROR] 獲得記録エラー: {e}")
+            import traceback; traceback.print_exc()
+            return False
+        
+    def record_payment(self, user_id: str, event_date: str, points_used: int,
+                    payment_type: str = "event_participation", description: str = None):
+        try:
+            record_spend(
+                self.part_history,
+                user_id=user_id,
+                points_used=points_used,
+                event_date=event_date,
+                payment_type=payment_type,
+                reason=description,
+                created_by=None
+            )
+            print(f"[SUCCESS] 支払い記録保存 - user_id={user_id}, event_date={event_date}, points={points_used}P")
+            return True
+        except Exception as e:
+            print(f"[ERROR] 支払い記録エラー: {e}")
             import traceback; traceback.print_exc()
             return False
         
@@ -1143,33 +1155,94 @@ class DynamoDB:
             print(f"[ERROR] 収支サマリーエラー: {e}")
             return None
         
-    def get_manual_points(self, user_id: str) -> int:
+    def get_manual_points(self, user_id: str, reset_date: str | None = None) -> int:
         """
-        管理人が手で付けたポイントを合計して返す。
-        effective_at が未来のものはまだ反映しない。
+        管理人付与ポイント合計（ledger集計）
+        - bad-users-history の "earn" かつ joined_at が "points#earn#" で始まる
+        - earn_type=="manual" または source=="admin_manual" を対象
+        - reset_date があれば event_date >= reset_date のみカウント
+        ※ 旧: ugu_points は参照しない
         """
-        table = dynamodb.Table(UGU_POINTS_TABLE)
+        table = self.part_history  # boto3.resource('dynamodb').Table('bad-users-history')
+        total = 0
+
         resp = table.query(
-            KeyConditionExpression=Key("user_id").eq(user_id)
+            KeyConditionExpression=Key("user_id").eq(user_id) &
+                                Key("joined_at").begins_with("points#earn#"),
+            ScanIndexForward=True
         )
         items = resp.get("Items", [])
-        total = 0
-        now = datetime.utcnow()
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) &
+                                    Key("joined_at").begins_with("points#earn#"),
+                ScanIndexForward=True,
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
 
         for it in items:
-            pts = int(it.get("points", 0))
-            eff = it.get("effective_at")
-            if eff:
-                try:
-                    eff_dt = datetime.fromisoformat(eff)
-                except ValueError:
-                    eff_dt = now
-                # 未来日時はまだ反映しない
-                if eff_dt > now:
-                    continue
-            total += pts
+            if it.get("kind") != "earn":
+                continue
+            if not (it.get("earn_type") == "manual" or it.get("source") == "admin_manual"):
+                continue
+            if reset_date and it.get("event_date", "") < reset_date:
+                continue
 
+            val = it.get("delta_points")
+            if val is None:
+                val = it.get("points", 0)  # 念のため互換
+            try:
+                total += int(val)
+            except Exception:
+                pass
+
+        print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
         return total
+    
+    def list_point_spends(self, user_id: str, limit: int = 20):
+        """
+        bad-users-history から支払(消費)の直近履歴を返す。
+        必ず list を返す（例外・0件時は []）。
+        返す要素: {event_date, amount, reason, created_at, tx_id, joined_at}
+        """
+        try:
+            resp = self.part_history.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with("points#spend#"),
+                ScanIndexForward=False,  # 新しい順
+                Limit=limit
+            )
+            items = resp.get("Items", [])
+            out = []
+            for it in items:
+                # amount は points_used 優先、なければ delta_points (負数) を反転して正数に
+                amt = it.get("points_used")
+                if amt is None:
+                    dp = int(it.get("delta_points", 0))
+                    amt = -dp if dp < 0 else 0
+                out.append({
+                    "event_date": it.get("event_date"),
+                    "amount": int(amt or 0),
+                    "reason": it.get("reason", "参加費"),
+                    "created_at": it.get("created_at"),
+                    "tx_id": it.get("tx_id"),
+                    "joined_at": it.get("joined_at"),
+                })
+            return out
+        except Exception as e:
+            print(f"[WARN] list_point_spends failed: {e}")
+            return []
+
+    def debug_list_spend(self, user_id: str, since: str | None = None) -> int:
+        """
+        上の list_point_spends を使ってログ出力も行う簡易版（開発時に手早く確認用）。
+        戻り値: 合計消費ポイント
+        """
+        result = self.list_point_spends(user_id, since=since)
+        for row in result["items"]:
+            print("[SPEND]", row["event_date"], f"-{row['used_points']}P", row.get("reason", ""), row["joined_at"])
+        print("== 消費合計:", result["total_spent"], "P ==")
+        return result["total_spent"]
 
     # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
     def get_user_stats(self, user_id: str):
@@ -1569,11 +1642,46 @@ class DynamoDB:
                 'days_until_reset': None
             }
         
-    def calc_total_points_spent(self, user_id: str) -> int:
-        """消費合計（正の数: 800Pなど）"""
-        txs = self.get_point_transactions(user_id, transaction_type='spend', limit=1000)
-        total = sum(int(t.get('points_used', 0)) for t in txs)
-        print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(txs)}")
+    def calc_total_points_spent(self, user_id: str, since: str | None = None) -> int:
+        """
+        消費合計（正の数: 800 など）。
+        - kind=spend の台帳を直接読み、points_used が無ければ delta_points(<0) を反転して加算。
+        - since = 'YYYY-MM-DD' を渡すと、その日付以降の支払いだけ合計。
+        """
+        t = self.part_history  # bad-users-history テーブル想定
+        total = 0
+
+        rs = t.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) &
+                                Key("joined_at").begins_with("points#spend#"),
+            ScanIndexForward=True,  # 昇順
+        )
+        items = rs.get("Items", [])
+        while "LastEvaluatedKey" in rs:
+            rs = t.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) &
+                                    Key("joined_at").begins_with("points#spend#"),
+                ScanIndexForward=True,
+                ExclusiveStartKey=rs["LastEvaluatedKey"],
+            )
+            items += rs.get("Items", [])
+
+        for it in items:
+            # 期間フィルタ（40日リセット以降だけ数えたい時に使う）
+            if since and it.get("event_date", "0000-00-00") < since:
+                continue
+
+            used = int(it.get("points_used", 0))
+            if used <= 0:
+                dp = int(it.get("delta_points", 0))
+                if dp < 0:
+                    used = -dp  # 例: delta_points=-600 → used=600
+
+            if used > 0:
+                total += used
+
+        print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(items)}"
+            + (f" / since={since}" if since else ""))
         return total
         
 

@@ -796,13 +796,29 @@ def get_all_users_dict():
         return {}
 
 @app.template_filter('format_date')
-def format_date(value):
-    """日付を 'MM/DD' 形式にフォーマット"""
+def format_date(value, fmt='%m/%d'):
+    """
+    日付文字列/ISO文字列を受け取り、指定フォーマットで返す。
+    既定は 'MM/DD'。例: {{ value|format_date('%Y年%m月%d日') }}
+    """
+    if not value:
+        return value
+    s = str(value)
+
+    # まず先頭10桁 'YYYY-MM-DD' を優先的に解釈
     try:
-        date_obj = datetime.fromisoformat(value)  # ISO 形式から日付オブジェクトに変換
-        return date_obj.strftime('%m/%d')        # MM/DD フォーマットに変換
-    except ValueError:
-        return value  # 変換できない場合はそのまま返す   
+        dt = datetime.strptime(s[:10], "%Y-%m-%d")
+    except Exception:
+        # ダメなら ISO8601 を試す（Z -> +00:00）
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return value  # どれもダメなら原文返し
+
+    try:
+        return dt.strftime(fmt)
+    except Exception:
+        return value
 
 
 @app.route('/schedules')

@@ -441,6 +441,37 @@
     </div>
 
   </div>
+
+  <!-- ▼ポイント支払い履歴（直近） -->
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>ポイント支払い履歴</span>
+    <small class="text-muted">
+      直近 {{ point_spends|length }} 件 / 合計 {{ point_total_spent_recent|default(0) }}P
+    </small>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      
+      {% for tx in point_spends %}
+        <tr>
+          <td>             
+            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}          
+          </td>
+          <td class="fw-bold">-{{ tx.amount }}P</td>          
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="3" class="text-muted">支払い履歴はまだありません。</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- ▲ポイント支払い履歴（直近） -->
+
 </div>          
 
                 <!-- 改行して「うぐポイントで参加」ボタン -->

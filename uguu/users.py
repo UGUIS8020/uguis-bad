@@ -1,23 +1,65 @@
-from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request
+from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app
 from flask_login import login_required, current_user
-from .dynamo import db
 from datetime import datetime, date
-import boto3
 import os
+import boto3
+
+# ❶ Blueprint は一番最初に作る（route より前）
+users = Blueprint('users', __name__)
+
+# ❷ 以降に他の import（循環回避のためなるべく上に集約しすぎない）
+from .dynamo import db
+from utils.points import record_earn
 
 print("[DEBUG] AWS_REGION =", os.getenv("AWS_REGION"))
 print("[DEBUG] DYNAMO_UGU_POINTS_TABLE =", os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points"))
 
-# Blueprintの作成
-users = Blueprint('users', __name__)
-
-# DynamoDB (管理人付与ポイント用)
-dynamodb = boto3.resource(
-    "dynamodb",
-    region_name=os.getenv("AWS_REGION", "ap-northeast-1"),
-)
+# ❸ 定数
 UGU_POINTS_TABLE = os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points")
-UGU_PARTICIPATION_TABLE = "bad-users-history" 
+UGU_PARTICIPATION_TABLE = "bad-users-history"
+
+# ❹ ルート定義（ここから下で @users.route を使う）
+@users.route("/admin/users/<user_id>/add-point", methods=["POST"])
+@login_required
+def add_point(user_id):
+    if not getattr(current_user, "administrator", False):
+        flash("権限がありません", "danger")
+        return redirect(url_for("users.user_profile", user_id=user_id))
+
+    points = int(request.form.get("points", "0"))
+    reason = (request.form.get("reason") or "管理人付与").strip()
+    effective_at_str = (request.form.get("effective_at") or "").strip()
+
+    # 付与日
+    if effective_at_str:
+        try:
+            dt = datetime.strptime(effective_at_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            dt = datetime.strptime(effective_at_str, "%Y-%m-%dT%H:%M")
+    else:
+        dt = datetime.utcnow()
+    event_date = dt.strftime("%Y-%m-%d")
+
+    # app → current_app
+    history_table = current_app.dynamodb.Table(UGU_PARTICIPATION_TABLE)
+
+    try:
+        record_earn(
+            history_table,
+            user_id=user_id,
+            points=points,
+            event_date=event_date,
+            reason=reason,
+            source="admin_manual",
+            created_by=getattr(current_user, "email", "admin"),
+        )
+        flash("ポイントを付与しました。", "success")
+    except Exception:
+        current_app.logger.exception("ポイント付与の保存に失敗")
+        flash("ポイント付与の保存に失敗しました。", "danger")
+
+    return redirect(url_for("users.user_profile", user_id=user_id))
+
 
 @users.route('/user/<user_id>')
 def user_profile(user_id):
@@ -39,6 +81,9 @@ def user_profile(user_id):
 
         # 統計（ポイント/参加回数）
         user_stats = db.get_user_stats(user_id)
+
+        point_spends = db.list_point_spends(user_id, limit=20)  # 新規に実装したメソッド
+        point_total_spent_recent = sum(s.get("amount", 0) for s in point_spends)
 
         # 今後の予定を取得（ポイント参加用）
         upcoming_schedules = db.get_upcoming_schedules()
@@ -72,13 +117,17 @@ def user_profile(user_id):
             posts=user_posts,
             posts_count=len(user_posts) if user_posts else 0,
             past_participation_count=user_stats['total_participation'],
-            participation_points=user_stats['uguu_points'],
+            participation_points=user_stats['uguu_points'],  # ←「うぐポイント」残高を表示するならこのままでOK
             followers_count=0,
             following_count=0,
             is_admin=is_admin,
             admin_participation_dates=admin_participation_dates,
             days_until_reset=user_stats.get('days_until_reset'),
-            upcoming_schedules=upcoming_schedules
+            upcoming_schedules=upcoming_schedules,
+
+            # ▼ 追加（テンプレで表示用）
+            point_spends=point_spends,
+            point_total_spent_recent=point_total_spent_recent,
         )
 
     except Exception as e:
@@ -148,65 +197,3 @@ def point_participation():
         import traceback; traceback.print_exc()
         return jsonify({'error': '内部エラー'}), 500
     
-@users.route("/admin/users/<user_id>/add-point", methods=["POST"])
-@login_required
-def add_point(user_id):
-    # 管理者だけ
-    if not getattr(current_user, "administrator", False):
-        flash("権限がありません", "danger")
-        return redirect(url_for("users.user_profile", user_id=user_id))
-
-    # フォームから取得
-    points = int(request.form.get("points", "0"))
-    reason = request.form.get("reason", "").strip()
-    effective_at_str = request.form.get("effective_at", "").strip()
-
-    # 日時パース
-    if effective_at_str:
-        try:
-            effective_at = datetime.strptime(effective_at_str, "%Y-%m-%d %H:%M")
-        except ValueError:
-            # datetime-local の場合
-            effective_at = datetime.strptime(effective_at_str, "%Y-%m-%dT%H:%M")
-    else:
-        # 指定がなければ「いま」を有効日時にする
-        effective_at = datetime.utcnow()
-
-    now_utc = datetime.utcnow()
-    point_id = f"POINT#{now_utc.isoformat()}"
-
-    # ① ポイントテーブルに書く
-    points_table = dynamodb.Table(UGU_POINTS_TABLE)
-    points_item = {
-        "user_id": user_id,
-        "point_id": point_id,
-        "points": points,
-        "reason": reason or "管理人付与",
-        "created_at": now_utc.isoformat(),
-        "effective_at": effective_at.isoformat(),
-        "created_by": getattr(current_user, "email", "admin"),
-        "source": "admin_manual",
-    }
-    points_table.put_item(Item=points_item)
-
-    # ② 40日ルール用に「参加したことにする」ダミー行を履歴に追加
-    participation_table = dynamodb.Table(UGU_PARTICIPATION_TABLE)
-
-    # 参加日として使うのは有効日時の日付
-    event_date_str = effective_at.strftime("%Y-%m-%d")
-    joined_at_str = effective_at.isoformat()
-
-    participation_item = {
-        "user_id": user_id,
-        "date": event_date_str,                        # ← get_user_participation_history_with_timestamp が見る日付
-        "joined_at": joined_at_str,                    # ← sort key がこれならここがキーになる
-        "schedule_id": f"MANUALPOINT#{point_id}",      # ダミー
-        "location": "管理人ポイント付与",
-        "status": "active",
-        "action": "admin_manual_point",                # ログでわかるようにしておく
-        "source": "admin_manual_point",
-    }
-    participation_table.put_item(Item=participation_item)
-
-    flash("ポイントを付与しました。", "success")
-    return redirect(url_for("users.user_profile", user_id=user_id))
