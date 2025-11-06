@@ -374,14 +374,18 @@
                         {% for participant in schedule.participants_info %}
                         <div class="col-md-3 col-sm-4 mb-1">
                             <div class="card">
-                            <div class="card-body py-2">
-                                <a
-                                href="{{ url_for('users.user_profile', user_id=participant.get('user_id') or participant.get('user#user_id')) }}"
-                                class="participant-name text-decoration-none text-dark"
-                                >
-                                {{ participant.display_name }}
-                                </a>
-                            </div>
+                                <div class="card-body py-2 d-flex justify-content-between align-items-center">
+                                    <a href="{{ url_for('users.user_profile', user_id=participant.get('user_id') or participant.get('user#user_id')) }}"
+                                    class="participant-name text-decoration-none text-dark flex-grow-1">
+                                        {{ participant.display_name }}
+                                    </a>
+                                    <!-- 削除ボタン -->
+                                    <button class="btn btn-sm btn-danger ms-2" 
+                                            onclick="removeParticipant('{{ schedule.schedule_id }}', '{{ participant.get('user_id') or participant.get('user#user_id') }}', '{{ schedule.date }}')"
+                                            title="参加者を削除">
+                                        ×
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         {% endfor %}
@@ -982,6 +986,43 @@
         }
     });
 });
+
+// 管理者が参加者を削除する関数
+async function removeParticipant(scheduleId, userId, scheduleDate) {
+    if (!confirm('この参加者を削除しますか？')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/schedule/${scheduleId}/participant/${userId}/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ date: scheduleDate })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            alert(errorData.message || 'エラーが発生しました');
+            return;
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            alert(data.message);
+            location.reload(); // ページをリロード
+        } else {
+            alert(data.message || '削除に失敗しました');
+        }
+
+    } catch (error) {
+        console.error('削除エラー:', error);
+        alert('通信エラーが発生しました');
+    }
+}
     </script>
 
         

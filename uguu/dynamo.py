@@ -504,25 +504,49 @@ class DynamoDB:
         print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
         return dates
     
-    def cancel_participation(self, user_id: str, date: str):
-        """参加をキャンセル"""
+    def cancel_participation(self, user_id: str, date: str, schedule_id: str = None):
+        """参加をキャンセル - 該当する全レコードを更新"""
         try:
-            # statusは予約語なので ExpressionAttributeNames を使用
-            self.part_history.update_item(
-                Key={
-                    'user_id': user_id,
-                    'date': date
-                },
-                UpdateExpression='SET #status = :s',
-                ExpressionAttributeNames={
-                    '#status': 'status'  # 予約語を回避
-                },
-                ExpressionAttributeValues={
-                    ':s': 'cancelled'
-                }
+            from boto3.dynamodb.conditions import Key
+            
+            # user_idで検索し、該当するすべてのレコードを取得
+            response = self.part_history.query(
+                KeyConditionExpression=Key('user_id').eq(user_id)
             )
-            print(f"[INFO] キャンセル成功: user_id={user_id}, date={date}")
+            
+            items = response.get('Items', [])
+            updated_count = 0
+            
+            # dateが一致するレコードをすべて更新（schedule_idがあればそれも確認）
+            for item in items:
+                date_match = item.get('date') == date
+                schedule_match = (schedule_id is None) or (item.get('schedule_id') == schedule_id)
+                
+                if date_match and schedule_match:
+                    # joined_atをソートキーとして使用
+                    self.part_history.update_item(
+                        Key={
+                            'user_id': user_id,
+                            'joined_at': item['joined_at']  # ★ ソートキーを使用
+                        },
+                        UpdateExpression='SET #status = :s',
+                        ExpressionAttributeNames={
+                            '#status': 'status'
+                        },
+                        ExpressionAttributeValues={
+                            ':s': 'cancelled'
+                        }
+                    )
+                    updated_count += 1
+                    print(f"[INFO] 更新: user_id={user_id}, joined_at={item['joined_at']}, date={date}")
+            
+            if updated_count > 0:
+                print(f"[INFO] キャンセル成功: user_id={user_id}, date={date}, schedule_id={schedule_id}, 更新件数={updated_count}")
+            else:
+                print(f"[WARNING] 該当レコードなし: user_id={user_id}, date={date}, schedule_id={schedule_id}")
+            
             return True
+            
         except Exception as e:
             print(f"[ERROR] 参加キャンセルエラー: {str(e)}")
             import traceback

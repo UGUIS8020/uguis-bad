@@ -8,10 +8,9 @@ logger = logging.getLogger(__name__)
 from uguu.dynamo import DynamoDB   
 _db = DynamoDB() 
 
-# ★ 追加: app.py から呼ばれるエクスポート関数（ここが無いと AttributeError）
-def cancel_participation(user_id: str, date_str: str):   # ★
-    """bad-users-history の user_id + joined_at を更新する"""  # ★（説明は任意）
-    return _db.cancel_participation(user_id, date_str)   # ★
+def cancel_participation(user_id: str, date_str: str, schedule_id: str = None):
+    """bad-users-history の該当レコードを更新する"""
+    return _db.cancel_participation(user_id, date_str, schedule_id)
 
 def get_schedule_table():
     """スケジュールテーブルを取得する関数"""

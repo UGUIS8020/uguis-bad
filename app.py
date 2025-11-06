@@ -1143,7 +1143,8 @@ def join_schedule(schedule_id):
             is_joining = False
             
             # ★★★ ここに追加：bad-users-historyのstatusを更新 ★★★
-            db.cancel_participation(current_user.id, date)
+            # ★ schedule_idも渡す
+            db.cancel_participation(current_user.id, date, schedule_id)
             app.logger.info(f"✓ ユーザー {current_user.id} の参加履歴をキャンセル済みに更新しました (date={date})")
             # ★★★ ここまで追加 ★★★
             
@@ -2638,71 +2639,84 @@ def show_routes():
     
     return '<br>'.join(sorted(output))
 
-# @app.route('/uguu/point-participation', methods=['POST'])
-# @login_required
-# def point_participation():
-#     """ポイント消費での参加登録"""
-#     try:
-#         data = request.get_json()
-#         user_id = data.get('user_id')
-#         schedule_id = data.get('schedule_id')
-#         points_cost = data.get('points_cost', 600)
+@app.route('/schedule/<string:schedule_id>/participant/<string:user_id>/remove', methods=['POST'])
+@login_required
+def remove_participant(schedule_id, user_id):
+    """管理者が参加者を削除する"""
+    try:
+        # 管理者権限チェック
+        if not current_user.administrator:
+            return jsonify({'status': 'error', 'message': '権限がありません。'}), 403
+
+        data = request.get_json()
+        date = data.get('date')
+
+        if not date:
+            return jsonify({'status': 'error', 'message': '日付が不足しています。'}), 400
+
+        # スケジュールの取得
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        response = schedule_table.get_item(
+            Key={
+                'schedule_id': schedule_id,
+                'date': date
+            }
+        )
+        schedule = response.get('Item')
+        if not schedule:
+            return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません。'}), 404
+
+        # 参加者リストから削除
+        participants = schedule.get('participants', [])
         
-#         # 本人確認
-#         if current_user.id != user_id:
-#             return jsonify({'error': '本人のみ実行できます'}), 403
+        if user_id not in participants:
+            return jsonify({'status': 'error', 'message': 'この参加者は登録されていません。'}), 400
         
-#         # 現在のポイントを取得
-#         stats = db.get_user_stats(user_id)  # ← uguu_db を db に変更
-#         current_points = stats.get('uguu_points', 0)
+        participants.remove(user_id)
         
-#         # ポイント不足チェック
-#         if current_points < points_cost:
-#             return jsonify({
-#                 'error': f'ポイントが不足しています（現在: {current_points}P、必要: {points_cost}P）'
-#             }), 400
+        # bad-users-historyのstatusを更新（schedule_idも渡す）
+        db.cancel_participation(user_id, date, schedule_id)  # ★ schedule_idを追加
+        app.logger.info(f"✓ 管理者がユーザー {user_id} を削除しました (date={date}, schedule_id={schedule_id})")
         
-#         # スケジュール情報を取得
-#         schedule = db.get_schedule_by_id(schedule_id)  # ← uguu_db を db に変更
-#         if not schedule:
-#             return jsonify({'error': 'スケジュールが見つかりません'}), 404
-        
-#         event_date = schedule['date']
-        
-#         # すでに参加済みかチェック
-#         if db.check_user_participation(user_id, event_date):  # ← uguu_db を db に変更
-#             return jsonify({'error': 'すでに参加登録済みです'}), 400
-        
-#         # 参加登録
-#         success = db.register_participation(  # ← uguu_db を db に変更
-#             user_id=user_id,
-#             schedule_id=schedule_id,
-#             event_date=event_date,
-#             payment_method='point',
-#             points_used=points_cost
-#         )
-        
-#         if success:
-#             return jsonify({
-#                 'message': '参加登録が完了しました',
-#                 'remaining_points': current_points - points_cost
-#             }), 200
-#         else:
-#             return jsonify({'error': '参加登録に失敗しました'}), 500
-            
-#     except Exception as e:
-#         print(f"[ERROR] ポイント参加エラー: {str(e)}")
-#         import traceback
-#         traceback.print_exc()
-#         return jsonify({'error': str(e)}), 500
+        # DynamoDB の更新
+        schedule_table.update_item(
+            Key={
+                'schedule_id': schedule_id,
+                'date': date
+            },
+            UpdateExpression="SET participants = :participants, participants_count = :count",
+            ExpressionAttributeValues={
+                ':participants': participants,
+                ':count': len(participants)
+            }
+        )
+
+        # キャッシュのリセット
+        cache.delete_memoized(get_schedules_with_formatting)
+
+        return jsonify({
+            'status': 'success',
+            'message': '参加者を削除しました',
+            'participants': participants,
+            'participants_count': len(participants)
+        })
+
+    except ClientError as e:
+        app.logger.error(f"DynamoDB ClientError: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'データベースエラーが発生しました。'}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in remove_participant: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': '予期しないエラーが発生しました。'}), 500
 
 
 from uguu.timeline import uguu
 from uguu.users import users
+from uguu.post import post          
 from schedule.views import bp as bp_schedule
 from game.views import bp_game
+from uguu.analytics import analytics
 
-for blueprint in [uguu, post, users]:
+for blueprint in [uguu, post, users, analytics]:
     app.register_blueprint(blueprint, url_prefix='/uguu')
 
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
