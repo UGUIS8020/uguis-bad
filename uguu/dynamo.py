@@ -6,6 +6,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
+import uuid
 
 dynamodb = boto3.resource(
     "dynamodb",
