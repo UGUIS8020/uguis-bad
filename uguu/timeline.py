@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash
+from flask import Blueprint, render_template, redirect, url_for, flash, current_app
 from .dynamo import db
 from flask_login import current_user, login_required
 
@@ -23,21 +23,49 @@ def show_timeline():
         print(f"Retrieved {len(posts) if posts else 0} posts")
         
         if posts:
-            # いいね状態の確認（ログインユーザーのみ）
+            # DynamoDB ユーザーテーブル（current_appで統一）
+            user_table = current_app.dynamodb.Table(current_app.table_name)
+            
             for post in posts:
                 try:
-                    if user_id:  # ログインユーザーの場合のみいいね状態をチェック
+                    # DynamoDBからユーザー情報を取得してプロフィール画像を追加
+                    post_user_id = post.get('user_id')
+                    if post_user_id:
+                        res = user_table.get_item(Key={"user#user_id": post_user_id})
+                        user = res.get("Item")
+                        
+                        if user:
+                            # 画像URLは複数候補からフォールバック
+                            url = (user.get("profile_image_url")
+                                   or user.get("profileImageUrl")
+                                   or user.get("large_image_url")
+                                   or "")
+                            url = url.strip() if isinstance(url, str) else None
+                            
+                            # 投稿データにプロフィール画像URLを追加
+                            post['profile_image_url'] = url if url and url.lower() != "none" else None
+                            
+                            # display_nameも更新（念のため）
+                            if 'display_name' not in post or not post['display_name']:
+                                post['display_name'] = user.get("display_name", "不明")
+                    
+                    # いいね状態の確認（ログインユーザーのみ）
+                    if user_id:
                         post['is_liked_by_user'] = db.check_if_liked(
                             post['post_id'], 
                             user_id
                         )
                         print(f"Like status checked for post {post['post_id']}")
-                    else:  # 匿名ユーザーの場合はFalse
+                    else:
                         post['is_liked_by_user'] = False
                         
                 except Exception as e:
-                    print(f"Error checking like status: {str(e)}")
+                    print(f"Error processing post {post.get('post_id')}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
                     post['is_liked_by_user'] = False
+                    if 'profile_image_url' not in post:
+                        post['profile_image_url'] = None
             
             # 時系列順にソート
             posts = sorted(
@@ -59,13 +87,6 @@ def show_timeline():
         return render_template('uguu/timeline.html', 
                              posts=[],
                              is_authenticated=current_user.is_authenticated)
-        
-    except Exception as e:
-        print(f"Timeline Error: {str(e)}")
-        import traceback
-        print(traceback.format_exc())  # スタックトレース出力を追加
-        flash('タイムラインの取得中にエラーが発生しました。', 'danger')
-        return render_template('uguu/timeline.html', posts=[])
 
 @uguu.route('/my_posts')
 

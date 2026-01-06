@@ -12,6 +12,7 @@ post = Blueprint('post', __name__)
 def create_post():
     if request.method == 'POST':       
         content = request.form.get('content', '').strip()
+        youtube_url = request.form.get('youtube_url', '').strip()  # YouTube URL取得
         image = request.files.get('image')
         print(f"投稿内容: {repr(content)}")      
         
@@ -39,8 +40,17 @@ def create_post():
                 image_url = upload_image_to_s3(image)
                 print(f"画像アップロード成功: {image_url}")
             
-            # DynamoDBに保存
-            db.create_post(current_user.id, content, image_url)
+            # YouTube URLを埋め込み形式に変換
+            embed_url = None
+            if youtube_url:
+                embed_url = convert_youtube_url(youtube_url)
+                if not embed_url:
+                    flash('有効なYouTube URLを入力してください', 'warning')
+                    return render_template('uguu/create_post.html')
+                print(f"YouTube URL変換成功: {embed_url}")
+            
+            # DynamoDBに保存（youtube_urlを追加）
+            db.create_post(current_user.id, content, image_url, embed_url)
             print("投稿作成成功")
             
             flash('投稿が完了しました', 'success')
@@ -55,6 +65,41 @@ def create_post():
     
     return render_template('uguu/create_post.html')
 
+def convert_youtube_url(url):
+    """
+    YouTube URLを埋め込み形式に変換
+    
+    対応形式:
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://youtu.be/VIDEO_ID
+    - https://www.youtube.com/shorts/VIDEO_ID (Shorts対応)
+    - https://www.youtube.com/embed/VIDEO_ID (既に埋め込み形式)
+    """
+    import re
+    
+    if not url:
+        return None
+    
+    # 既に埋め込み形式の場合
+    if 'youtube.com/embed/' in url:
+        return url
+    
+    # YouTube Shorts の場合
+    if 'youtube.com/shorts/' in url:
+        match = re.search(r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})', url)
+        if match:
+            video_id = match.group(1)
+            return f'https://www.youtube.com/embed/{video_id}'
+    
+    # 通常のYouTube URL (watch?v=) または短縮URL (youtu.be)
+    match = re.search(r'(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+    if match:
+        video_id = match.group(1)
+        return f'https://www.youtube.com/embed/{video_id}'
+    
+    # マッチしない場合はNoneを返す
+    return None
+
 @post.route('/post/<post_id>/edit', methods=['GET', 'POST'])
 @login_required  # login_requiredを追加
 def edit_post(post_id):
@@ -63,7 +108,7 @@ def edit_post(post_id):
     post_data = db.get_post(post_id)
     if not post_data or post_data['user_id'] != current_user.id:  # current_userを使用
         flash('投稿が見つからないか、編集権限がありません')
-        return redirect(url_for('uguu.show_timeline'))  # 正しいURLに修正
+        return redirect(url_for('uguu.show_timeline')) 
         
     if request.method == 'POST':
         content = request.form.get('content')

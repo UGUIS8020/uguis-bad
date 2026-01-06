@@ -21,9 +21,24 @@
                                 placeholder="ここに投稿内容を入力してください..."
                                 required></textarea>
                         </div>
-                         <div class="form-group mt-2 mb-2">
+                        
+                        <div class="form-group mt-2 mb-2">
                             <label for="image" class="form-label">画像を選択</label>
                             <input type="file" name="image" class="form-control" accept="image/*">
+                        </div>
+                        
+                        <!-- YouTube URL フィールド追加 -->
+                        <div class="form-group mt-2 mb-3">
+                            <label for="youtube_url" class="form-label">YouTube動画URL（任意）</label>
+                            <input 
+                                type="url" 
+                                id="youtube_url" 
+                                name="youtube_url" 
+                                class="form-control" 
+                                placeholder="https://www.youtube.com/watch?v=xxxxx または https://youtu.be/xxxxx">
+                            <small class="form-text text-muted">
+                                YouTube動画を埋め込む場合は、動画のURLを貼り付けてください
+                            </small>
                         </div>
                         
                         <div class="d-flex justify-content-between">

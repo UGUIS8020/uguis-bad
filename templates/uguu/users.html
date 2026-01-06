@@ -1,64 +1,809 @@
 {% extends "base.html" %}
 
-<style>
-.card-text {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    line-height: 1.5;
-}
-</style>
+{# SEO最適化 #}
+{% block title %}{{ user.display_name }}さんのプロフィール | うぐすたぐらむ{% endblock %}
+{% block description %}{{ user.display_name }}さんのプロフィールページ。{{ user.bio[:100] if user.bio else '鶯バドミントンクラブのメンバー' }}{% endblock %}
+
+{# Open Graph / SNSシェア対策 #}
+{% block og_tags %}
+<meta property="og:title" content="{{ user.display_name }}さんのプロフィール | うぐすたぐらむ">
+<meta property="og:description" content="{{ user.bio[:100] if user.bio else '鶯バドミントンクラブのメンバー' }}">
+<meta property="og:type" content="profile">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:image" content="{{ user.profile_image_url or url_for('static', filename='images/default.jpg', _external=True) }}">
+<meta property="profile:username" content="{{ user.display_name }}">
+{% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    <!-- プロフィールヘッダー -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <div class="d-flex align-items-center">
-                <!-- ユーザー情報 -->
-                <div class="ms-3">
-                    <h3 class="mb-1">{{ user.display_name }}</h3>
-                    <p class="text-muted mb-2">@{{ user.user_name }}</p>
-                    <div class="mb-2">
-                        <span class="badge bg-primary">{{ user.badminton_experience }}</span>
+<style>
+      
+    
+    /* 統計情報 */
+    .profile-stats {
+        display: flex;
+        gap: 2rem;
+        margin: 1.5rem 0;
+    }
+    
+    .stat-item {
+        text-align: center;
+    }
+    
+    .stat-number {
+        font-size: 1.5rem;
+        font-weight: bold;
+        display: block;
+    }
+    
+    .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+    
+    /* 投稿グリッド */
+    .posts-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+        margin-top: 2rem;
+    }
+    
+    .post-thumbnail {
+        aspect-ratio: 1;
+        overflow: hidden;
+        position: relative;
+        cursor: pointer;
+        background: #f0f0f0;
+    }
+    
+    .post-thumbnail img,
+    .post-thumbnail video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.2s;
+    }
+    
+    .post-thumbnail:hover img,
+    .post-thumbnail:hover video {
+        transform: scale(1.05);
+    }
+    
+    .post-thumbnail-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        opacity: 0;
+        transition: opacity 0.2s;
+        color: white;
+        font-weight: bold;
+    }
+    
+    .post-thumbnail:hover .post-thumbnail-overlay {
+        opacity: 1;
+    }
+    
+    /* ビデオアイコン */
+    .video-indicator {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        color: white;
+        font-size: 1.2rem;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* プロフィールヘッダー */
+    .profile-header {
+        max-width: 935px;
+        margin: 2rem auto;
+        padding: 0 20px;
+    }
+    
+    .profile-info {
+        display: flex;
+        gap: 2rem;
+        align-items: flex-start;
+        margin-bottom: 2rem;
+    }
+    
+    @media (max-width: 768px) {
+        .profile-info {
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .profile-stats {
+            justify-content: center;
+        }
+    }
+    
+    /* ボタンスタイル */
+    .profile-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+    
+    .bio-text {
+        white-space: pre-line;
+        margin-top: 1rem;
+        line-height: 1.6;
+    }
+</style>
+
+<!-- プロフィール画像（本人はクリックで編集ページへ） -->
+<div class="profile-avatar-container text-center">
+  {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+    <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}"
+       class="profile-avatar-link" aria-label="プロフィール画像を変更">
+      <span class="profile-avatar">
+        <img
+          src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+          alt="{{ user.display_name }}さんのプロフィール画像"
+          loading="lazy" decoding="async"
+          onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+      </span>
+      <span class="camera-icon" aria-hidden="true">
+        <i class="fas fa-camera"></i>
+      </span>
+    </a>
+  {% else %}
+    <span class="profile-avatar">
+      <img
+        src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+        alt="{{ user.display_name }}さんのプロフィール画像"
+        loading="lazy" decoding="async"
+        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+    </span>
+  {% endif %}  
+</div>
+
+<!-- 名前を表示 -->
+<div class="profile-name" style="text-align: center; font-size: 1.5rem; margin-top: 1rem; font-weight: 600;">
+  {{ user.display_name }}
+</div>
+  
+
+        <style>
+
+        .profile-name {
+        text-align: center;
+        font-size: 1.5rem;
+        margin-top: 1rem;
+        font-weight: 600;
+        }
+
+        /* クリック可能エリアの外枠 */
+        .profile-avatar-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        }
+
+        /* 本人のみリンク化（位置基準のためrelative） */
+        .profile-avatar-link {
+        position: relative;
+        display: inline-block;
+        text-decoration: none;
+        outline: none;
+        }
+
+        /* Instagram風リング（既存CSSを統合） */
+        .profile-avatar {
+        --size: 150px;
+        --ring: 4px;
+        --gap: 4px;
+
+        display: inline-grid;
+        place-items: center;
+        width: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+        height: calc(var(--size) + (var(--ring) + var(--gap)) * 2);
+        border-radius: 50%;
+        padding: calc(var(--ring) + var(--gap));
+        background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75);
+        }
+
+        /* 中の画像（既存CSS） */
+        .profile-avatar > img {
+        width: var(--size);
+        height: var(--size);
+        object-fit: cover;
+        border-radius: 50%;
+        display: block;
+        background: #fff;
+        box-shadow: 0 0 0 var(--gap) #fff; /* リングと画像の間に白い余白 */
+        }
+
+        /* カメラアイコン（スマホでも常時表示して編集可能を示す） */
+        .camera-icon {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        background: rgba(0,0,0,0.6);
+        color: #fff;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 0.9rem;
+        pointer-events: none; /* クリックは画像リンクへ */
+        }
+
+        /* キーボードフォーカス（アクセシビリティ） */
+        .profile-avatar-link:focus-visible {
+        box-shadow: 0 0 0 3px rgba(13,110,253,0.45);
+        border-radius: 9999px;
+        }
+
+        /* PCでのわずかなフィードバック（スマホには影響なし） */
+        @media (hover: hover) and (pointer: fine) {
+        .profile-avatar-link:hover .profile-avatar > img {
+            transform: scale(1.03);
+            transition: transform 0.2s ease;
+        }
+        }
+
+        /* スマホ用に小さく（既存CSSを踏襲） */
+        @media (max-width: 768px) {
+        .profile-avatar {
+            --size: 100px;
+            --ring: 3px;
+            --gap: 3px;
+        }
+        .camera-icon {
+            right: 6px;
+            bottom: 6px;
+            width: 30px;
+            height: 30px;
+            font-size: 0.8rem;
+        }
+        }
+
+        /* 統計情報（既存CSS＋レスポンシブ微調整） */
+        .profile-stats {
+        display: flex;
+        gap: 2rem;
+        margin: 1.5rem 0;
+        flex-wrap: wrap;
+        }
+        .stat-item {
+        text-align: center;
+        min-width: 120px;
+        }
+        .stat-number {
+        font-size: 1.5rem;
+        font-weight: bold;
+        display: block;
+        }
+        .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        }
+        .profile-actions {
+            display: inline-block;
+            text-align: center;
+            width: auto;
+        }
+        .profile-actions .btn {
+            min-width: 180px;
+        }
+        </style>
+
+                
+                <!-- 本人の場合：編集ボタン -->
+                {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+                <div class="text-center">
+                    <div class="profile-actions">
+                        <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
+                        class="btn btn-outline-secondary btn-sm d-block mb-3">
+                            <i class="fas fa-edit me-1"></i>プロフィールを編集
+                        </a>
+                        <a href="{{ url_for('logout') }}" 
+                        class="btn btn-outline-danger btn-sm d-block"
+                        onclick="return confirm('ログアウトしますか？')">
+                            <i class="fas fa-sign-out-alt me-1"></i>
+                            ログアウト
+                        </a>
                     </div>
                 </div>
+                {% else %}
+                <!-- 他人の場合：フォローボタン（将来実装） -->
+                <button class="btn btn-primary btn-sm" disabled>
+                    <i class="fas fa-user-plus me-1"></i>フォロー
+                </button>
+                {% endif %}
+            </div>
+            
+            <!-- 統計情報 -->
+            <style>
+            .profile-stats {
+                display: flex;
+                justify-content: center;
+                gap: 40px;
+                margin-bottom: 0.8rem; /* ← 1.5rem → 0.8rem に変更して上下を詰める */
+                flex-wrap: wrap;
+            }
+
+            .stat-item {
+                text-align: center;
+            }
+
+            .stat-number {
+                font-size: 1.5rem;
+                font-weight: bold;
+                display: block;
+            }
+
+            .stat-label {
+                font-size: 0.9rem;
+                color: #6c757d;
+            }
+
+            /* 2段構成：上段と下段の間をさらに詰める */
+            .profile-stats-group {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 0.3rem; /* ← 全体の上下間隔も軽く調整（以前より詰まり気味に） */
+            }
+
+            /* モバイル用調整 */
+            @media (max-width: 576px) {
+                .profile-stats {
+                    gap: 20px;
+                    margin-bottom: 0.5rem; /* ← モバイルはさらに詰める */
+                }
+                .stat-number {
+                    font-size: 1.2rem;
+                }
+            }
+            </style>
+
+            <div class="profile-stats-group">
+                <!-- 上段：投稿・フォロワー・フォロー中 -->
+                <div class="profile-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">{{ posts_count|default(0) }}</span>
+                        <span class="stat-label">投稿</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">{{ followers_count|default(0) }}</span>
+                        <span class="stat-label">フォロワー</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">{{ following_count|default(0) }}</span>
+                        <span class="stat-label">フォロー中</span>
+                    </div>
+                </div>
+
+                <!-- 下段：参加回数 -->
+                <!-- 下段：参加情報 -->
+                <!-- <div class="profile-stats-group text-center">
+                <div class="profile-stats justify-content-center">
+                    <div class="stat-item">
+                    <span class="stat-number">{{ past_participation_count|default(0, true) }}</span>
+                    <span class="stat-label">参加回数</span>
+                    </div>
+                    <div class="stat-item">
+                    <span class="stat-number">{{ participation_points|default(0, true) }}</span>
+                    <span class="stat-label">うぐポイント</span>
+                    </div>
+                </div> -->
+
+                <!-- うぐポイント表示の下に追加 -->
+                <div class="card mb-3">
+  <div class="card-body d-flex flex-column flex-md-row gap-3 align-items-stretch">
+
+    <!-- 左：参加回数 -->
+    <div class="ug-stat-box text-center d-flex flex-column justify-content-center px-3 py-2">
+      <div class="stat-item mb-0">
+        <span class="stat-number d-block">{{ past_participation_count|default(0, true) }}</span>
+        <span class="stat-label">参加回数</span>
+      </div>
+    </div>
+
+    <!-- 右：うぐポイント -->
+    <div class="flex-grow-1">
+      <h5 class="card-title mb-2">うぐポイント</h5>
+      <p class="display-4 mb-3">{{ participation_points }}P</p>
+
+      {% if days_until_reset is not none %}
+        {% if days_until_reset <= 0 %}
+          <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>ポイントが失効しています</strong><br>
+            次回参加でリセットされ、新たにポイントが貯まります
+          </div>
+        {% elif days_until_reset <= 10 %}
+          <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-circle"></i>
+            <strong>危険！</strong> ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
+          </div>
+        {% elif days_until_reset <= 20 %}
+          <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle"></i>
+            ポイント失効まで<strong>あと{{ days_until_reset }}日</strong>
+          </div>
+        {% else %}
+          <div class="alert alert-info" role="alert">
+            <i class="fas fa-info-circle"></i>
+            次回参加まで {{ days_until_reset }}日
+          </div>
+        {% endif %}
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- ▼ポイント支払い履歴（直近） -->
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>ポイント支払い履歴</span>
+    <small class="text-muted">
+      直近 {{ point_spends|length }} 件 / 合計 {{ point_total_spent_recent|default(0) }}P
+    </small>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      
+      {% for tx in point_spends %}
+        <tr>
+          <td>             
+            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}          
+          </td>
+          <td class="fw-bold">-{{ tx.amount }}P</td>          
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="3" class="text-muted">支払い履歴はまだありません。</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- ▲ポイント支払い履歴（直近） -->
+
+</div>          
+
+                <!-- 改行して「うぐポイントで参加」ボタン -->
+                {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+                <div class="mt-3 text-center">
+                    <button class="btn btn-point-pay px-4 py-2"
+                            data-bs-toggle="modal" 
+                            data-bs-target="#pointParticipationModal"
+                            {% if participation_points|default(0) < 1 %}disabled{% endif %}>
+                    <i class="fas fa-ticket-alt me-2"></i>
+                    うぐポイントで参加
+                    </button>
+
+                    {% if participation_points|default(0) < 1 %}
+                    <div class="text-danger small mt-2">
+                    ポイントが不足しています（現在: {{ participation_points|default(0) }}P）
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+                </div>
+
+                <style>
+                .btn-point-pay {
+                    background-color: #28a745; /* 緑 */
+                    color: #fff;
+                    border: none;
+                    border-radius: 25px;
+                    font-weight: 600;
+                    font-size: 0.95rem;
+                    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+                    transition: all 0.25s ease-in-out;
+                }
+                .btn-point-pay:hover {
+                    background-color: #218838;
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.25);
+                }
+                .btn-point-pay:active {
+                    transform: translateY(0);
+                    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+                }
+                .btn-point-pay:disabled {
+                    background-color: #ccc;
+                    color: #666;
+                    cursor: not-allowed;
+                    box-shadow: none;
+                }
+                </style>
+      
+            
+            <!-- 自己紹介 -->
+            {% if user.bio %}
+            <div class="bio-text">{{ user.bio }}</div>
+            {% endif %}
+            
+            <!-- その他の情報 -->
+            {% if user.location %}
+            <div class="text-muted mt-2">
+                <i class="fas fa-map-marker-alt me-1"></i>{{ user.location }}
+            </div>
+            {% endif %}
+        </div>
+    </div>    
+    
+    <!-- タブ区切り -->
+    <hr class="my-4">
+    
+    <!-- 投稿タブ -->
+    <div class="text-center mb-3">
+        <span class="fw-bold">
+            <i class="fas fa-th me-1"></i>投稿
+        </span>
+    </div>
+</div>
+
+<!-- 投稿グリッド -->
+<div class="posts-grid" style="max-width: 935px; margin: 0 auto;">
+    {% if posts %}
+        {% for post in posts %}
+        <div class="post-thumbnail">
+            
+            <!-- 画像投稿 -->
+            {% if post.image_url %}
+            <img src="{{ post.image_url }}" 
+                 alt="{{ post.content[:50] if post.content else '投稿画像' }}"
+                 loading="lazy">
+            
+            <!-- 動画投稿 -->
+            {% elif post.youtube_url %}
+            <div style="width: 100%; height: 100%; background: #000; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-play-circle" style="font-size: 3rem; color: white; opacity: 0.8;"></i>
+            </div>
+            <span class="video-indicator">
+                <i class="fas fa-video"></i>
+            </span>
+            
+            <!-- テキストのみ投稿 -->
+            {% else %}
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; padding: 1rem;">
+                <span style="color: white; text-align: center; font-size: 0.9rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;">
+                    {{ post.content[:100] }}
+                </span>
+            </div>
+            {% endif %}
+            
+            <!-- ホバー時の統計表示 -->
+            <div class="post-thumbnail-overlay">
+                <span><i class="fas fa-heart me-1"></i>{{ post.likes_count|default(0) }}</span>
+                <span><i class="fas fa-comment me-1"></i>{{ post.replies_count|default(0) }}</span>
+            </div>
+          </div>
+        {% endfor %}
+    {% else %}
+        <!-- 投稿がない場合 -->
+        <div style="grid-column: 1 / -1; text-align: center; padding: 4rem 1rem; color: #6c757d;">
+            <i class="fas fa-camera" style="font-size: 4rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+            <p class="mb-0">まだ投稿がありません</p>
+            {% if current_user.is_authenticated and current_user.id == user.user_id %}
+            <a href="{{ url_for('post.create_post') }}" class="btn btn-primary mt-3">
+                <i class="fas fa-plus me-1"></i>最初の投稿を作成
+            </a>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+{% if current_user.is_authenticated and current_user.administrator %}
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>管理者：ポイント付与</span>
+    <small class="text-muted">40日ルールもここで延長されます</small>
+  </div>
+  <div class="card-body">
+    <form action="{{ url_for('users.add_point', user_id=user['user#user_id']) }}" method="post">
+      <div class="row g-3">
+        <!-- ポイント数 -->
+        <div class="col-md-4">
+          <label class="form-label">ポイント数 <span class="text-danger">*</span></label>
+          <input type="number"
+       name="points"
+       class="form-control"
+       value="100"
+       min="0"
+       step="50"
+       required>
+          <small class="text-muted d-block mt-1">
+            例）100, 200, 500 など
+          </small>
+        </div>
+
+        <!-- 付与日時 -->
+        <div class="col-md-4">
+          <label class="form-label">付与日時</label>
+          <input type="datetime-local" name="effective_at" class="form-control">
+          <small class="text-muted d-block mt-1">
+            空欄なら「今」の時刻で記録します
+          </small>
+        </div>
+
+        <!-- 理由 -->
+        <div class="col-md-4">
+          <label class="form-label">理由</label>
+          <input type="text" name="reason" class="form-control" placeholder="例：大会手伝い・備品運搬など">
+          <small class="text-muted d-block mt-1">
+            後で履歴を見たときのメモ用
+          </small>
+        </div>
+      </div>
+
+      <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">
+          ポイントを付与する
+        </button>
+        <small class="text-muted align-self-center">
+          この操作はすぐに反映されます
+        </small>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated and is_admin and admin_participation_dates %}
+<div class="card mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>参加日一覧（管理者のみ）</strong>
+    <span class="text-muted small">件数: {{ admin_participation_dates|length }}</span>
+  </div>
+  <div class="card-body">
+    <ul class="list-unstyled mb-0" style="font-size: 1.2rem; line-height: 1.9;">
+      {% for d in admin_participation_dates %}
+        <li>{{ d }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
+<!-- ポイント参加モーダル -->
+<div class="modal fade" id="pointParticipationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ポイントで参加</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">現在のポイント: <strong>{{ participation_points|default(0) }}P</strong></p>
+                
+                <div class="mb-3">
+                    <label for="points-cost" class="form-label">消費ポイント</label>
+                    <input type="number" 
+                           class="form-control" 
+                           id="points-cost" 
+                           value="600" 
+                           min="100" 
+                           max="{{ participation_points|default(0) }}"
+                           step="100"
+                           required>
+                    <div class="form-text">消費するポイント数を入力してください（100P単位、デフォルト: 600P）</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label d-block">参加する練習日</label>
+
+                    {% if upcoming_schedules %}
+                        {% set s = upcoming_schedules|first %}
+                        <div class="p-3 border rounded bg-light">
+                        <div class="fw-bold">{{ s.date }}（{{ s.day_of_week }}）{{ s.start_time }}～{{ s.end_time }}</div>
+                        </div>
+
+                        <!-- hidden で schedule_id / event_date を埋め込む -->
+                        <input type="hidden" id="event-schedule-id" value="{{ s.schedule_id }}">
+                        <input type="hidden" id="event-date" value="{{ s.date }}">
+                    {% else %}
+                        <div class="alert alert-secondary mb-0">
+                        予約できる練習日は現在ありません。
+                        </div>
+                    {% endif %}
+                    </div>
+                
+                <div class="alert alert-warning small">
+                    <i class="fas fa-exclamation-triangle me-1"></i>
+                    参加後のキャンセルはできません
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <button type="button" class="btn btn-success" id="confirmPointParticipation"
+                        {% if not upcoming_schedules %}disabled{% endif %}>
+                <span id="confirm-button-text">600P</span>で参加する
+                </button>
             </div>
         </div>
     </div>
-
-    <!-- 投稿一覧 -->
-    <div class="mb-4">
-        <h4 class="mb-3">投稿一覧</h4>
-        {% if posts %}
-            {% for post in posts %}
-                <div class="card mb-3">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <div>
-                                <strong>{{ post.display_name }}</strong>
-                            </div>
-                            <small class="text-muted">
-                                {{ post.created_at.split('T')[0] }}
-                            </small>
-                        </div>
-                        <!-- Windows改行（\r\n）に対応 -->
-                        <p class="card-text" style="white-space: pre-wrap; word-wrap: break-word;">{{ post.content }}</p>
-                        {% if post.image_url %}
-                        <div class="mt-2">
-                            <img src="{{ post.image_url }}" 
-                                class="img-fluid rounded" 
-                                alt="投稿画像"
-                                style="max-height: 400px; object-fit: contain;">
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endfor %}
-        {% else %}
-            <div class="text-center text-muted py-5">
-                <p>投稿はありません</p>
-            </div>
-        {% endif %}
-    </div>
 </div>
+
+<script>
+document.getElementById('points-cost')?.addEventListener('input', function() {
+  const points = this.value;
+  document.getElementById('confirm-button-text').textContent = points + 'P';
+});
+
+document.getElementById('confirmPointParticipation')?.addEventListener('click', async function() {
+  // hiddenから取得
+  const scheduleIdEl = document.getElementById('event-schedule-id');
+  const eventDateEl = document.getElementById('event-date');
+  const scheduleId = scheduleIdEl ? scheduleIdEl.value : '';
+  const eventDate = eventDateEl ? eventDateEl.value : '';
+  const pointsCost = parseInt(document.getElementById('points-cost').value);
+  const currentPoints = {{ participation_points|default(0) }};
+
+  // バリデーション
+  if (!scheduleId || !eventDate) {
+    alert('参加できる練習日がありません');
+    return;
+  }
+  if (!pointsCost || pointsCost <= 0) {
+    alert('消費ポイントは100以上を入力してください');
+    return;
+  }
+  if (pointsCost % 100 !== 0) {
+    alert('消費ポイントは100P単位で入力してください');
+    return;
+  }
+  if (pointsCost > currentPoints) {
+    alert(`ポイントが不足しています（現在: ${currentPoints}P、必要: ${pointsCost}P）`);
+    return;
+  }
+  if (!confirm(`${pointsCost}ポイントを消費して参加しますか？`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch('/uguu/point-participation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: '{{ user["user#user_id"] }}',
+        schedule_id: scheduleId,
+        event_date: eventDate,
+        points_cost: pointsCost
+      })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      alert(`うぐポイントでの支払いが完了しました！（残りポイント: ${result.remaining_points}P）`);
+      location.reload();
+    } else {
+      alert('エラー: ' + (result.error || '支払いに失敗しました'));
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('通信エラーが発生しました');
+  }
+});
+
+</script>
+
+<script>
+fetch("{{ url_for('users.point_participation') }}", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    user_id: "{{ current_user.id }}",
+    event_date: selectedDate, // "2025-11-03"
+    points_cost: 600
+  })
+});
+</script>
+
 {% endblock %}

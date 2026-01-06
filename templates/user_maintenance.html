@@ -1,3 +1,6 @@
+
+
+
 {% extends "base.html" %}
 {% block content %}
 
@@ -37,6 +40,7 @@
                             <thead class="table-dark">
                                 <tr>
                                     <th>ID</th>
+                                    <th>画像</th>
                                     <th>ユーザー名</th>
                                     <th>名前</th>
                                     <th>メールアドレス</th>
@@ -49,14 +53,31 @@
                                     {% for user in users %}
                                     <tr>
                                         <td>{{ '%06d' % loop.index }}</td>  <!-- インデックスを6桁の番号で表示 -->
+                                        <td>
+                                            <img src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}" 
+                                                 alt="プロフィール画像" 
+                                                 class="rounded-circle"
+                                                 style="width: 40px; height: 40px; object-fit: cover;">
+                                        </td>
                                         <td>{{ user.display_name | truncate(10) }}</td>
                                         <td>{{ user.user_name | truncate(10) }}</td>
                                         <td>{{ user.email | truncate(20) }}</td>
                                         <td>{{ user.phone | truncate(15) }}</td> 
-                                        <td>{{ user.emergency_phone | truncate(15) }}</td>                                       
+                                        <td>{{ user.emergency_phone | truncate(15) }}</td>                                                                              
                                         <td>
                                             
-                                            <a href="{{ url_for('account', user_id=user.user_id) }}" class="btn btn-secondary">変更</a>
+                                                <!-- マイページボタン -->
+                                        <a href="{{ url_for('users.user_profile', user_id=user.user_id) }}" 
+                                        class="btn btn-primary btn-sm mb-1">
+                                            マイページ
+                                        </a>
+
+                                        <!-- 変更ボタン -->
+                                        <a href="{{ url_for('account', user_id=user.user_id) }}" 
+                                        class="btn btn-secondary btn-sm">
+                                            変更
+                                        </a>
+                                    </td>
                                                
                                             
                                         </td>
