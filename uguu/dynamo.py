@@ -6,7 +6,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
-import uuid
+
 
 dynamodb = boto3.resource(
     "dynamodb",
@@ -174,7 +174,7 @@ class DynamoDB:
     def create_post(self, user_id, content, image_url=None, youtube_url=None):
         """新規投稿を作成"""
         try:
-            post_id = str(uuid.uuid4())
+            post_id = str(uuid4())            
             timestamp = datetime.now().isoformat()
             
             post = {
