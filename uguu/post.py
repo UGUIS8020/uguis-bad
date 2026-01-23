@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import current_user, login_required
 from .dynamo import db
 from utils.s3 import upload_image_to_s3, delete_image_from_s3
-import uuid
+from uuid import uuid4
 from datetime import datetime
 
 post = Blueprint('post', __name__)
@@ -165,7 +165,7 @@ def create_reply(post_id):
     
     try:
         # 返信をDynamoDBに保存（PK/SK構造に合わせる）
-        reply_id = str(uuid.uuid4())
+        reply_id = str(uuid4())
         reply_data = {
             'PK': f"POST#{post_id}",
             'SK': f"REPLY#{reply_id}",
