@@ -441,6 +441,38 @@ class DynamoDB:
             print(traceback.format_exc())
             return []
         
+    def get_user_posts(self, user_id):
+        """特定ユーザーの投稿を取得（get_posts_by_userのエイリアス）"""
+        return self.get_posts_by_user(user_id)
+    
+    def get_post_replies(self, post_id):
+        """投稿の返信を取得"""
+        try:
+            print(f"[DEBUG] 返信取得: post_id={post_id}")
+            
+            response = self.posts_table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :reply)",
+                ExpressionAttributeValues={
+                    ':pk': f"POST#{post_id}",
+                    ':reply': 'REPLY#'
+                },
+                ScanIndexForward=True  # 古い順（時系列）
+            )
+            
+            replies = response.get('Items', [])
+            print(f"[DEBUG] 取得した返信数: {len(replies)}件")
+            
+            # 作成日時でソート
+            return sorted(replies, key=lambda x: x.get('created_at', ''))
+            
+        except Exception as e:
+            print(f"[ERROR] 返信取得エラー: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return []
+        
+    
+        
     def get_user_participation_history(self, user_id: str):
         """
         bad-users-history からユーザーの参加日を昇順で返す
@@ -1708,6 +1740,8 @@ class DynamoDB:
         print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(items)}"
             + (f" / since={since}" if since else ""))
         return total
+    
+    
         
 
 class PointTransaction:

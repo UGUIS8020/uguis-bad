@@ -20,6 +20,7 @@ def show_timeline():
             user_id = None
         
         posts = db.get_posts()
+        
         print(f"Retrieved {len(posts) if posts else 0} posts")
         
         if posts:
@@ -49,6 +50,11 @@ def show_timeline():
                             if 'display_name' not in post or not post['display_name']:
                                 post['display_name'] = user.get("display_name", "不明")
                     
+                    # 返信を取得
+                    post['replies'] = db.get_post_replies(post['post_id'])
+                    post['replies_count'] = len(post['replies'])
+                    print(f"Post {post['post_id']}: {post['replies_count']}件の返信")
+                    
                     # いいね状態の確認（ログインユーザーのみ）
                     if user_id:
                         post['is_liked_by_user'] = db.check_if_liked(
@@ -64,6 +70,8 @@ def show_timeline():
                     import traceback
                     traceback.print_exc()
                     post['is_liked_by_user'] = False
+                    post['replies'] = []  # ★ 追加
+                    post['replies_count'] = 0  # ★ 追加
                     if 'profile_image_url' not in post:
                         post['profile_image_url'] = None
             
@@ -86,7 +94,8 @@ def show_timeline():
         flash('タイムラインの取得中にエラーが発生しました。', 'danger')
         return render_template('uguu/timeline.html', 
                              posts=[],
-                             is_authenticated=current_user.is_authenticated)
+                             is_authenticated=current_user.is_authenticated)    
+
 
 @uguu.route('/my_posts')
 
@@ -97,6 +106,12 @@ def show_my_posts():
         posts = db.get_user_posts(current_user.id)
         
         if posts:
+            # ★★★ ここに追加 ★★★
+            for post in posts:
+                post['replies'] = db.get_post_replies(post['post_id'])
+                post['replies_count'] = len(post['replies'])
+            # ★★★ ここまで ★★★
+            
             posts = sorted(posts, key=lambda x: x['updated_at'], reverse=True)
             
         return render_template(
@@ -109,3 +124,5 @@ def show_my_posts():
         print(f"My Posts Error: {e}")
         flash('投稿の取得中にエラーが発生しました。', 'danger')
         return redirect(url_for('timeline.show_timeline'))
+    
+
