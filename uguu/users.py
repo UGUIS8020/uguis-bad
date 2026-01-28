@@ -1,8 +1,9 @@
 from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app
 from flask_login import login_required, current_user
-from datetime import datetime, date
+from datetime import datetime
 import os
 import boto3
+from typing import Any, cast
 
 # ❶ Blueprint は一番最初に作る（route より前）
 users = Blueprint('users', __name__)
@@ -26,11 +27,14 @@ def add_point(user_id):
         flash("権限がありません", "danger")
         return redirect(url_for("users.user_profile", user_id=user_id))
 
-    points = int(request.form.get("points", "0"))
+    try:
+        points = int(request.form.get("points", "0") or 0)
+    except ValueError:
+        points = 0
+
     reason = (request.form.get("reason") or "管理人付与").strip()
     effective_at_str = (request.form.get("effective_at") or "").strip()
 
-    # 付与日
     if effective_at_str:
         try:
             dt = datetime.strptime(effective_at_str, "%Y-%m-%d %H:%M")
@@ -38,10 +42,11 @@ def add_point(user_id):
             dt = datetime.strptime(effective_at_str, "%Y-%m-%dT%H:%M")
     else:
         dt = datetime.utcnow()
+
     event_date = dt.strftime("%Y-%m-%d")
 
-    # app → current_app
-    history_table = current_app.dynamodb.Table(UGU_PARTICIPATION_TABLE)
+    dynamodb = cast(Any, boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION")))
+    history_table = dynamodb.Table(UGU_PARTICIPATION_TABLE)
 
     try:
         record_earn(

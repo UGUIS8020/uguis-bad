@@ -3,7 +3,9 @@ from flask_login import current_user, login_required
 from .dynamo import db
 from utils.s3 import upload_image_to_s3, delete_image_from_s3
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
+
+
 
 post = Blueprint('post', __name__)
 
@@ -101,32 +103,53 @@ def convert_youtube_url(url):
     return None
 
 @post.route('/post/<post_id>/edit', methods=['GET', 'POST'])
-@login_required  # login_requiredを追加
+@login_required
 def edit_post(post_id):
-    """投稿を編集"""
-    # 投稿を取得
     post_data = db.get_post(post_id)
-    if not post_data or post_data['user_id'] != current_user.id:  # current_userを使用
+    if not post_data or post_data['user_id'] != current_user.id:
         flash('投稿が見つからないか、編集権限がありません')
-        return redirect(url_for('uguu.show_timeline')) 
-        
+        return redirect(url_for('uguu.show_timeline'))
+
     if request.method == 'POST':
-        content = request.form.get('content')
+        content = (request.form.get('content') or "").strip()
         if not content:
             flash('投稿内容を入力してください')
-            return redirect(url_for('uguu.show_timeline'))
-            
+            return redirect(url_for('post.edit_post', post_id=post_id))
+
+        remove_image = request.form.get('remove_image') == "1"
+        file = request.files.get('image')
+
         try:
-            # 投稿を更新
-            db.update_post(post_id, content)
+            new_image_url = None
+            image_url_to_set = None
+            image_url_specified = False
+
+            # 画像削除（チェックONなら image_url=None をセット）
+            if remove_image:
+                image_url_to_set = None
+                image_url_specified = True
+
+            # 画像差し替え（ファイルが来たら優先）
+            if file and file.filename:
+                # ここをあなたのS3アップロード処理に置き換え
+                new_image_url = upload_image_to_s3(file, user_id=current_user.id, post_id=post_id)
+                image_url_to_set = new_image_url
+                image_url_specified = True
+
+            # DB更新：contentは必須、image_urlは指定があった時だけ
+            if image_url_specified:
+                db.update_post_fields(post_id, content=content, image_url=image_url_to_set)
+            else:
+                db.update_post_fields(post_id, content=content)
+
             flash('投稿を更新しました')
+            return redirect(url_for('uguu.show_timeline'))
+
         except Exception as e:
             print(f"Error: {e}")
             flash('更新に失敗しました')
-            
-        return redirect(url_for('uguu.show_timeline'))
-        
-    # GET リクエストの場合は編集フォームを表示
+            return redirect(url_for('post.edit_post', post_id=post_id))
+
     return render_template('uguu/edit_post.html', post=post_data)
 
 @post.route('/like/<post_id>', methods=['POST'])
@@ -154,74 +177,104 @@ def like_post(post_id):
             return redirect(url_for('uguu.show_timeline'))
 
 @post.route('/reply/<post_id>', methods=['POST'])
-@login_required  # login_requiredを追加
+@login_required
 def create_reply(post_id):
-    """返信を作成する"""
-    content = request.form.get('content')
-    
+    content = (request.form.get('content') or "").strip()
     if not content:
-        flash('内容を入力してください。')
+        flash('内容を入力してください。', 'warning')
         return redirect(url_for('uguu.show_timeline'))
-    
+
     try:
-        # 返信をDynamoDBに保存（PK/SK構造に合わせる）
         reply_id = str(uuid4())
-        reply_data = {
-            'PK': f"POST#{post_id}",
-            'SK': f"REPLY#{reply_id}",
-            'reply_id': reply_id,
-            'post_id': post_id,
-            'user_id': current_user.id,
-            'content': content,
-            'created_at': datetime.now().isoformat(),
-            'display_name': current_user.display_name  # current_userから取得
+        now = datetime.now(timezone.utc).isoformat()
+
+        item = {
+            "post_id": post_id,                 
+            "sk": f"REPLY#{reply_id}",          
+            "reply_id": reply_id,
+            "user_id": str(current_user.id),
+            "content": content,
+            "created_at": now,
+            "display_name": getattr(current_user, "display_name", "不明"),
         }
-        
-        db.posts_table.put_item(Item=reply_data)
+
+        db.replies_table.put_item(Item=item)
         flash('返信を投稿しました', 'success')
-        
+
     except Exception as e:
-        print(f"返信作成エラー: {str(e)}")
+        print(f"返信作成エラー: {e}")
         flash('返信の投稿に失敗しました', 'error')
 
     return redirect(url_for('uguu.show_timeline'))
 
+
 @post.route('/post/<post_id>/delete', methods=['POST'])
 @login_required
 def delete_post(post_id):
-    """投稿を削除"""
     try:
-        # 投稿を取得して存在確認
         post_data = db.get_post(post_id)
         if not post_data:
             flash('投稿が見つかりません', 'error')
             return redirect(url_for('uguu.show_timeline'))
-        
-        # 投稿者本人か確認
-        if str(post_data['user_id']) != str(current_user.id):
+
+        if str(post_data.get('user_id')) != str(current_user.id):
             flash('投稿を削除する権限がありません', 'error')
             return redirect(url_for('uguu.show_timeline'))
-        
-        # S3から画像を削除（もし画像がある場合）
-        if post_data.get('image_url'):
-            try:
-                delete_image_from_s3(post_data['image_url'])
-            except Exception as e:
-                pass  # S3削除に失敗してもDynamoDB削除は続行
-        
-        # DynamoDBから投稿を削除
+
+        # 投稿本体削除（uguu_post）
         db.delete_post(post_id)
-        
-        # 関連するいいねや返信も削除
-        try:
-            db.delete_post_likes(post_id)
-            db.delete_post_replies(post_id)
-        except Exception as e:
-            pass  # 関連データ削除に失敗しても続行
-        
+
+        # 返信削除（post-replies）
+        db.delete_post_replies(post_id)
+
+        # いいね削除（あるなら）
+        db.delete_post_likes(post_id)
+
         flash('投稿を削除しました', 'success')
-        
+        return redirect(url_for('uguu.show_timeline'))
+
     except Exception as e:
+        print(f"[delete_post route] error: {e}")
         flash('投稿の削除に失敗しました', 'error')
+        return redirect(url_for('uguu.show_timeline')) 
+
+
+
+# def delete_post(post_id):
+#     """投稿を削除"""
+#     try:
+#         # 投稿を取得して存在確認
+#         post_data = db.get_post(post_id)
+#         if not post_data:
+#             flash('投稿が見つかりません', 'error')
+#             return redirect(url_for('uguu.show_timeline'))
+        
+#         # 投稿者本人か確認
+#         if str(post_data['user_id']) != str(current_user.id):
+#             flash('投稿を削除する権限がありません', 'error')
+#             return redirect(url_for('uguu.show_timeline'))
+        
+#         # S3から画像を削除（もし画像がある場合）
+#         if post_data.get('image_url'):
+#             try:
+#                 delete_image_from_s3(post_data['image_url'])
+#             except Exception as e:
+#                 pass  # S3削除に失敗してもDynamoDB削除は続行
+        
+#         # DynamoDBから投稿を削除
+#         db.delete_post(post_id)
+        
+#         # 関連するいいねや返信も削除
+#         try:
+#             db.delete_post_likes(post_id)
+#             db.delete_post_replies(post_id)
+#         except Exception as e:
+#             pass  # 関連データ削除に失敗しても続行
+        
+#         flash('投稿を削除しました', 'success')
+        
+#     except Exception as e:
+#         flash('投稿の削除に失敗しました', 'error')
     
-    return redirect(url_for('uguu.show_timeline'))
+#     return redirect(url_for('uguu.show_timeline'))
+
