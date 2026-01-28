@@ -1,21 +1,38 @@
-import boto3
-import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
-
-
-dynamodb = boto3.resource(
-    "dynamodb",
-    region_name=os.getenv("AWS_REGION", "ap-northeast-1"),
-)
-UGU_POINTS_TABLE = os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points")
-
+from typing import Any, Dict, List, Optional, Tuple
+import json, base64
+from decimal import Decimal
+from botocore.exceptions import ClientError
 
 load_dotenv()
+
+import boto3
+import os
+
+def _encode_cursor(last_key: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not last_key:
+        return None
+
+    def conv(v):
+        if isinstance(v, Decimal):
+            return int(v) if v % 1 == 0 else float(v)
+        return v
+
+    safe = {k: conv(v) for k, v in last_key.items()}
+    raw = json.dumps(safe, ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+def _decode_cursor(cursor: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not cursor:
+        return None
+    raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+    return json.loads(raw.decode("utf-8"))
+
 
 class DynamoDB:
     def __init__(self):
@@ -25,233 +42,282 @@ class DynamoDB:
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
             region_name=os.getenv("AWS_REGION")
         )
-        self.posts_table = self.dynamodb.Table('posts')
-        self.users_table = self.dynamodb.Table('bad-users')
+        self.posts_table    = self.dynamodb.Table('uguu_post')
+        self.users_table    = self.dynamodb.Table('bad-users')
         self.schedule_table = self.dynamodb.Table('bad_schedules')
-        self.part_history    = self.dynamodb.Table("bad-users-history")
+        self.part_history   = self.dynamodb.Table("bad-users-history")
+        
+        self.replies_table  = self.dynamodb.Table("post-replies")
+
         print("DynamoDB tables initialized")
 
-    def get_posts(self, limit=20):
-        """投稿一覧を取得（PK/SK構造対応版）"""
-        try:
-            print("Starting to fetch posts...")
-            
-            # PK/SK構造に対応したクエリ
-            response = self.posts_table.scan(
-                FilterExpression="begins_with(SK, :metadata)",
-                ExpressionAttributeValues={
-                    ':metadata': 'METADATA#'
-                }
-            )
-            posts = response.get('Items', [])
-            print(f"Found {len(posts)} posts")
-            
-            enriched_posts = []
-            for post in posts:
-                try:
-                    user_id = post.get('user_id')
-                    if user_id:
-                        print(f"Processing post for user: {user_id}")
-                        
-                        try:
-                            user_response = self.users_table.get_item(
-                                Key={
-                                    'user#user_id': user_id
-                                }
-                            )
-                            user = user_response.get('Item', {})
-                            
-                            enriched_post = {
-                                'post_id': post.get('post_id'),
-                                'content': post.get('content'),
-                                'image_url': post.get('image_url'),
-                                'youtube_url': post.get('youtube_url'),  # ← 追加
-                                'created_at': post.get('created_at'),
-                                'updated_at': post.get('updated_at', post.get('created_at')),
-                                'user_id': user_id,
-                                'display_name': user.get('display_name', 'Unknown User'),
-                                'user_name': user.get('user_name', 'Unknown')
-                            }
-                            enriched_posts.append(enriched_post)
-                            print(f"Successfully processed post: {post.get('post_id')}")
-                        except Exception as e:
-                            print(f"Error fetching user: {str(e)}")
-                            # エラー時にもポストは表示する
-                            enriched_post = {
-                                'post_id': post.get('post_id'),
-                                'content': post.get('content'),
-                                'image_url': post.get('image_url'),
-                                'youtube_url': post.get('youtube_url'),  # ← 追加
-                                'created_at': post.get('created_at'),
-                                'updated_at': post.get('updated_at', post.get('created_at')),
-                                'user_id': user_id,
-                                'display_name': '不明なユーザー',
-                                'user_name': 'Unknown'
-                            }
-                            enriched_posts.append(enriched_post)
-                except Exception as e:
-                    print(f"Error processing post: {str(e)}")
-                    continue
-            
-            return sorted(enriched_posts, 
-                        key=lambda x: x.get('updated_at', x.get('created_at', '')), 
-                        reverse=True)[:limit]
-            
-        except Exception as e:
-            print(f"Error in get_posts: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            return []
+    def get_posts_page(
+        self,
+        limit: int = 10,
+        cursor: Optional[str] = None,
+        replies_limit: int = 5,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
 
-    def get_post(self, post_id):
-        """特定の投稿を取得（PK/SK構造対応）"""
-        try:
-            print(f"Fetching post: {post_id}")
-            
-            # PK/SK構造に合わせて投稿を取得
-            response = self.posts_table.get_item(
-                Key={
-                    'PK': f"POST#{post_id}",
-                    'SK': f"METADATA#{post_id}"
-                }
-            )
-            
-            print(f"DynamoDB response: {response}")
-            
-            if 'Item' not in response:
-                print(f"Post not found: {post_id}")
-                return None
-                
-            post = response['Item']
-            print(f"Raw post data: {post}")
-            
-            # ユーザー情報を取得して投稿を充実させる
-            user_id = post.get('user_id')
-            if user_id:
+        eks = _decode_cursor(cursor)
+
+        kwargs = dict(
+            IndexName="gsi_feed",
+            KeyConditionExpression=Key("feed_pk").eq("FEED"),
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        if eks:
+            kwargs["ExclusiveStartKey"] = eks
+
+        res = self.posts_table.query(**kwargs)
+        items = res.get("Items", [])
+        next_cursor = _encode_cursor(res.get("LastEvaluatedKey"))
+
+        enriched_posts: List[Dict[str, Any]] = []
+
+        for post in items:
+            # post_id の決定
+            post_id = post.get("post_id")
+            if not post_id:
+                pk = post.get("PK", "")
+                if isinstance(pk, str) and pk.startswith("POST#"):
+                    post_id = pk.split("#", 1)[1]
+
+            user_id = post.get("user_id")
+
+            p: Dict[str, Any] = {
+                "post_id": post_id,
+                "content": post.get("content"),
+                "image_url": post.get("image_url"),
+                "youtube_url": post.get("youtube_url"),
+                "created_at": post.get("created_at"),
+                "updated_at": post.get("updated_at", post.get("created_at")),
+                "user_id": user_id,
+                "display_name": post.get("display_name"),
+                "user_name": post.get("user_name"),
+            }
+
+            # 返信
+            if post_id:
                 try:
-                    user_response = self.users_table.get_item(
-                        Key={'user#user_id': user_id}
+                    rr = self.replies_table.query(
+                        KeyConditionExpression=Key("post_id").eq(str(post_id)) & Key("sk").begins_with("REPLY#"),
+                        ScanIndexForward=False,
+                        Limit=replies_limit,
                     )
-                    user = user_response.get('Item', {})
-                    
-                    enriched_post = {
-                        'post_id': post.get('post_id', post_id),
-                        'content': post.get('content'),
-                        'image_url': post.get('image_url'),
-                        'created_at': post.get('created_at'),
-                        'updated_at': post.get('updated_at', post.get('created_at')),
-                        'user_id': user_id,
-                        'display_name': user.get('display_name', 'Unknown User'),
-                        'user_name': user.get('user_name', 'Unknown')
-                    }
-                    return enriched_post
-                    
+                    replies_items = rr.get("Items", [])
+
+                    cr = self.replies_table.query(
+                        KeyConditionExpression=Key("post_id").eq(str(post_id)) & Key("sk").begins_with("REPLY#"),
+                        Select="COUNT",
+                    )
+                    replies_count = int(cr.get("Count", 0))
+
+                    p["replies"] = [
+                        {
+                            "reply_id": it.get("reply_id") or (
+                                it.get("sk", "").split("#", 1)[1]
+                                if str(it.get("sk", "")).startswith("REPLY#")
+                                else None
+                            ),
+                            "post_id": str(post_id),
+                            "user_id": it.get("user_id"),
+                            "content": it.get("content"),
+                            "created_at": it.get("created_at"),
+                            "display_name": it.get("display_name"),
+                            "profile_image_url": it.get("profile_image_url"),
+                        }
+                        for it in replies_items
+                    ]
+                    p["replies_count"] = replies_count
+
                 except Exception as e:
-                    print(f"Error fetching user: {str(e)}")
-                    # ユーザー情報取得失敗時のフォールバック
-                    fallback_post = {
-                        'post_id': post.get('post_id', post_id),
-                        'content': post.get('content'),
-                        'image_url': post.get('image_url'),
-                        'created_at': post.get('created_at'),
-                        'updated_at': post.get('updated_at', post.get('created_at')),
-                        'user_id': user_id,
-                        'display_name': '不明なユーザー',
-                        'user_name': 'Unknown'
-                    }
-                    return fallback_post
-            
-            # user_idがない場合
-            post['post_id'] = post.get('post_id', post_id)
-            return post
-                
-        except Exception as e:
-            print(f"投稿取得エラー: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            return None
+                    print("[DEBUG replies] error:", e)
+                    p["replies"] = []
+                    p["replies_count"] = 0
+            else:
+                p["replies"] = []
+                p["replies_count"] = 0
+
+            # ★これが必要（作ったpをリストに入れる）
+            enriched_posts.append(p)
+
+        # ★これが必要（必ずタプルで返す）
+        return enriched_posts, next_cursor
+
+
+    def get_post(self, post_id: str) -> Optional[Dict[str, Any]]:
+        """投稿メタデータ1件を取得（uguu_post から）"""
+        res = self.posts_table.get_item(
+            Key={"PK": f"POST#{post_id}", "SK": f"METADATA#{post_id}"}
+        )
+        return res.get("Item")
+    
 
     def create_post(self, user_id, content, image_url=None, youtube_url=None):
-        """新規投稿を作成"""
-        try:
-            post_id = str(uuid4())            
-            timestamp = datetime.now().isoformat()
-            
-            post = {
-                'PK': f"POST#{post_id}",
-                'SK': f"METADATA#{post_id}",
-                'post_id': post_id,
-                'user_id': user_id,
-                'content': content,
-                'image_url': image_url,
-                'youtube_url': youtube_url,  # YouTube URL追加
-                'created_at': timestamp,
-                'updated_at': timestamp
-            }
-            print(f"Post data: {post}")
-            
-            self.posts_table.put_item(Item=post)
-            print("Post created successfully in DynamoDB")
-            return post
-            
-        except Exception as e:
-            print(f"DynamoDB Error: {str(e)}")
-            raise
+        """新規投稿を作成（gsi_feed 対応）"""
+        post_id = str(uuid4())
+        now = datetime.now(timezone.utc).isoformat()  # UTC推奨（並びも安定）
+
+        post = {
+            "PK": f"POST#{post_id}",
+            "SK": f"METADATA#{post_id}",
+            "post_id": post_id,
+            "user_id": user_id,
+            "content": content,
+            "image_url": image_url,
+            "youtube_url": youtube_url,
+
+            "created_at": now,
+            "updated_at": now,
+
+            # ✅ gsi_feed 用（あなたの query に必要）
+            "feed_pk": "FEED",
+            "feed_ts": now,  # ScanIndexForward=False で新しい順
+        }
+
+        self.posts_table.put_item(Item=post)
+        return post
+
+    def update_post_fields(self, post_id: str, content: str = None, image_url=None):
+        now = datetime.now().isoformat()
+
+        key = {"PK": f"POST#{post_id}", "SK": f"METADATA#{post_id}"}
+
+        updates = []
+        values = {}
+        names = {}
+
+        # content 更新
+        if content is not None:
+            updates.append("#content = :content")
+            names["#content"] = "content"
+            values[":content"] = content
+
+            # ✅ content編集したらフィード順も更新（上に上げる）
+            updates.append("#updated_at = :now")
+            updates.append("#feed_ts = :now")
+            names["#updated_at"] = "updated_at"
+            names["#feed_ts"] = "feed_ts"
+            values[":now"] = now
+
+        # image_url 更新（None も許容：削除）
+        if image_url is not None:
+            updates.append("#image_url = :image_url")
+            names["#image_url"] = "image_url"
+            values[":image_url"] = image_url
+
+            # 画像変更でも上げたいならここでも feed_ts 更新してOK
+            if ":now" not in values:
+                updates.append("#updated_at = :now")
+                updates.append("#feed_ts = :now")
+                names["#updated_at"] = "updated_at"
+                names["#feed_ts"] = "feed_ts"
+                values[":now"] = now
+
+        if not updates:
+            return False
+
+        self.posts_table.update_item(
+            Key=key,
+            UpdateExpression="SET " + ", ".join(updates),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return True
+
 
     def update_post(self, post_id, content):
-        """投稿を更新"""
-        try:
-            timestamp = datetime.now().isoformat()
-            self.posts_table.update_item(
-                Key={
-                    'PK': f"POST#{post_id}",
-                    'SK': f"METADATA#{post_id}"
-                },
-                UpdateExpression='SET content = :content, updated_at = :updated_at',
-                ExpressionAttributeValues={
-                    ':content': content,
-                    ':updated_at': timestamp
-                }
-            )
-            return True
-        except Exception as e:
-            print(f"Error updating post: {e}")
-            raise
+        """投稿を更新（フィードの並びも更新＝上に上がる）"""
+        timestamp = datetime.now(timezone.utc).isoformat()
 
-    def delete_post(self, post_id):
-        """投稿を削除"""
+        self.posts_table.update_item(
+            Key={
+                "PK": f"POST#{post_id}",
+                "SK": f"METADATA#{post_id}",
+            },
+            UpdateExpression="SET content = :content, updated_at = :updated_at, feed_ts = :feed_ts",
+            ExpressionAttributeValues={
+                ":content": content,
+                ":updated_at": timestamp,
+                ":feed_ts": timestamp,
+            },
+            ReturnValues="NONE",
+        )
+        return True
+
+    # def delete_post(self, post_id):
+    #     """投稿を削除"""
+    #     try:
+    #         # 投稿を検索して実際のキー構造を確認
+    #         response = self.posts_table.scan()
+    #         posts = response.get('Items', [])
+            
+    #         target_post = None
+    #         for post in posts:
+    #             if str(post.get('post_id')) == str(post_id):
+    #                 target_post = post
+    #                 break
+            
+    #         if not target_post:
+    #             raise Exception(f"Post {post_id} not found")
+            
+    #         # 実際のキー構造に基づいて削除
+    #         if 'PK' in target_post and 'SK' in target_post:
+    #             # PK/SK構造の場合
+    #             delete_key = {
+    #                 'PK': target_post['PK'],
+    #                 'SK': target_post['SK']
+    #             }
+    #         else:
+    #             # post_id直接の場合
+    #             delete_key = {
+    #                 'post_id': post_id
+    #             }
+            
+    #         response = self.posts_table.delete_item(Key=delete_key)
+    #         return response
+            
+    #     except Exception as e:
+    #         raise Exception(f"投稿削除エラー: {str(e)}")
+        
+    def delete_post(self, post_id: str):
+        """投稿(METADATA) + 返信(全件)を削除"""
+        pk = f"POST#{post_id}"
+
+        # 1) 返信を全削除（replies_table）
         try:
-            # 投稿を検索して実際のキー構造を確認
-            response = self.posts_table.scan()
-            posts = response.get('Items', [])
-            
-            target_post = None
-            for post in posts:
-                if str(post.get('post_id')) == str(post_id):
-                    target_post = post
-                    break
-            
-            if not target_post:
-                raise Exception(f"Post {post_id} not found")
-            
-            # 実際のキー構造に基づいて削除
-            if 'PK' in target_post and 'SK' in target_post:
-                # PK/SK構造の場合
-                delete_key = {
-                    'PK': target_post['PK'],
-                    'SK': target_post['SK']
-                }
-            else:
-                # post_id直接の場合
-                delete_key = {
-                    'post_id': post_id
-                }
-            
-            response = self.posts_table.delete_item(Key=delete_key)
-            return response
-            
+            last_evaluated_key = None
+            with self.replies_table.batch_writer() as batch:
+                while True:
+                    kwargs = {
+                        "KeyConditionExpression": Key("PK").eq(pk) & Key("SK").begins_with("REPLY#"),
+                        "ProjectionExpression": "PK, SK",
+                    }
+                    if last_evaluated_key:
+                        kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+                    res = self.replies_table.query(**kwargs)
+                    for it in res.get("Items", []):
+                        batch.delete_item(Key={"PK": it["PK"], "SK": it["SK"]})
+
+                    last_evaluated_key = res.get("LastEvaluatedKey")
+                    if not last_evaluated_key:
+                        break
         except Exception as e:
-            raise Exception(f"投稿削除エラー: {str(e)}")
+            raise Exception(f"返信削除エラー: {e}")
+
+        # 2) 投稿(METADATA)削除（posts_table）
+        try:
+            return self.posts_table.delete_item(
+                Key={"PK": pk, "SK": f"METADATA#{post_id}"},
+                ConditionExpression="attribute_exists(PK) AND attribute_exists(SK)",
+            )
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code")
+            if code == "ConditionalCheckFailedException":
+                raise Exception(f"Post {post_id} not found")
+            raise Exception(f"投稿削除エラー: {e}")
 
     def delete_post_likes(self, post_id):
         """投稿に関連するいいねを削除"""
@@ -280,32 +346,51 @@ class DynamoDB:
             print(f"いいね削除エラー: {str(e)}")
             return False
 
-    def delete_post_replies(self, post_id):
-        """投稿に関連する返信を削除"""
+    def delete_post_replies(self, post_id: str) -> bool:
+        """投稿に関連する返信を削除（post_id + sk 版）"""
         try:
             print(f"Deleting replies for post: {post_id}")
-            
-            response = self.posts_table.query(
-                KeyConditionExpression="PK = :pk AND begins_with(SK, :reply)",
-                ExpressionAttributeValues={
-                    ':pk': f"POST#{post_id}",
-                    ':reply': 'REPLY#'
-                }
-            )
-            
-            for reply in response.get('Items', []):
-                self.posts_table.delete_item(
-                    Key={
-                        'PK': reply['PK'],
-                        'SK': reply['SK']
+            deleted = 0
+            last_evaluated_key = None
+
+            with self.replies_table.batch_writer() as batch:
+                while True:
+                    kwargs = {
+                        "KeyConditionExpression": Key("post_id").eq(str(post_id)) & Key("sk").begins_with("REPLY#"),
                     }
-                )
-            
-            print(f"Deleted {len(response.get('Items', []))} replies")
+                    if last_evaluated_key:
+                        kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+                    res = self.replies_table.query(**kwargs)
+                    items = res.get("Items", [])
+
+                    for it in items:
+                        batch.delete_item(Key={"post_id": it["post_id"], "sk": it["sk"]})
+                        deleted += 1
+
+                    last_evaluated_key = res.get("LastEvaluatedKey")
+                    if not last_evaluated_key:
+                        break
+
+            print(f"Deleted {deleted} replies")
             return True
+
         except Exception as e:
             print(f"返信削除エラー: {str(e)}")
             return False
+        
+    def delete_reply(self, post_id: str, reply_id: str) -> bool:
+        """返信1件を削除（sk = REPLY#<reply_id> 前提）"""
+        try:
+            sk = f"REPLY#{reply_id}"
+            self.replies_table.delete_item(
+                Key={"post_id": str(post_id), "sk": sk}
+            )
+            return True
+        except Exception as e:
+            print("[delete_reply] error:", e)
+            return False
+        
 
     def like_post(self, post_id, user_id):
         """投稿にいいねを追加/削除"""
@@ -384,62 +469,86 @@ class DynamoDB:
             print(f"Error checking like status: {e}")
             return False
     
-    def get_user_by_id(self, user_id):
-        """ユーザー情報を取得"""
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        """ユーザー情報を取得（表示用に最低限整形）"""
         try:
-            print(f"Fetching user: {user_id}")
-            response = self.users_table.get_item(
-                Key={'user#user_id': user_id}
+            if not user_id:
+                return None
+
+            res = self.users_table.get_item(Key={"user#user_id": user_id})
+            u = res.get("Item")
+            if not u:
+                return None
+
+            # 表示名のフォールバック
+            display_name = (u.get("display_name") or "").strip() or "不明"
+            user_name    = (u.get("user_name") or "").strip()
+
+            # 画像URLのフォールバック（あなたの既存ロジックに合わせる）
+            url = (
+                u.get("profile_image_url")
+                or u.get("profileImageUrl")
+                or u.get("large_image_url")
+                or ""
             )
-            user = response.get('Item')
-            print(f"User found: {user is not None}")
-            return user
+            url = url.strip() if isinstance(url, str) else ""
+            profile_image_url = url if url and url.lower() != "none" else None
+
+            u["display_name"] = display_name
+            u["user_name"] = user_name
+            u["profile_image_url"] = profile_image_url
+
+            return u
+
         except Exception as e:
-            print(f"Error getting user by id: {str(e)}")
+            print(f"Error getting user by id: {e}")
             import traceback
             print(traceback.format_exc())
             return None
 
-    def get_posts_by_user(self, user_id):
-        """特定ユーザーの投稿を取得"""
-        try:
-            print(f"Fetching posts for user: {user_id}")
-            
-            # postsテーブルから該当ユーザーの投稿を検索
-            response = self.posts_table.scan(
-                FilterExpression="begins_with(SK, :metadata) AND user_id = :user_id",
-                ExpressionAttributeValues={
-                    ':metadata': 'METADATA#',
-                    ':user_id': user_id
-                }
-            )
-            
-            posts = response.get('Items', [])
-            print(f"Found {len(posts)} posts for user {user_id}")
-            
-            # 投稿データを整形
-            enriched_posts = []
-            for post in posts:
-                enriched_post = {
-                    'post_id': post.get('post_id'),
-                    'content': post.get('content'),
-                    'image_url': post.get('image_url'),
-                    'youtube_url': post.get('youtube_url'),
-                    'created_at': post.get('created_at'),
-                    'updated_at': post.get('updated_at', post.get('created_at')),
-                    'user_id': user_id,
-                    'likes_count': post.get('likes_count', 0),
-                    'replies_count': post.get('replies_count', 0)
-                }
-                enriched_posts.append(enriched_post)
-            
-            return enriched_posts
-            
-        except Exception as e:
-            print(f"Error getting posts by user: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            return []
+    def get_posts_by_user(
+        self,
+        user_id: str,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+
+        eks = _decode_cursor(cursor)
+
+        kwargs = dict(
+            IndexName="gsi_user_posts",
+            KeyConditionExpression=Key("user_id").eq(user_id),
+            ScanIndexForward=False,  # 新しい順
+            Limit=limit,
+        )
+        if eks:
+            kwargs["ExclusiveStartKey"] = eks
+
+        res = self.posts_table.query(**kwargs)
+        items = res.get("Items", [])
+        next_cursor = _encode_cursor(res.get("LastEvaluatedKey"))
+
+        posts = []
+        for post in items:
+            post_id = post.get("post_id")
+            if not post_id:
+                pk = post.get("PK", "")
+                if pk.startswith("POST#"):
+                    post_id = pk.split("#", 1)[1]
+
+            posts.append({
+                "post_id": post_id,
+                "content": post.get("content"),
+                "image_url": post.get("image_url"),
+                "youtube_url": post.get("youtube_url"),
+                "created_at": post.get("created_at"),
+                "updated_at": post.get("updated_at", post.get("created_at")),
+                "user_id": post.get("user_id"),
+                "likes_count": post.get("likes_count", 0),
+                "replies_count": post.get("replies_count", 0),
+            })
+
+        return posts, next_cursor
         
     def get_user_posts(self, user_id):
         """特定ユーザーの投稿を取得（get_posts_by_userのエイリアス）"""
@@ -1739,10 +1848,8 @@ class DynamoDB:
 
         print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(items)}"
             + (f" / since={since}" if since else ""))
-        return total
-    
-    
-        
+        return total   
+
 
 class PointTransaction:
     """ポイント取引のデータ構造を定義"""

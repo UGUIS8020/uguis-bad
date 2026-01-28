@@ -1344,114 +1344,110 @@ def participants_by_date(schedule_id):
                            schedule=schedule,
                            participants_info=participants_info)
 
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     form = RegistrationForm()
-    if form.validate_on_submit():
-        try:            
-            current_time = datetime.now(timezone.utc).isoformat()
-            hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
-            user_id = str(uuid.uuid4())          
 
-            table = app.dynamodb.Table(app.table_name) 
-            posts_table = app.dynamodb.Table('posts')  # 投稿用テーブル
+    if not form.validate_on_submit():
+        # バリデーションエラー表示
+        if form.errors:
+            app.logger.warning(f"Form validation errors: {form.errors}")
+            for field, errors in form.errors.items():
+                for error in errors:
+                    flash(f'{form[field].label.text}: {error}', 'error')
+        return render_template('signup.html', form=form)
 
-            # メールアドレスの重複チェック用のクエリ
-            email_check = table.query(
-                IndexName='email-index',
-                KeyConditionExpression='email = :email',
-                ExpressionAttributeValues={
-                    ':email': form.email.data
-                }
-            )
+    # -------------------------
+    # ここから登録処理
+    # -------------------------
+    user_id = str(uuid.uuid4())
+    current_time = datetime.now(timezone.utc).isoformat()
+    hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
 
-            if email_check.get('Items'):
-                app.logger.warning(f"Duplicate email registration attempt: {form.email.data}")
-                flash('このメールアドレスは既に登録されています。', 'error')
-                return redirect(url_for('signup'))         
+    # usersテーブル（bad-users想定）
+    users_table = app.dynamodb.Table(app.table_name)  # app.table_name が users テーブル名ならOK
 
-            app.table.put_item(
-                Item={
-                    "user#user_id": user_id,                    
-                    "address": form.address.data,
-                    "administrator": False,
-                    "created_at": current_time,
-                    "date_of_birth": form.date_of_birth.data.strftime('%Y-%m-%d'),
-                    "display_name": form.display_name.data,
-                    "email": form.email.data.lower(),
-                    "furigana": form.furigana.data,
-                    "gender": form.gender.data,
-                    "password": hashed_password,
-                    "phone": form.phone.data,
-                    "post_code": form.post_code.data,
-                    "updated_at": current_time,
-                    "user_name": form.user_name.data,
-                    "guardian_name": form.guardian_name.data,
-                    "emergency_phone": form.emergency_phone.data,
-                    "badminton_experience": form.badminton_experience.data,
-                    "organization": form.organization.data,
-                    # プロフィール用の追加フィールド
-                    "bio": "",  # 自己紹介
-                    "profile_image_url": "",  # プロフィール画像URL
-                    "followers_count": 0,  # フォロワー数
-                    "following_count": 0,  # フォロー数
-                    "posts_count": 0  # 投稿数
-                },
-                ConditionExpression='attribute_not_exists(#user_id)',
-                ExpressionAttributeNames={ "#user_id": "user#user_id"
-                }
-            )
+    # ユーザーItem（作成）
+    user_item = {
+        "user#user_id": user_id,
+        "address": form.address.data,
+        "administrator": False,
+        "created_at": current_time,
+        "updated_at": current_time,
 
-            posts_table.put_item(
-                Item={
-                    'PK': f"USER#{user_id}",
-                    'SK': 'TIMELINE#DATA',
-                    'user_id': user_id,
-                    'created_at': current_time,
-                    'updated_at': current_time,
-                    'last_post_time': None
-                }
-            )           
-            
+        "date_of_birth": form.date_of_birth.data.strftime('%Y-%m-%d'),
+        "display_name": form.display_name.data,
+        "user_name": form.user_name.data,
+        "furigana": form.furigana.data,
+        "gender": form.gender.data,
 
-            # ログ出力を詳細に
-            app.logger.info(f"New user created - ID: {user_id}, Organization: {form.organization.data}, Email: {form.email.data}")
-            
-            # 成功メッセージ
-            flash('アカウントが作成されました！ログインしてください。', 'success')
-            return redirect(url_for('login'))
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            error_message = e.response['Error']['Message']
-            
-            app.logger.error(f"DynamoDB error - Code: {error_code}, Message: {error_message}")
-            
-            if error_code == 'ConditionalCheckFailedException':
-                flash('このメールアドレスは既に登録されています。', 'error')
-            elif error_code == 'ValidationException':
-                flash('入力データが無効です。', 'error')
-            elif error_code == 'ResourceNotFoundException':
-                flash('システムエラーが発生しました。', 'error')
-                app.logger.critical(f"DynamoDB table not found: {app.table_name}")
-            else:
-                flash('アカウント作成中にエラーが発生しました。', 'error')
-                
+        "email": form.email.data.lower(),
+        "password": hashed_password,
+
+        "phone": form.phone.data,
+        "post_code": form.post_code.data,
+        "organization": form.organization.data,
+
+        "guardian_name": form.guardian_name.data,
+        "emergency_phone": form.emergency_phone.data,
+        "badminton_experience": form.badminton_experience.data,
+
+        # プロフィール用の追加フィールド
+        "bio": "",
+        "profile_image_url": "",
+        "followers_count": 0,
+        "following_count": 0,
+        "posts_count": 0,
+    }
+
+    try:
+        # 1) email重複チェック（GSI: email-index）
+        email_check = users_table.query(
+            IndexName='email-index',
+            KeyConditionExpression='email = :email',
+            ExpressionAttributeValues={':email': form.email.data.lower()},
+        )
+
+        if email_check.get('Items'):
+            app.logger.warning(f"Duplicate email registration attempt: {form.email.data}")
+            flash('このメールアドレスは既に登録されています。', 'error')
             return redirect(url_for('signup'))
-        
-        except Exception as e:
-            app.logger.error(f"Unexpected error during signup: {str(e)}", exc_info=True)
-            flash('予期せぬエラーが発生しました。時間をおいて再度お試しください。', 'error')
-            return redirect(url_for('signup'))
-            
-    # フォームのバリデーションエラーの場合
-    if form.errors:
-        app.logger.warning(f"Form validation errors: {form.errors}")
-        for field, errors in form.errors.items():
-            for error in errors:
-                flash(f'{form[field].label.text}: {error}', 'error')
-    
-    return render_template('signup.html', form=form)
+
+        # 2) usersテーブルにユーザー作成
+        users_table.put_item(
+            Item=user_item,
+            ConditionExpression='attribute_not_exists(#pk)',
+            ExpressionAttributeNames={"#pk": "user#user_id"},
+        )    
+
+        app.logger.info(
+            f"New user created - ID: {user_id}, Organization: {form.organization.data}, Email: {form.email.data}"
+        )
+        flash('アカウントが作成されました！ログインしてください。', 'success')
+        return redirect(url_for('login'))
+
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error'].get('Message', '')
+        app.logger.error(f"DynamoDB error - Code: {error_code}, Message: {error_message}", exc_info=True)
+
+        if error_code == 'ConditionalCheckFailedException':
+            flash('このメールアドレスは既に登録されています。', 'error')
+        elif error_code == 'ValidationException':
+            flash('入力データが無効です。', 'error')
+        elif error_code == 'ResourceNotFoundException':
+            flash('システムエラーが発生しました。', 'error')
+            app.logger.critical(f"DynamoDB table not found: {app.table_name}")
+        else:
+            flash('アカウント作成中にエラーが発生しました。', 'error')
+
+        return redirect(url_for('signup'))
+
+    except Exception as e:
+        app.logger.error(f"Unexpected error during signup: {str(e)}", exc_info=True)
+        flash('予期せぬエラーが発生しました。時間をおいて再度お試しください。', 'error')
+        return redirect(url_for('signup'))
 
 @app.route('/temp_register', methods=['GET', 'POST'])
 def temp_register():

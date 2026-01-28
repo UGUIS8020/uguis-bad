@@ -43,557 +43,685 @@
     {
       "@type": "SocialMediaPosting",
       "headline": "{{ post.display_name }}の投稿",
-      "author": {
-        "@type": "Person",
-        "name": "{{ post.display_name }}"
-      },
+      "author": { "@type": "Person", "name": "{{ post.display_name }}" },
       "datePublished": "{{ post.created_at }}",
       "articleBody": "{{ post.content[:100] }}",
       "interactionStatistic": [
-        {
-          "@type": "InteractionCounter",
-          "interactionType": "https://schema.org/LikeAction",
-          "userInteractionCount": {{ post.likes_count|default(0) }}
-        },
-        {
-          "@type": "InteractionCounter",
-          "interactionType": "https://schema.org/CommentAction",
-          "userInteractionCount": {{ post.replies_count|default(0) }}
-        }
+        { "@type": "InteractionCounter", "interactionType": "https://schema.org/LikeAction", "userInteractionCount": {{ post.likes_count|default(0) }} },
+        { "@type": "InteractionCounter", "interactionType": "https://schema.org/CommentAction", "userInteractionCount": {{ post.replies_count|default(0) }} }
       ]
-      {% if post.image_url %}
-      ,"image": "{{ post.image_url }}"
-      {% endif %}
+      {% if post.image_url %},"image": "{{ post.image_url }}"{% endif %}
     }{% if not loop.last %},{% endif %}
     {% endfor %}
   ]
 }
 </script>
 {% endblock %}
-{% block content %}
 
-<!-- <style>
-   :root{
-  --post-max-width: 600px;   /* PC時の投稿表示幅 */
-  --shorts-fill-width: 150%; /* Shorts埋め込みの横方向拡大率（帯消し用） */
-  --radius-pc: 8px;
-  --radius-mobile: 10px;
-}
-
-/* ================== Avatar ================== */
-.avatar-ig{
-  --size: 40px; --ring: 2px; --gap: 1px;
-  display:inline-grid; place-items:center;
-  width:calc(var(--size) + (var(--ring)+var(--gap))*2);
-  height:calc(var(--size) + (var(--ring)+var(--gap))*2);
-  border-radius:50%;
-  padding:calc(var(--ring) + var(--gap));
-  background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
-}
-.avatar-ig>img{
-  width:var(--size); height:var(--size);
-  border-radius:50%; object-fit:cover; display:block;
-  background:#fff; box-shadow:0 0 0 var(--gap) #fff;
-}
-
-/* ================== Timeline ================== */
-.timeline-container{ max-width: var(--post-max-width); margin: 0 auto; }
-@media (min-width:769px){
-  .timeline-container .card{ margin-bottom:2rem; }
-}
-@media (max-width:768px){
-  .timeline-container .card-header,
-  .timeline-container .card-body{ padding-left:15px; padding-right:15px; }
-  .timeline-container .card + .card{ border-top:8px solid #f0f0f0; }
-}
-
-/* ================== 縦写真/縦動画（4:5） ================== */
-.ig-portrait-frame{
-  width: 400px;                          /* 横幅を固定（ここで調整可能） */
-  max-width: 100%;
-  margin: 0 auto;                        /* 中央寄せ */
-  background: #000;                      /* 背景を黒に（好みに応じて変更可） */
-  overflow: hidden;
-  border-radius: 8px;                    /* 少し角丸 */
-}
-
-.ig-portrait-frame > img,
-.ig-portrait-frame > video{
-  display: block;
-  width: 100%;                           /* 横幅にフィット */
-  height: auto;                          /* 縦横比を保持 */
-  object-fit: contain;                   /* トリミングせず全体を表示 */
-  max-height: 85vh;                      /* 画面の縦に収まるよう制限 */
-}
-
-/* ================== YouTube Shorts（9:16） ================== */
-/* ===== YouTube Shorts：固定サイズ・中央表示（PC基準、スマホ調整なし） ===== */
-.shorts-fixed {
-  width: 400px;                 /* 枠の見かけ上の幅（統一） */
-  max-width: 100%;
-  aspect-ratio: 9 / 16;         /* 縦長比率固定 */
-  margin: 0 auto;
-  background: #000;
-  position: relative;
-  overflow: hidden;             /* はみ出しトリミング */
-  border-radius: 8px;
-}
-
-/* 横幅を2倍にして左右をカット＝縦長ショート化 */
-.shorts-fixed > iframe {
-  position: absolute;
-  inset: 0;
-  height: 100%;
-  width: 220%;                  /* ← 200〜230%で調整可能。中央トリミング */
-  left: 50%;
-  transform: translateX(-50%);
-  border: 0;
-  object-fit: cover;
-}
-
-/* ================== YouTube 通常動画 ================== */
-.mobile-full-width-media {
-  width: 400px;                          /* ← 横幅を固定（お好みで調整可） */
-  max-width: 100%;
-  margin: 0 auto;                        /* ← 中央寄せ */
-  background: #000;
-  overflow: hidden;
-  border-radius: 8px;
-}
-
-.mobile-full-width-media iframe {
-  width: 100%;                           /* ← 枠にフィット */
-  height: 225px;                         /* ← 16:9 比率で 400px幅に対応 */
-  border: none;
-  display: block;
-}
-    
-</style> -->
-
+{# ✅ extra_css は content の外に置く #}
 {% block extra_css %}
 <style>
-body {
-    padding-top: 60px;  /* ナビバーの実際の高さに合わせて調整 */
-    padding-bottom: 60px;  /* フッターが固定なら下にも */
+body{
+  padding-top:65px;
+  padding-bottom:60px;
 }
 
-#u-gram .ig-portrait-frame {
-  width: 400px !important;
-  max-width: 100% !important;
-  margin: 12px auto 16px auto !important; /* 上下に少し余白を追加 */
-  overflow: hidden;
-  border-radius: 8px;
-  padding: 8px;  /* ← 内側に黒背景の余白を入れるとより自然 */
-  box-sizing: border-box; /* paddingを含めてサイズ計算 */
+/* =========================
+   共通：カード
+========================= */
+.ig-card{
+  margin-bottom:14px;
+  border-radius:12px;
+  overflow:hidden;
 }
 
-#u-gram .ig-portrait-frame img,
-#u-gram .ig-portrait-frame video {
-  display: block;
-  width: 100% !important;
-  height: auto !important;
-  object-fit: contain;
-  max-height: 85vh;
-  border-radius: 4px; /* ← 角丸を少し付けると綺麗 */
+/* =========================
+   共通：メディア枠（画像/YouTube）
+   → 400pxセンター寄せ
+========================= */
+#u-gram .ig-media,
+#u-gram .mobile-full-width-media,
+#u-gram .shorts-fixed{
+  width:400px;
+  max-width:100%;
+  margin:12px auto 16px;
+  border-radius:8px;
+  overflow:hidden;
+  background:#000; /* YouTube/shorts向け。画像は下で上書き */
 }
 
-/* YouTube Shorts を縦長（9:16）に見せる（中央トリミング） */
-#u-gram .shorts-fixed {
-  width: 400px;
-  max-width: 100%;
-  aspect-ratio: 9 / 16;
-  margin: 16px auto;
-  background: #000;
-  position: relative;
-  overflow: hidden;
-  border-radius: 8px;
-}
-#u-gram .shorts-fixed > iframe {
-  position: absolute !important;
-  top: 0 !important;
-  left: 50% !important;
-  height: 100% !important;
-  width: 177.78% !important;  /* 16:9 → 9:16 化の基準値。必要なら 180–220%で微調整 */
-  transform: translateX(-50%) !important;
-  border: 0 !important;
+/* 画像メディアは背景を明るく */
+#u-gram .ig-media{
+  position:relative;
+  background:#f2f3f5;
 }
 
-/* 通常のYouTube（16:9）を中央・固定幅で */
-#u-gram .mobile-full-width-media {
-  width: 400px;
-  max-width: 100%;
-  margin: 16px auto;
-  background: #000;
-  overflow: hidden;
-  border-radius: 8px;
+/* 中身は枠にフィット */
+#u-gram .ig-media img{
+  display:block;
+  width:100%;
+  height:auto;
+  object-fit:contain;
+  max-height:85vh;
 }
-#u-gram .mobile-full-width-media iframe {
-  display: block;
-  width: 100% !important;
-  height: 225px !important; /* 400px 幅の16:9 */
-  border: 0;
+
+#u-gram .mobile-full-width-media iframe{
+  display:block;
+  width:100%;
+  height:225px;
+  border:0;
 }
+
+/* 通常YouTube iframe */
+#u-gram .ig-media iframe{
+  display:block;
+  width:100%;
+  aspect-ratio:16/9;
+  border:0;
+}
+
+/* =========================
+   shorts（9:16固定＆中央クロップ）
+========================= */
+#u-gram .shorts-fixed{
+  aspect-ratio:9 / 16;
+  position:relative;
+}
+#u-gram .shorts-fixed > iframe{
+  position:absolute;
+  top:0;
+  left:50%;
+  height:100%;
+  width:177.78%;          /* 16/9 を 9/16枠にフィットさせる */
+  transform:translateX(-50%);
+  border:0;
+}
+
+/* =========================
+   skeleton shimmer
+========================= */
+#u-gram .ig-skeleton-block::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(90deg,
+    rgba(240,240,240,.9),
+    rgba(250,250,250,.9),
+    rgba(240,240,240,.9)
+  );
+  transform:translateX(-100%);
+  animation:igShimmer 1.2s infinite;
+}
+@keyframes igShimmer{100%{transform:translateX(100%);}}
+#u-gram .ig-media.is-loaded::before{display:none;}
+
+/* =========================
+   loader
+========================= */
+.ig-feed-loader{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  padding:18px 0 24px;
+  color:#6c757d;
+}
+.ig-spinner{
+  width:18px;
+  height:18px;
+  border:2px solid rgba(0,0,0,.12);
+  border-top-color:rgba(0,0,0,.45);
+  border-radius:50%;
+  animation:igSpin .8s linear infinite;
+}
+
+/* 返信の右端ゴミ箱：位置と色の調整 */
+.ug-trash-btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 12px;
+  color: #9aa0a6;
+  text-decoration: none;
+  font-size: 18px;   /* アイコンを少し大きく */
+}
+
+.ug-trash-btn:hover{
+  color: #dc3545;      /* hoverで赤 */
+  background: rgba(220,53,69,.08);
+  border-radius: 6px;
+}
+
+.ug-trash-btn:focus{
+  outline: none;
+  box-shadow: 0 0 0 .2rem rgba(220,53,69,.15);
+  border-radius: 6px;
+}
+
+@keyframes igSpin{to{transform:rotate(360deg);}}
 </style>
 {% endblock %}
 
+{% block content %}
 <div class="container-fluid">
-    <div class="row">
-        <!-- 左サイドバー -->
-        <aside class="col-1 border-end d-none d-md-block" role="complementary" aria-label="サイドバー">
-        </aside>
+  <div class="row">
+    <aside class="col-1 border-end d-none d-md-block" role="complementary" aria-label="サイドバー"></aside>
 
-        <!-- メインコンテンツエリア -->
-        <main class="col-12 col-md-10" role="main">
-            <div id="u-gram" class="timeline-container">
-                <!-- ページ見出し（SEO用・非表示） -->
-                <h1 class="visually-hidden">うぐすたぐらむ - 鶯バドミントンクラブ投稿タイムライン</h1>
-                
-               
-                
-                <!-- 投稿一覧 -->
-                <section class="posts" aria-label="投稿一覧">
-                    {% for post in posts %}
-                    <article class="card shadow-sm" 
-                             itemscope 
-                             itemtype="https://schema.org/SocialMediaPosting"
-                             aria-label="{{ post.display_name }}さんの投稿">
-                        <!-- カードヘッダー -->
-                        <header class="card-header bg-white">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div class="d-flex align-items-center gap-2">
-                                    <!-- プロフィール画像 -->
-                                    <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}"
-                                       aria-label="{{ post.display_name }}さんのプロフィールを見る">
-                                        <span class="avatar-ig" 
-                                              style="--size:35px;--ring:2px;--gap:1px;" 
-                                              title="{{ post.display_name }}">
-                                            <img
-                                                src="{{ post.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-                                                alt="{{ post.display_name }}さんのプロフィール画像"
-                                                width="40" 
-                                                height="40" 
-                                                loading="lazy" 
-                                                decoding="async"
-                                                itemprop="image"
-                                                onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-                                        </span>
-                                    </a>
-                                    
-                                    <!-- 投稿者名 -->
-                                    <div>
-                                        <h2 class="mb-0 h5">
-                                            <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}" 
-                                               class="text-dark text-decoration-none hover-underline"
-                                               itemprop="author"
-                                               itemscope
-                                               itemtype="https://schema.org/Person">
-                                                <strong itemprop="name">{{ post.display_name }}</strong>
-                                            </a>                                    
-                                        </h2>
-                                    </div>
-                                </div>
-                                
-                                <div class="d-flex align-items-center gap-2">
-                                    <time class="text-muted" 
-                                          datetime="{{ post.created_at }}"
-                                          itemprop="datePublished">
-                                        {{ post.created_at.split('T')[0] }}
-                                    </time>
-                                    
-                                    <!-- 投稿者本人のみ編集・削除ボタン -->
-                                    {% if current_user.is_authenticated and current_user.id == post.user_id %}
-                                    <div class="dropdown">
-                                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" 
-                                                type="button" 
-                                                data-bs-toggle="dropdown" 
-                                                aria-expanded="false"
-                                                aria-label="投稿オプション">
-                                            <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
-                                        </button>
-                                        <ul class="dropdown-menu dropdown-menu-end">
-                                            <li>
-                                                <a class="dropdown-item" 
-                                                   href="{{ url_for('post.edit_post', post_id=post.post_id) }}"
-                                                   aria-label="投稿を編集">
-                                                    <i class="fas fa-edit" aria-hidden="true"></i> 編集
-                                                </a>
-                                            </li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li>
-                                                <form method="POST" 
-                                                      action="{{ url_for('post.delete_post', post_id=post.post_id) }}" 
-                                                      class="d-inline" 
-                                                      onsubmit="return confirm('この投稿を削除しますか？')">
-                                                    <button type="submit" 
-                                                            class="dropdown-item text-danger"
-                                                            aria-label="投稿を削除">
-                                                        <i class="fas fa-trash" aria-hidden="true"></i> 削除
-                                                    </button>
-                                                </form>
-                                            </li>
-                                        </ul>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </header>
-                        
-                        <!-- 画像 -->
-                        {% if post.image_url %}
-                        <figure class="ig-portrait-frame">
-                            <img src="{{ post.image_url }}"
-                                alt="{{ post.display_name }}さんが投稿した画像{% if post.content %}: {{ post.content[:50] }}{% endif %}"
-                                itemprop="image"
-                                loading="lazy"
-                                decoding="async">
-                        </figure>
-                        {% endif %}
-                        
-                        <!-- YouTube動画 -->
-                        {% if post.youtube_url %}
-                        {% set y = post.youtube_url %}
-                        {% if 'shorts' in y %}
-                            {# Shorts専用：固定サイズで表示 #}
-                            {% set vid = y.split('/shorts/')[-1].split('?')[0] %}
-                            <div class="shorts-fixed">
-                            <iframe
-                                src="https://www.youtube.com/embed/{{ vid }}?playsinline=1&rel=0&modestbranding=1"
-                                title="{{ post.display_name }}さんが共有したYouTubeショート"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                allowfullscreen
-                                loading="lazy">
-                            </iframe>
-                            </div>
-                        {% else %}
-                            {# 通常動画（16:9） #}
-                            <div class="bg-light mobile-full-width-media">
-                            <iframe
-                                src="{% if y.startswith('https://www.youtube.com/embed/') %}
-                                        {{ y }}
-                                    {% elif 'youtube.com' in y %}
-                                        {{ 'https://www.youtube.com/embed/' + y.split('v=')[-1].split('&')[0] }}
-                                    {% else %}
-                                        {{ 'https://www.youtube.com/embed/' + y.split('/')[-1] }}
-                                    {% endif %}"
-                                title="{{ post.display_name }}さんが共有したYouTube動画"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowfullscreen
-                                loading="lazy">
-                            </iframe>
-                            </div>
-                        {% endif %}
-                        {% endif %}
-                        
-                        <!-- カードボディ -->
-                        <div class="card-body">
-                            <p class="card-text" 
-                               style="white-space: pre-line;"
-                               itemprop="articleBody">{{ post.content }}</p>
+    <main class="col-12 col-md-10" role="main">
+      <div id="u-gram" class="timeline-container">
+        <h1 class="visually-hidden">うぐすたぐらむ - 鶯バドミントンクラブ投稿タイムライン</h1>
 
-                            <!-- アクションボタン -->
-                            <div class="d-flex justify-content-between align-items-center mt-3" 
-                                 role="group"
-                                 aria-label="投稿アクション">
-                                <div class="btn-group">
-                                    <!-- いいねボタン -->
-                                    {% if post.post_id %}
-                                    <form action="{{ url_for('post.like_post', post_id=post.post_id) }}" 
-                                          method="POST" 
-                                          class="d-inline">
-                                        <div class="btn-group">
-                                            <button type="button" 
-                                                    onclick="handleLike('{{ post.post_id }}')" 
-                                                    class="btn btn-link p-0 border-0 text-decoration-none me-3" 
-                                                    style="box-shadow: none;"
-                                                    aria-label="いいね {{ post.likes_count|default(0) }}件">
-                                                <i class="far fa-heart" 
-                                                   id="heart-{{ post.post_id }}"
-                                                   aria-hidden="true"></i>
-                                                <span class="ms-1" 
-                                                      id="likes-count-{{ post.post_id }}"
-                                                      itemprop="interactionStatistic"
-                                                      itemscope
-                                                      itemtype="https://schema.org/InteractionCounter">
-                                                    <meta itemprop="interactionType" content="https://schema.org/LikeAction">
-                                                    <span itemprop="userInteractionCount">{{ post.likes_count|default(0) }}</span>
-                                                </span>
-                                            </button>
-                                        </div>
-                                    </form>
-                                    {% else %}
-                                    <div class="d-inline">
-                                        <div class="btn-group">
-                                            <button type="button" 
-                                                    class="btn btn-link p-0 border-0 text-decoration-none me-3" 
-                                                    style="box-shadow: none;" 
-                                                    disabled
-                                                    aria-label="いいね {{ post.likes_count|default(0) }}件">
-                                                <i class="far fa-heart" aria-hidden="true"></i>
-                                                <span class="ms-1">{{ post.likes_count|default(0) }}</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {% endif %}          
+        <section class="posts" id="post-feed"
+              aria-label="投稿一覧"
+              data-next-cursor="{{ next_cursor|default('', true) }}"
+              data-user-profile-url-template="{{ url_for('users.user_profile', user_id='__USER__') }}"
+              data-default-profile-image="{{ url_for('static', filename='images/default.jpg') }}"
+              data-reply-url-template="{{ url_for('post.create_reply', post_id='__POST__') }}"
+              data-edit-url-template="{{ url_for('post.edit_post', post_id='__POST__') }}"
+              data-delete-url-template="{{ url_for('post.delete_post', post_id='__POST__') }}"              
+              data-csrf-token="{{ csrf_token() if csrf_token is defined else '' }}">
 
-                                    <!-- 返信ボタン -->
-                                    {% if post.post_id %}
-                                    <button type="button" 
-                                            class="btn btn-link p-0 border-0 text-decoration-none" 
-                                            style="box-shadow: none;"
-                                            onclick="toggleReplyForm('{{ post.post_id }}')"
-                                            aria-label="コメント {{ post.replies_count|default(0) }}件"
-                                            aria-expanded="false"
-                                            aria-controls="reply-form-{{ post.post_id }}">
-                                        <i class="far fa-comment" aria-hidden="true"></i>
-                                        <span class="ms-1" 
-                                              id="replies-count-{{ post.post_id }}"
-                                              itemprop="interactionStatistic"
-                                              itemscope
-                                              itemtype="https://schema.org/InteractionCounter">
-                                            <meta itemprop="interactionType" content="https://schema.org/CommentAction">
-                                            <span itemprop="userInteractionCount">{{ post.replies_count|default(0) }}</span>
-                                        </span>
-                                    </button>
-                                    {% else %}
-                                    <button type="button" 
-                                            class="btn btn-link p-0 border-0 text-decoration-none" 
-                                            style="box-shadow: none;" 
-                                            disabled
-                                            aria-label="コメント {{ post.replies_count|default(0) }}件">
-                                        <i class="far fa-comment" aria-hidden="true"></i>
-                                        <span class="ms-1">{{ post.replies_count|default(0) }}</span>
-                                    </button>
-                                    {% endif %}
-                                </div>
-                            </div>
+          {% for post in posts %}
+          <article class="card shadow-sm ig-card"
+                   itemscope itemtype="https://schema.org/SocialMediaPosting"
+                   aria-label="{{ post.display_name }}さんの投稿">
 
-                            <!-- 返信フォーム -->
-                            {% if post.post_id %}
-                            <div id="reply-form-{{ post.post_id }}" 
-                                 class="mt-3" 
-                                 style="display: none;"
-                                 role="form"
-                                 aria-label="返信フォーム">
-                                <form action="{{ url_for('post.create_reply', post_id=post.post_id) }}" 
-                                      method="POST">
-                                    <div class="form-group">
-                                        <label for="reply-content-{{ post.post_id }}" class="visually-hidden">
-                                            返信内容
-                                        </label>
-                                        <textarea class="form-control" 
-                                                  id="reply-content-{{ post.post_id }}"
-                                                  name="content" 
-                                                  rows="2" 
-                                                  placeholder="返信を入力..."
-                                                  required
-                                                  aria-required="true"></textarea>
-                                    </div>
-                                    <button type="submit" 
-                                            class="btn btn-primary btn-sm mt-2"
-                                            aria-label="返信を投稿">返信する</button>
-                                </form>
-                            </div>
-                            {% endif %}
+            <header class="card-header bg-white">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                  <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}"
+                     aria-label="{{ post.display_name }}さんのプロフィールを見る">
+                    <span class="avatar-ig" style="--size:35px;--ring:2px;--gap:1px;" title="{{ post.display_name }}">
+                      <img
+                        src="{{ post.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                        alt="{{ post.display_name }}さんのプロフィール画像"
+                        width="40" height="40"
+                        loading="lazy" decoding="async"
+                        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                    </span>
+                  </a>
 
-                            <!-- 返信一覧 -->
-                            {% if post.post_id and post.replies %}
-                            <section id="replies-{{ post.post_id }}" 
-                                     class="mt-3"
-                                     aria-label="返信一覧"
-                                     itemprop="comment"
-                                     itemscope
-                                     itemtype="https://schema.org/Comment">
-                                {% for reply in post.replies %}
-                                <article class="card mb-2">
-                                    <div class="card-body py-2">
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <div>
-                                                <a href="{{ url_for('users.user_profile', user_id=reply.user_id) }}" 
-                                                   class="text-dark text-decoration-none"
-                                                   itemprop="author"
-                                                   itemscope
-                                                   itemtype="https://schema.org/Person">
-                                                    <strong itemprop="name">{{ reply.display_name }}</strong>
-                                                </a>
-                                            </div>
-                                            <time class="text-muted" 
-                                                  datetime="{{ reply.created_at }}"
-                                                  itemprop="datePublished">
-                                                {{ reply.created_at.split('T')[0] }}
-                                            </time>
-                                        </div>
-                                        <p class="mb-0 mt-1" itemprop="text">{{ reply.content }}</p>
-                                    </div>
-                                </article>
-                                {% endfor %}
-                            </section>
-                            {% endif %}
-                        </div>
-                    </article>
-                    {% endfor %}
-                    
-                    {% if not posts %}
-                    <div class="alert alert-info" role="alert">
-                        <p class="mb-0">まだ投稿がありません。最初の投稿を作成してみましょう！</p>
-                    </div>
+                  <div>
+                    <h2 class="mb-0 h5">
+                      <a href="{{ url_for('users.user_profile', user_id=post.user_id) }}"
+                         class="text-dark text-decoration-none hover-underline"
+                         itemprop="author" itemscope itemtype="https://schema.org/Person">
+                        <strong itemprop="name">{{ post.display_name }}</strong>
+                      </a>
+                    </h2>
+                  </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                  <time class="text-muted" datetime="{{ post.created_at }}" itemprop="datePublished">
+                    {{ post.created_at.split('T')[0] }}
+                  </time>
+                  {% if post.can_edit %}
+                  <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                            type="button"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false"
+                            aria-label="投稿メニュー">
+                      ⋯
+                    </button>
+
+                    <ul class="dropdown-menu dropdown-menu-end">
+                      <li>
+                        <a class="dropdown-item"
+                          href="{{ url_for('post.edit_post', post_id=post.post_id) }}">
+                          編集
+                        </a>
+                      </li>
+
+                      <li><hr class="dropdown-divider"></li>
+
+                      <li>
+                        <form action="{{ url_for('post.delete_post', post_id=post.post_id) }}"
+                              method="POST"
+                              onsubmit="return confirm('この投稿を削除しますか？');">
+                          {% if csrf_token is defined %}
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          {% endif %}
+                          <button type="submit" class="dropdown-item text-danger">
+                            削除
+                          </button>
+                        </form>
+                      </li>
+                    </ul>
+                  </div>
+                {% endif %}
+
+                </div>
+              </div>
+            </header>
+
+            {% if post.image_url %}
+            <figure class="ig-media ig-skeleton-block">
+              <img src="{{ post.image_url }}"
+                   alt="{{ post.display_name }}さんが投稿した画像"
+                   loading="lazy" decoding="async"
+                   onload="this.closest('.ig-media').classList.add('is-loaded')">
+            </figure>
+            {% endif %}
+
+            {% if post.youtube_url %}
+            {% set y = post.youtube_url %}
+            {% if 'shorts' in y %}
+              {% set vid = y.split('/shorts/')[-1].split('?')[0] %}
+              <div class="ig-media ig-skeleton-block shorts-fixed">
+                <iframe
+                  src="https://www.youtube.com/embed/{{ vid }}?playsinline=1&rel=0&modestbranding=1"
+                  allowfullscreen loading="lazy"
+                  onload="this.closest('.ig-media').classList.add('is-loaded')"></iframe>
+              </div>
+            {% else %}
+              <div class="ig-media ig-skeleton-block mobile-full-width-media">
+                <iframe
+                  src="{% if y.startswith('https://www.youtube.com/embed/') %}
+                        {{ y }}
+                      {% elif 'youtube.com' in y %}
+                        {{ 'https://www.youtube.com/embed/' + y.split('v=')[-1].split('&')[0] }}
+                      {% else %}
+                        {{ 'https://www.youtube.com/embed/' + y.split('/')[-1] }}
+                      {% endif %}"
+                  allowfullscreen loading="lazy"
+                  onload="this.closest('.ig-media').classList.add('is-loaded')"></iframe>
+              </div>
+            {% endif %}
+            {% endif %}
+
+            <div class="card-body">
+              <p class="card-text" style="white-space: pre-line;">{{ post.content }}</p>
+
+              <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="btn-group">
+                  {% if post.post_id %}
+                  <button type="button"
+                          onclick="handleLike('{{ post.post_id }}')"
+                          class="btn btn-link p-0 border-0 text-decoration-none me-3"
+                          style="box-shadow:none;">
+                    <i class="far fa-heart" id="heart-{{ post.post_id }}"></i>
+                    <span class="ms-1" id="likes-count-{{ post.post_id }}">{{ post.likes_count|default(0) }}</span>
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-link p-0 border-0 text-decoration-none"
+                          style="box-shadow:none;"
+                          onclick="toggleReplyForm('{{ post.post_id }}')"
+                          aria-controls="reply-form-{{ post.post_id }}"
+                          aria-expanded="false">
+                    <i class="far fa-comment"></i>
+                    <span class="ms-1" id="replies-count-{{ post.post_id }}">{{ post.replies_count|default(0) }}</span>
+                  </button>
+                  {% endif %}
+                </div>
+              </div>
+
+
+
+
+
+              <div class="mt-2">             
+
+              {% if post.replies and post.replies|length > 0 %}
+                {% for r in post.replies %}
+                  <div class="border rounded p-2 my-1">
+
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div class="small text-muted">{{ r.display_name or r.user_id }}</div>
+
+                      {% if r.can_delete %}
+                      <form method="POST"
+                            action="{{ url_for('uguu.delete_reply', post_id=post.post_id, reply_id=r.reply_id) }}"
+                            onsubmit="return confirm('この返信を削除しますか？');"
+                            class="m-0">
+                        <button type="submit"
+                                class="btn btn-sm btn-link p-0 ug-trash-btn"
+                                title="削除"
+                                aria-label="削除">
+                          <i class="fas fa-trash fa-lg"></i>
+                        </button>
+                      </form>
                     {% endif %}
-                </section>
-            </div>
-        </main>
+                    </div>
 
-        <!-- 右側の余白 -->
-        <aside class="col-1 d-none d-md-block" role="complementary"></aside>
-    </div>
+                    <div>{{ r.content }}</div>
+                  </div>
+                {% endfor %}
+              {% endif %}
+            </div>
+
+
+
+
+
+
+
+              {% if post.post_id %}
+              <div id="reply-form-{{ post.post_id }}" class="mt-3" style="display:none;">
+                <form action="{{ url_for('post.create_reply', post_id=post.post_id) }}" method="POST">
+                  <div class="form-group">
+                    <textarea class="form-control" name="content" rows="2" placeholder="返信を入力..." required></textarea>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-sm mt-2">返信する</button>
+                </form>
+              </div>
+              {% endif %}
+            </div>
+          </article>
+          {% endfor %}
+        </section>
+
+        <div id="feed-sentinel" class="ig-feed-loader" aria-label="読み込み中" role="status">
+          <div class="ig-spinner" aria-hidden="true"></div>
+          <div class="ig-loader-text">読み込み中…</div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="col-1 d-none d-md-block" role="complementary"></aside>
+  </div>
 </div>
 
 <script>
-function toggleReplyForm(postId) {
-    const replyForm = document.getElementById(`reply-form-${postId}`);
-    const isHidden = replyForm.style.display === 'none';
-    replyForm.style.display = isHidden ? 'block' : 'none';
-    
-    // アクセシビリティのためaria-expanded属性を更新
-    const button = document.querySelector(`[aria-controls="reply-form-${postId}"]`);
-    if (button) {
-        button.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+window.toggleReplyForm = function(postId) {
+  const el = document.getElementById(`reply-form-${postId}`);
+  if (!el) return;
+
+  const hidden = (el.style.display === "none" || getComputedStyle(el).display === "none");
+  el.style.display = hidden ? "block" : "none";
+};
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const feed = document.getElementById('post-feed');
+  const sentinel = document.getElementById('feed-sentinel');
+  if (!feed || !sentinel) return;
+
+  let loading = false;
+
+  const userUrlTpl    = feed.dataset.userProfileUrlTemplate || "";   // .../__USER__
+  const replyUrlTpl   = feed.dataset.replyUrlTemplate || "";         // .../__POST__
+  const defaultAvatar = feed.dataset.defaultProfileImage || "";
+
+  const getCursor = () => (feed.dataset.nextCursor || "").trim();
+  const setCursor = (v) => { feed.dataset.nextCursor = v || ""; };
+
+  function escapeHtml(s) {
+    return (s ?? "").toString().replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+  }
+
+  function getYoutubeEmbedUrl(url) {
+    if (!url) return "";
+    const u = url.trim();
+
+    // already embed
+    if (u.startsWith("https://www.youtube.com/embed/")) return u;
+
+    // shorts
+    const mShorts = u.match(/youtube\.com\/shorts\/([^?&/]+)/);
+    if (mShorts) return `https://www.youtube.com/embed/${mShorts[1]}`;
+
+    // watch?v=
+    const mWatch = u.match(/[?&]v=([^?&/]+)/);
+    if (mWatch) return `https://www.youtube.com/embed/${mWatch[1]}`;
+
+    // youtu.be/
+    const mYoutu = u.match(/youtu\.be\/([^?&/]+)/);
+    if (mYoutu) return `https://www.youtube.com/embed/${mYoutu[1]}`;
+
+    // fallback
+    return "";
+  }
+
+  function renderPostHTML(p) {
+    const userId  = escapeHtml(p.user_id || "");
+    const name    = escapeHtml(p.display_name || "不明");
+    const created = escapeHtml((p.created_at || "").split("T")[0] || "");
+    const content = escapeHtml(p.content || "");
+    const profile = escapeHtml(p.profile_image_url || defaultAvatar);
+    const postId  = escapeHtml(p.post_id || "");
+
+    const editUrlTpl   = feed.dataset.editUrlTemplate || "";
+    const deleteUrlTpl = feed.dataset.deleteUrlTemplate || "";
+    const csrfToken    = feed.dataset.csrfToken || "";
+
+    const userUrl  = userUrlTpl ? userUrlTpl.replace("__USER__", encodeURIComponent(userId)) : "#";
+    const replyUrl = replyUrlTpl ? replyUrlTpl.replace("__POST__", encodeURIComponent(postId)) : "#";
+
+    const imageBlock = p.image_url ? `
+      <figure class="ig-media ig-skeleton-block">
+        <img src="${escapeHtml(p.image_url)}"
+             alt="${name}さんが投稿した画像"
+             loading="lazy" decoding="async"
+             onload="this.closest('.ig-media').classList.add('is-loaded')">
+      </figure>
+    ` : "";
+
+     // ✅ 編集・削除（本人のみ）
+    const canEdit = !!p.can_edit;
+
+    const editUrl = (editUrlTpl && postId)
+      ? editUrlTpl.replace("__POST__", encodeURIComponent(postId))
+      : "#";
+
+    const deleteUrl = (deleteUrlTpl && postId)
+      ? deleteUrlTpl.replace("__POST__", encodeURIComponent(postId))
+      : "#";
+
+    const editDeleteBlock = (postId && canEdit) ? `
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                type="button"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                aria-label="投稿メニュー">
+          ⋯
+        </button>
+
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li>
+            <a class="dropdown-item" href="${editUrl}">編集</a>
+          </li>
+
+          <li><hr class="dropdown-divider"></li>
+
+          <li>
+            <form action="${deleteUrl}" method="POST"
+                  onsubmit="return confirm('この投稿を削除しますか？');">
+              ${csrfToken ? `<input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">` : ``}
+              <button type="submit" class="dropdown-item text-danger">削除</button>
+            </form>
+          </li>
+        </ul>
+      </div>
+    ` : "";
+
+    // YouTube（shorts / 通常）
+    let youtubeBlock = "";
+    if (p.youtube_url) {
+      const raw = (p.youtube_url || "").toString();
+      const isShorts = raw.includes("/shorts/");
+      const embed = getYoutubeEmbedUrl(raw);
+
+      if (embed) {
+        youtubeBlock = isShorts ? `
+          <div class="ig-media ig-skeleton-block shorts-fixed">
+            <iframe
+              src="${embed}?playsinline=1&rel=0&modestbranding=1"
+              allowfullscreen loading="lazy"
+              onload="this.closest('.ig-media').classList.add('is-loaded')"></iframe>
+          </div>
+        ` : `
+          <div class="ig-media ig-skeleton-block mobile-full-width-media">
+            <iframe
+              src="${embed}?playsinline=1&rel=0&modestbranding=1"
+              allowfullscreen loading="lazy"
+              onload="this.closest('.ig-media').classList.add('is-loaded')"></iframe>
+          </div>
+        `;
+      }
     }
+
+    const likesCount   = (p.likes_count ?? 0);
+    const repliesCount = (p.replies_count ?? 0);
+    const liked = !!p.is_liked_by_user;
+
+    return `
+      <article class="card shadow-sm ig-card"
+               itemscope itemtype="https://schema.org/SocialMediaPosting"
+               aria-label="${name}さんの投稿">
+
+        <header class="card-header bg-white">
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+              <a href="${userUrl}" aria-label="${name}さんのプロフィールを見る">
+                <span class="avatar-ig" style="--size:35px;--ring:2px;--gap:1px;" title="${name}">
+                  <img src="${profile}"
+                       alt="${name}さんのプロフィール画像"
+                       width="40" height="40"
+                       loading="lazy" decoding="async"
+                       onerror="this.onerror=null;this.src='${escapeHtml(defaultAvatar)}'">
+                </span>
+              </a>
+
+              <div>
+                <h2 class="mb-0 h5">
+                  <a href="${userUrl}"
+                     class="text-dark text-decoration-none hover-underline"
+                     itemprop="author" itemscope itemtype="https://schema.org/Person">
+                    <strong itemprop="name">${name}</strong>
+                  </a>
+                </h2>
+              </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+              <time class="text-muted" itemprop="datePublished">${created}</time>
+              ${editDeleteBlock}
+            </div>
+          </div>
+        </header>
+
+        ${imageBlock}
+        ${youtubeBlock}
+
+        <div class="card-body">
+          <p class="card-text" style="white-space: pre-line;">${content}</p>
+
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="btn-group">
+              ${postId ? `
+                <button type="button"
+                        onclick="handleLike('${postId}')"
+                        class="btn btn-link p-0 border-0 text-decoration-none me-3"
+                        style="box-shadow:none;">
+                  <i class="${liked ? "fas" : "far"} fa-heart" id="heart-${postId}"></i>
+                  <span class="ms-1" id="likes-count-${postId}">${likesCount}</span>
+                </button>
+
+                <button type="button"
+                      class="btn btn-link p-0 border-0 text-decoration-none js-reply-toggle"
+                      data-post-id="${postId}"
+                      style="box-shadow:none;">
+                <i class="far fa-comment"></i>
+                <span class="ms-1" id="replies-count-${postId}">${repliesCount}</span>
+              </button>
+              ` : ``}
+            </div>
+          </div>
+
+          ${postId ? `
+          <div id="reply-form-${postId}" class="mt-3" style="display:none;">
+            <form action="${replyUrl}" method="POST">
+              <div class="form-group">
+                <textarea class="form-control" name="content" rows="2" placeholder="返信を入力..." required></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm mt-2">返信する</button>
+            </form>
+          </div>
+          ` : ``}
+        </div>
+      </article>
+    `;
+  }
+
+  async function loadMore() {
+  const cursor = getCursor();
+  if (!cursor || loading) return;
+
+  loading = true;
+  io.unobserve(sentinel);              // ✅ 連続発火防止
+  sentinel.style.display = "flex";
+
+  try {
+    const baseUrl = "{{ url_for('uguu.api_feed') }}";
+    const connector = baseUrl.includes('?') ? '&' : '?';
+
+    const res = await fetch(
+      `${baseUrl}${connector}cursor=${encodeURIComponent(cursor)}&limit=5`,
+      { headers: { "Accept": "application/json" }, credentials: "same-origin" }
+    );
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const posts = Array.isArray(data.posts) ? data.posts : [];
+    const next  = (data.next_cursor || "").trim();
+
+    if (posts.length > 0) {
+      const frag = document.createDocumentFragment();
+      posts.forEach(p => {
+        const div = document.createElement('div');
+        div.innerHTML = renderPostHTML(p);
+        if (div.firstElementChild) frag.appendChild(div.firstElementChild);
+      });
+      feed.appendChild(frag);
+    }
+
+    setCursor(next);
+
+    if (!next) {
+      sentinel.style.display = "none";
+      io.disconnect();
+      return;
+    }
+
+    // ✅ 次があるなら監視再開（1フレーム遅らせる）
+    requestAnimationFrame(() => io.observe(sentinel));
+
+  } catch (e) {
+    console.error("LoadMore Error:", e);
+    const textNode = sentinel.querySelector('.ig-loader-text');
+    if (textNode) textNode.textContent = "読み込みに失敗しました";
+
+    // ✅ 失敗時も再開（1フレーム遅らせる）
+    requestAnimationFrame(() => io.observe(sentinel));
+
+  } finally {
+    loading = false;
+  }
 }
 
-async function handleLike(postId) {
-    try {
-        const response = await fetch(`/uguu/like/${postId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            credentials: 'same-origin'
-        });
-        
-        const data = await response.json();
-        if (response.ok) {
-            const heartIcon = document.getElementById(`heart-${postId}`);
-            const likesCount = document.getElementById(`likes-count-${postId}`);
-            const button = heartIcon.closest('button');
-            
-            heartIcon.classList.toggle('fas', data.is_liked);
-            heartIcon.classList.toggle('far', !data.is_liked);
-            
-            // いいね数とカウント内のテキストを更新
-            const countSpan = likesCount.querySelector('[itemprop="userInteractionCount"]') || likesCount;
-            countSpan.textContent = data.likes_count;
-            
-            // ボタンのaria-labelを更新
-            if (button) {
-                button.setAttribute('aria-label', `いいね ${data.likes_count}件`);
-            }
-        } else {
-            console.error('Error:', data.error);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-    }
+let io; // const じゃなく let が安全
+io = new IntersectionObserver((entries) => {
+  if (entries[0].isIntersecting) loadMore();
+}, { root: null, rootMargin: "0px 0px 400px 0px", threshold: 0.01 });
+
+// ✅ cursor があるときだけ監視
+if (getCursor()) {
+  sentinel.style.display = "flex";
+  io.observe(sentinel);
+} else {
+  sentinel.style.display = "none";
 }
+});
 </script>
+
 
 {% endblock %}
