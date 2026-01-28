@@ -1831,19 +1831,19 @@ class DynamoDB:
                     # 連続マイルストーン
                     milestone_bonus = 0
                     if current_streak == 5 and not milestone_5_achieved:
-                        milestone_bonus = int(300 * point_multiplier)
+                        milestone_bonus = int(200 * point_multiplier)
                         milestone_5_achieved = True
                     elif current_streak == 10 and not milestone_10_achieved:
-                        milestone_bonus = int(600 * point_multiplier)
+                        milestone_bonus = int(400 * point_multiplier)
                         milestone_10_achieved = True
                     elif current_streak == 15 and not milestone_15_achieved:
-                        milestone_bonus = int(900 * point_multiplier)
+                        milestone_bonus = int(600 * point_multiplier)
                         milestone_15_achieved = True
                     elif current_streak == 20 and not milestone_20_achieved:
-                        milestone_bonus = int(1200 * point_multiplier)
+                        milestone_bonus = int(800 * point_multiplier)
                         milestone_20_achieved = True
                     elif current_streak == 25 and not milestone_25_achieved:
-                        milestone_bonus = int(1500 * point_multiplier)
+                        milestone_bonus = int(1000 * point_multiplier)
                         milestone_25_achieved = True
 
                     if milestone_bonus > 0:
@@ -1879,15 +1879,15 @@ class DynamoDB:
 
                 base_bonus = 0
                 if count >= 5:
-                    base_bonus = 250
+                    base_bonus = 200
                 if count >= 8:
-                    base_bonus = 400
+                    base_bonus = 300
                 if count >= 10:
-                    base_bonus = 500
+                    base_bonus = 400
                 if count >= 15:
-                    base_bonus = 750
+                    base_bonus = 600
                 if count >= 20:
-                    base_bonus = 1000
+                    base_bonus = 800
 
                 bonus = int(base_bonus * point_multiplier)
                 monthly_bonuses[month] = {
