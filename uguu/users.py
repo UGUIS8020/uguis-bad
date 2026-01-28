@@ -78,7 +78,7 @@ def user_profile(user_id):
             return redirect(url_for('index'))
 
         # 投稿
-        user_posts = db.get_posts_by_user(user_id)
+        user_posts, _next_cursor = db.get_posts_by_user(user_id)
         if user_posts is None:  # ← None チェックを追加
             user_posts = []
         if user_posts:
