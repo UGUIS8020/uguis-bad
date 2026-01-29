@@ -1657,8 +1657,7 @@ class DynamoDB:
                     'current_streak_count': 0,
                     'cumulative_count': 0,
                     'monthly_bonuses': {},
-                    'early_registration_count': 0,
-                    'super_early_registration_count': 0,
+                    'early_registration_count': 0,                    
                     'direct_registration_count': 0,
                     'is_junior_high': is_junior_high,
                     'is_reset': False,
@@ -1759,19 +1758,7 @@ class DynamoDB:
                 else:
                     pts = int(base_points * point_multiplier)
                     participation_points += pts
-                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")
-
-                # 累計ボーナス（5回ごとに500P）
-                cumulative_count += 1
-                if cumulative_count % 5 == 0:
-                    bonus = int(500 * point_multiplier)
-                    cumulative_bonus_points += bonus
-                    cumulative_milestones.append({
-                        "date": record["event_date"].strftime("%Y-%m-%d"),
-                        "count": cumulative_count,
-                        "bonus": bonus,
-                    })
-                    print(f"[DEBUG] 累計{cumulative_count}回 → +{bonus}P")
+                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")                
 
                 # 累計ボーナス（5回ごとに500P）
                 cumulative_count += 1
@@ -1879,15 +1866,15 @@ class DynamoDB:
 
                 base_bonus = 0
                 if count >= 5:
-                    base_bonus = 200
+                    base_bonus = 500
                 if count >= 8:
-                    base_bonus = 300
-                if count >= 10:
-                    base_bonus = 400
-                if count >= 15:
-                    base_bonus = 600
-                if count >= 20:
                     base_bonus = 800
+                if count >= 10:
+                    base_bonus = 1000
+                if count >= 15:
+                    base_bonus = 1500
+                if count >= 20:
+                    base_bonus = 2000
 
                 bonus = int(base_bonus * point_multiplier)
                 monthly_bonuses[month] = {
