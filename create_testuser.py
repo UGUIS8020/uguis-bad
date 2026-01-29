@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-40日ルールテスト用のユーザーを2名作成するスクリプト
+45日ルールテスト用のユーザーを2名作成するスクリプト
 - ユーザー1: 途中で53日あけてリセットになる想定
 - ユーザー2: 40日以内で継続する想定
 """
@@ -131,7 +131,7 @@ def get_or_create_schedule(schedules_table, event_date: str) -> str:
 # ------------------------------------------------------------
 def create_test_users():
     print("=" * 80)
-    print("【40日ルールテスト用ユーザー作成】")
+    print("【45日ルールテスト用ユーザー作成】")
     print("=" * 80)
     print("DynamoDBに接続中...")
 
@@ -204,7 +204,7 @@ def create_test_users():
         if i == 3:
             print(f"  {i}. {event_date} - {days_before}日前登録 ({point_label}) {status}")
             print("      ↓")
-            print("  【53日の空白期間】← 40日ルール発動想定")
+            print("  【53日の空白期間】← 45日ルール発動想定")
             print("      ↓")
         else:
             print(f"  {i}. {event_date} - {days_before}日前登録 ({point_label}) {status}")
