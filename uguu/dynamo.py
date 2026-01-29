@@ -4,15 +4,51 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 import json, base64
 from decimal import Decimal
 from botocore.exceptions import ClientError
+import re
 
 load_dotenv()
 
 import boto3
 import os
+
+
+    
+ISO_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)"
+)
+
+def extract_iso_from_joined_at(s: str) -> str | None:
+    if not s:
+        return None
+    m = ISO_RE.search(s)
+    return m.group(1) if m else None
+
+def parse_dt_safe(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    s = str(s).strip()
+    # fromisoformat は "Z" を直接食えないので +00:00 にする
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        # スペース区切りの "YYYY-MM-DD HH:MM:SS" を救う
+        try:
+            return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+        
+def iso_to_jst(s: str) -> str:
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt.astimezone(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return s
 
 def _encode_cursor(last_key: Optional[Dict[str, Any]]) -> Optional[str]:
     if not last_key:
@@ -773,20 +809,27 @@ class DynamoDB:
                         future_count += 1
                         continue
                     
-                    # joined_at のパース
-                    joined_at_str = item["joined_at"]
+                    # joined_at のパース（ISOでない joined_at も救う）
+                    joined_at_raw = item.get("joined_at")
+                    joined_at_str = str(joined_at_raw or "").strip()
                     print(f"[DEBUG] joined_at(元): {joined_at_str}")
-                    
-                    if joined_at_str.endswith("Z"):
-                        joined_at_str = joined_at_str[:-1]
-                    
-                    try:
-                        registered_at = datetime.fromisoformat(joined_at_str)
-                        print(f"[DEBUG] registered_at(変換後): {registered_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                    except ValueError as ve:
-                        print(f"[WARN] ✗ joined_at パースエラー: {joined_at_str} - {ve}")
+
+                    iso_candidate = (
+                        item.get("created_at")
+                        or item.get("registered_at")
+                        or item.get("transaction_date")
+                        or item.get("paid_at")
+                        or extract_iso_from_joined_at(joined_at_str)
+                    )
+
+                    registered_at = parse_dt_safe(iso_candidate)
+
+                    if not registered_at:
+                        print(f"[WARN] ✗ joined_at/created_at パースエラー: iso_candidate={repr(iso_candidate)} joined_at={repr(joined_at_str)}")
                         parse_error_count += 1
                         continue
+
+                    print(f"[DEBUG] registered_at(変換後): {registered_at.strftime('%Y-%m-%d %H:%M:%S')}")
                     
                     # 同じ日付の場合、より遅い登録時刻を採用（再参加を反映）
                     if event_date_str not in date_records:
@@ -1368,6 +1411,125 @@ class DynamoDB:
     #         return []
         
     
+    # def get_point_transactions(
+    #     self,
+    #     user_id: str,
+    #     limit: int = 50,
+    #     transaction_type: Optional[str] = None,
+    # ) -> List[Dict[str, Any]]:
+    #     """
+    #     bad-users-history からポイント取引履歴を取得して整形して返す。
+
+    #     transaction_type:
+    #     - None / "all"      : earn, spend, adjust を全部返す
+    #     - "spend" / "payment": spend だけ返す
+    #     - "earn"            : earn だけ返す
+    #     - "adjust"          : adjust だけ返す
+    #     """
+    #     try:
+    #         # ---- type 正規化 ----
+    #         t = (transaction_type or "spend").strip().lower()
+    #         if t in ("payment", "spend"):
+    #             kind_filter = {"spend"}
+    #             prefix = "points#spend#"
+    #         elif t == "earn":
+    #             kind_filter = {"earn"}
+    #             prefix = "points#earn#"
+    #         elif t == "adjust":
+    #             kind_filter = {"adjust"}
+    #             prefix = "points#adjust#"
+    #         elif t in ("all", "*"):
+    #             kind_filter = {"earn", "spend", "adjust"}
+    #             prefix = "points#"  # まとめて取得して kind で絞る
+    #         else:
+    #             # 想定外は安全に spend 扱い
+    #             kind_filter = {"spend"}
+    #             prefix = "points#spend#"
+
+    #         # ---- DynamoDB Query（ページネーション込み）----
+    #         txs: List[Dict[str, Any]] = []
+    #         last_evaluated_key = None
+
+    #         while len(txs) < limit:
+    #             q_kwargs = dict(
+    #                 KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with(prefix),
+    #                 ScanIndexForward=False,   # 新しい順
+    #                 ConsistentRead=True,
+    #                 Limit=min(100, limit - len(txs)),  # 余裕を持って取得
+    #             )
+    #             if last_evaluated_key:
+    #                 q_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+    #             resp = self.part_history.query(**q_kwargs)
+    #             items = resp.get("Items", [])
+    #             last_evaluated_key = resp.get("LastEvaluatedKey")
+
+    #             for it in items:
+    #                 joined_at = str(it.get("joined_at") or "")
+    #                 kind = str(it.get("kind") or "")
+
+    #                 # prefix="points#" のとき等に備えて joined_at/ kind 両方で絞る
+    #                 if not joined_at.startswith("points#"):
+    #                     continue
+    #                 if kind not in kind_filter:
+    #                     continue
+
+    #                 # ---- 数値の取り扱いを安全に（Decimal -> int 等）----
+    #                 def to_int(v, default=0) -> int:
+    #                     try:
+    #                         if v is None:
+    #                             return default
+    #                         if isinstance(v, Decimal):
+    #                             return int(v)
+    #                         return int(v)
+    #                     except Exception:
+    #                         return default
+
+    #                 delta_points = to_int(it.get("delta_points"), 0)
+
+    #                 # points_used は 0 を正しく扱う（or にしない）
+    #                 pu_raw = it.get("points_used")
+    #                 if pu_raw is not None:
+    #                     points_used = to_int(pu_raw, 0)
+    #                 else:
+    #                     # spend の場合は delta_points が負なので反転して正に
+    #                     points_used = -delta_points if kind == "spend" else 0
+
+    #                 # 表示用 type
+    #                 ui_type = "payment" if kind == "spend" else kind
+
+    #                 txs.append({
+    #                     "date": it.get("created_at") or it.get("transaction_date") or it.get("paid_at"),
+    #                     "type": ui_type,
+    #                     "kind": kind,  # 内部的に区別したい場合に便利
+    #                     "points_used": points_used,        # 支払い(消費)は常に正
+    #                     "points": points_used,             # 互換
+    #                     "delta_points": delta_points,      # +/-
+    #                     "description": it.get("reason", "") or "",
+    #                     "event_date": it.get("event_date"),
+    #                     "payment_type": it.get("payment_type"),
+    #                     "tx_id": it.get("tx_id"),
+    #                     "source": it.get("source"),
+    #                     "schedule_id": it.get("schedule_id"),
+    #                     "created_by": it.get("created_by"),
+    #                 })
+
+    #                 if len(txs) >= limit:
+    #                     break
+
+    #             if not last_evaluated_key:
+    #                 break
+
+    #         print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type={t}")
+    #         return txs
+
+    #     except Exception as e:
+    #         print(f"[ERROR] 取引履歴取得エラー: {e}")
+    #         import traceback; traceback.print_exc()
+    #         return []
+
+    
+        
     def get_point_transactions(
         self,
         user_id: str,
@@ -1378,14 +1540,34 @@ class DynamoDB:
         bad-users-history からポイント取引履歴を取得して整形して返す。
 
         transaction_type:
-        - None / "all"      : earn, spend, adjust を全部返す
+        - None / "all"       : earn, spend, adjust を全部返す
         - "spend" / "payment": spend だけ返す
-        - "earn"            : earn だけ返す
-        - "adjust"          : adjust だけ返す
+        - "earn"             : earn だけ返す
+        - "adjust"           : adjust だけ返す
         """
         try:
-            # ---- type 正規化 ----
-            t = (transaction_type or "spend").strip().lower()
+            # ---- helper: Decimal 等を安全に int 化 ----
+            def to_int(v: Any, default: int = 0) -> int:
+                try:
+                    if v is None:
+                        return default
+                    if isinstance(v, Decimal):
+                        return int(v)
+                    return int(v)
+                except Exception:
+                    return default
+
+            # ---- type 正規化（docstring通り: None は all）----
+            t = (transaction_type or "all").strip().lower()
+
+            # kind 正規化（DBに payment が混在しても spend 扱いに寄せる）
+            kind_alias = {
+                "payment": "spend",
+                "spend": "spend",
+                "earn": "earn",
+                "adjust": "adjust",
+            }
+
             if t in ("payment", "spend"):
                 kind_filter = {"spend"}
                 prefix = "points#spend#"
@@ -1399,20 +1581,23 @@ class DynamoDB:
                 kind_filter = {"earn", "spend", "adjust"}
                 prefix = "points#"  # まとめて取得して kind で絞る
             else:
-                # 想定外は安全に spend 扱い
-                kind_filter = {"spend"}
-                prefix = "points#spend#"
+                # 想定外は安全に all（or spend）どちらでも良いが、ここは all 推奨
+                kind_filter = {"earn", "spend", "adjust"}
+                prefix = "points#"
+                t = "all"
 
-            # ---- DynamoDB Query（ページネーション込み）----
             txs: List[Dict[str, Any]] = []
             last_evaluated_key = None
+
+            # ---- 重複排除（tx_id があればそれ優先）----
+            seen: Set[Any] = set()
 
             while len(txs) < limit:
                 q_kwargs = dict(
                     KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with(prefix),
-                    ScanIndexForward=False,   # 新しい順
+                    ScanIndexForward=False,  # 新しい順
                     ConsistentRead=True,
-                    Limit=min(100, limit - len(txs)),  # 余裕を持って取得
+                    Limit=min(100, limit - len(txs)),
                 )
                 if last_evaluated_key:
                     q_kwargs["ExclusiveStartKey"] = last_evaluated_key
@@ -1423,45 +1608,66 @@ class DynamoDB:
 
                 for it in items:
                     joined_at = str(it.get("joined_at") or "")
-                    kind = str(it.get("kind") or "")
 
-                    # prefix="points#" のとき等に備えて joined_at/ kind 両方で絞る
+                    # points 系以外は弾く
                     if not joined_at.startswith("points#"):
                         continue
+
+                    raw_kind = str(it.get("kind") or "").strip().lower()
+                    kind = kind_alias.get(raw_kind, raw_kind)  # payment -> spend など
+
                     if kind not in kind_filter:
                         continue
 
-                    # ---- 数値の取り扱いを安全に（Decimal -> int 等）----
-                    def to_int(v, default=0) -> int:
-                        try:
-                            if v is None:
-                                return default
-                            if isinstance(v, Decimal):
-                                return int(v)
-                            return int(v)
-                        except Exception:
-                            return default
-
                     delta_points = to_int(it.get("delta_points"), 0)
 
-                    # points_used は 0 を正しく扱う（or にしない）
+                    # spend の場合、delta_points は負で入っている想定 → points_used は常に正
                     pu_raw = it.get("points_used")
                     if pu_raw is not None:
                         points_used = to_int(pu_raw, 0)
                     else:
-                        # spend の場合は delta_points が負なので反転して正に
-                        points_used = -delta_points if kind == "spend" else 0
+                        points_used = (-delta_points) if kind == "spend" else 0
 
                     # 表示用 type
                     ui_type = "payment" if kind == "spend" else kind
 
+                    # 日付は joined_at もフォールバックに入れる（「不明」回避）
+                    joined_at = str(it.get("joined_at") or "")
+                    tx_date = (
+                        it.get("created_at")
+                        or it.get("transaction_date")
+                        or it.get("paid_at")
+                        or extract_iso_from_joined_at(joined_at)
+                        or None
+                    )
+
+                    # ---- 重複排除キー ----
+                    tx_id = it.get("tx_id")
+                    if tx_id:
+                        dedupe_key = ("tx_id", str(tx_id))
+                    else:
+                        # tx_id がない場合は、同一取引を識別できる複合キーで緩く排除
+                        dedupe_key = (
+                            "fallback",
+                            str(it.get("schedule_id") or ""),
+                            kind,
+                            int(delta_points),
+                            str(tx_date or ""),
+                            str(it.get("source") or ""),
+                            str(it.get("reason") or ""),
+                        )
+
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+
                     txs.append({
-                        "date": it.get("created_at") or it.get("transaction_date") or it.get("paid_at"),
+                        "date": tx_date,
                         "type": ui_type,
-                        "kind": kind,  # 内部的に区別したい場合に便利
-                        "points_used": points_used,        # 支払い(消費)は常に正
-                        "points": points_used,             # 互換
-                        "delta_points": delta_points,      # +/-
+                        "kind": kind,                    # 内部区別用（spend/earn/adjust）
+                        "points_used": points_used,      # 支払い(消費)は常に正
+                        "points": points_used,           # 互換
+                        "delta_points": delta_points,    # +/-（earnは+ / spendは-）
                         "description": it.get("reason", "") or "",
                         "event_date": it.get("event_date"),
                         "payment_type": it.get("payment_type"),
@@ -1561,38 +1767,146 @@ class DynamoDB:
         print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
         return total
     
-    def list_point_spends(self, user_id: str, limit: int = 20):
+    # def list_point_spends(self, user_id: str, limit: int = 20):
+    #     """
+    #     bad-users-history から支払(消費)の直近履歴を返す。
+    #     必ず list を返す（例外・0件時は []）。
+    #     返す要素: {event_date, amount, reason, created_at, tx_id, joined_at}
+    #     """
+    #     try:
+    #         resp = self.part_history.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with("points#spend#"),
+    #             ScanIndexForward=False,  # 新しい順
+    #             Limit=limit
+    #         )
+    #         items = resp.get("Items", [])
+    #         out = []
+    #         for it in items:
+    #             # amount は points_used 優先、なければ delta_points (負数) を反転して正数に
+    #             amt = it.get("points_used")
+    #             if amt is None:
+    #                 dp = int(it.get("delta_points", 0))
+    #                 amt = -dp if dp < 0 else 0
+    #             out.append({
+    #                 "event_date": it.get("event_date"),
+    #                 "amount": int(amt or 0),
+    #                 "reason": it.get("reason", "参加費"),
+    #                 "created_at": it.get("created_at"),
+    #                 "tx_id": it.get("tx_id"),
+    #                 "joined_at": it.get("joined_at"),
+    #             })
+    #         return out
+    #     except Exception as e:
+    #         print(f"[WARN] list_point_spends failed: {e}")
+    #         return []
+        
+    def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         bad-users-history から支払(消費)の直近履歴を返す。
         必ず list を返す（例外・0件時は []）。
-        返す要素: {event_date, amount, reason, created_at, tx_id, joined_at}
+
+        返す要素:
+        {
+            event_date, amount, reason,
+            created_at, tx_id, joined_at,
+            schedule_id, payment_type, source
+        }
+        created_at が無い場合は joined_at から補完する。
         """
         try:
             resp = self.part_history.query(
                 KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with("points#spend#"),
                 ScanIndexForward=False,  # 新しい順
-                Limit=limit
+                ConsistentRead=True,
+                Limit=limit,
             )
             items = resp.get("Items", [])
-            out = []
+
+            def to_int(v: Any, default: int = 0) -> int:
+                try:
+                    if v is None:
+                        return default
+                    if isinstance(v, Decimal):
+                        return int(v)
+                    return int(v)
+                except Exception:
+                    return default
+
+            def parse_ts_from_joined_at(joined_at: str) -> Optional[str]:
+                """
+                joined_at 例: points#spend#2026-01-15T12:34:56
+                → 2026-01-15T12:34:56 を取り出す
+                """
+                if not joined_at:
+                    return None
+                parts = joined_at.split("#", 2)
+                if len(parts) >= 3 and parts[2]:
+                    return parts[2]
+                return None
+
+            def normalize_created_at(it: Dict[str, Any]) -> Optional[str]:
+                # 優先順位: created_at -> paid_at -> transaction_date -> joined_at由来
+                ca = it.get("created_at") or it.get("paid_at") or it.get("transaction_date")
+                if ca:
+                    return str(ca)
+                ja = str(it.get("joined_at") or "")
+                ts = parse_ts_from_joined_at(ja)
+                return ts
+
+            def normalize_event_date(it: Dict[str, Any]) -> Optional[str]:
+                # event_date が無い場合、joined_at の日付部分で補完（YYYY-MM-DD）
+                ed = it.get("event_date")
+                if ed:
+                    return str(ed)
+
+                ja = str(it.get("joined_at") or "")
+                ts = parse_ts_from_joined_at(ja)
+                if not ts:
+                    return None
+
+                # ts: 2026-01-15T12:34:56 or 2026-01-15 12:34:56 などを想定
+                for sep in ("T", " "):
+                    if sep in ts:
+                        return ts.split(sep, 1)[0]
+                # それっぽい形なら先頭10文字
+                return ts[:10] if len(ts) >= 10 else ts
+
+            out: List[Dict[str, Any]] = []
             for it in items:
                 # amount は points_used 優先、なければ delta_points (負数) を反転して正数に
-                amt = it.get("points_used")
-                if amt is None:
-                    dp = int(it.get("delta_points", 0))
-                    amt = -dp if dp < 0 else 0
+                pu = it.get("points_used")
+                if pu is not None:
+                    amount = to_int(pu, 0)
+                else:
+                    dp = to_int(it.get("delta_points"), 0)
+                    amount = -dp if dp < 0 else 0
+
                 out.append({
-                    "event_date": it.get("event_date"),
-                    "amount": int(amt or 0),
-                    "reason": it.get("reason", "参加費"),
-                    "created_at": it.get("created_at"),
+                    "event_date": normalize_event_date(it),
+                    "amount": amount,
+                    "reason": str(it.get("reason") or "参加費"),
+                    "created_at": normalize_created_at(it),
                     "tx_id": it.get("tx_id"),
                     "joined_at": it.get("joined_at"),
+                    # 便利なので追加（不要なら消してOK）
+                    "schedule_id": it.get("schedule_id"),
+                    "payment_type": it.get("payment_type"),
+                    "source": it.get("source"),
                 })
+
+            print(f"[DEBUG] list_point_spends - user_id={user_id}, items={len(items)}, out={len(out)}")
+            # 日時が欠けてる件をすぐ特定できる
+            missing_ca = sum(1 for x in out if not x.get("created_at"))
+            if missing_ca:
+                print(f"[DEBUG] list_point_spends - created_at missing: {missing_ca}件（joined_at形式を確認）")
+
             return out
+
         except Exception as e:
             print(f"[WARN] list_point_spends failed: {e}")
+            import traceback; traceback.print_exc()
             return []
+
 
     def debug_list_spend(self, user_id: str, since: str | None = None) -> int:
         """
@@ -1681,7 +1995,7 @@ class DynamoDB:
 
             participation_records.sort(key=lambda x: x['event_date'])
 
-            # 表示用の全参加回数（40日ルール適用外）
+            # 表示用の全参加回数（45日ルール適用外）
             total_participation_all_time = len(participation_records)
             print(f"\n[DEBUG] 全参加回数（表示用）: {total_participation_all_time}回")
 
@@ -1760,10 +2074,10 @@ class DynamoDB:
                     participation_points += pts
                     print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")                
 
-                # 累計ボーナス（5回ごとに500P）
+                # 累計ボーナス（5回ごとに250P）
                 cumulative_count += 1
                 if cumulative_count % 5 == 0:
-                    bonus = int(500 * point_multiplier)
+                    bonus = int(250 * point_multiplier)
                     cumulative_bonus_points += bonus
                     cumulative_milestones.append({
                         'date': record['event_date'].strftime('%Y-%m-%d'),
@@ -1777,7 +2091,8 @@ class DynamoDB:
 
             # ===== 連続参加ボーナス =====
             today = datetime.now().date()
-            all_schedules = self.get_all_past_schedules(today)
+            all_schedules = self.get_all_past_schedules(today)            
+            all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
 
             if last_reset_index > 0:
                 reset_date = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
@@ -1806,6 +2121,7 @@ class DynamoDB:
 
                 if is_participated:
                     current_streak += 1
+                    print(f"[DEBUG][streak] participated date={schedule_date} current_streak(after_inc)={current_streak}")
                     if streak_start is None:
                         streak_start = schedule_date
 
@@ -1818,19 +2134,19 @@ class DynamoDB:
                     # 連続マイルストーン
                     milestone_bonus = 0
                     if current_streak == 5 and not milestone_5_achieved:
-                        milestone_bonus = int(200 * point_multiplier)
+                        milestone_bonus = int(500 * point_multiplier)
                         milestone_5_achieved = True
                     elif current_streak == 10 and not milestone_10_achieved:
-                        milestone_bonus = int(400 * point_multiplier)
+                        milestone_bonus = int(1000 * point_multiplier)
                         milestone_10_achieved = True
                     elif current_streak == 15 and not milestone_15_achieved:
-                        milestone_bonus = int(600 * point_multiplier)
+                        milestone_bonus = int(1500 * point_multiplier)
                         milestone_15_achieved = True
                     elif current_streak == 20 and not milestone_20_achieved:
-                        milestone_bonus = int(800 * point_multiplier)
+                        milestone_bonus = int(2000 * point_multiplier)
                         milestone_20_achieved = True
                     elif current_streak == 25 and not milestone_25_achieved:
-                        milestone_bonus = int(1000 * point_multiplier)
+                        milestone_bonus = int(2500 * point_multiplier)
                         milestone_25_achieved = True
 
                     if milestone_bonus > 0:
@@ -1840,7 +2156,7 @@ class DynamoDB:
                     max_streak = max(max_streak, current_streak)
                 else:
                     if current_streak > 0:
-                        print(f"[DEBUG] {schedule_date} 不参加 → 連続{current_streak}回でリセット")
+                        print(f"[DEBUG][streak] reset at date={schedule_date} streak_was={current_streak}")
                     current_streak = 0
                     streak_start = None
                     milestone_5_achieved = False
@@ -1898,12 +2214,23 @@ class DynamoDB:
                 print(f"[DEBUG] {reset_date_str} 以降の支払いのみを集計")
 
             for payment in payments:
-                points_used = payment.get('points_used', 0)
+                points_used = int(payment.get('points_used') or 0)
                 if points_used > 0:
                     total_points_used += points_used
-                    event_date = payment.get('event_date', '不明')
-                    paid_at = payment.get('transaction_date', payment.get('paid_at', '不明'))
-                    print(f"[DEBUG] {event_date} ポイント支払い: {points_used}P (支払日時: {paid_at})")
+
+                    event_date = payment.get('event_date') or '不明'
+
+                    paid_at_raw = (
+                    payment.get('date')  # ← get_point_transactions の "date"
+                    or payment.get('created_at')
+                    or payment.get('transaction_date')
+                    or payment.get('paid_at')
+                    or '不明'
+                )
+
+                paid_at = iso_to_jst(paid_at_raw) if paid_at_raw != '不明' else '不明'
+
+                print(f"[DEBUG] {event_date} ポイント支払い: {points_used}P (支払日時: {paid_at})")
 
             print(f"[DEBUG] 合計ポイント消費: {total_points_used}P")
 
@@ -1968,7 +2295,7 @@ class DynamoDB:
             print(f"\n[DEBUG] === 最終結果 ===")
             print(f"[DEBUG] 表示用参加回数: {total_participation_all_time}回")
             if is_reset:
-                print(f"[DEBUG] ポイントは40日ルールにより途中から計算されています")
+                print(f"[DEBUG] ポイントは45日ルールにより途中から計算されています")
                 print(f"[DEBUG] ポイント計算に使った参加回数: {len(participation_records_for_points)}回")
             if is_junior_high:
                 print(f"[DEBUG] 中学生係数 {point_multiplier}倍 が適用されています")
