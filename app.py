@@ -9,6 +9,9 @@ from io import BytesIO
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import urlparse, urljoin
+from flask import current_app
+import time
+from decimal import Decimal
 
 # --- サードパーティライブラリ ---
 from dotenv import load_dotenv
@@ -684,58 +687,57 @@ class User(UserMixin):
 @cache.memoize(timeout=600)
 def get_participants_info(schedule):
     participants_info = []
-
     try:
+        table_name = current_app.table_name
+        dynamodb = current_app.dynamodb
+
         raw = schedule.get("participants") or []
-        # 1) ID or dict の両対応 & None 除外 & 文字列化
+
         ids = []
+        seen = set()
         for x in raw:
-            if isinstance(x, dict):
-                uid = x.get("user_id") or x.get("user#user_id")
-            else:
-                uid = x
+            uid = (x.get("user_id") or x.get("user#user_id")) if isinstance(x, dict) else x
             if uid:
-                ids.append(str(uid))
+                s = str(uid)
+                if s not in seen:
+                    seen.add(s)
+                    ids.append(s)
+
         if not ids:
             return participants_info
 
-        # 2) BatchGetItem（UnprocessedKeys を再試行）
         request = {
-            app.table_name: {
+            table_name: {
                 "Keys": [{"user#user_id": uid} for uid in ids],
-                # ProjectionExpressionで#を含む属性名はExpressionAttributeNamesでエスケープが必要
-                "ProjectionExpression": "#user_id, display_name, profile_image_url, skill_score, practice_count",
-                "ExpressionAttributeNames": {
-                    "#user_id": "user#user_id"
-                }
+                "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
+                "ExpressionAttributeNames": {"#uid": "user#user_id"},
             }
         }
 
         responses = []
         unprocessed = request
-        client = getattr(app.dynamodb, "meta", None) and app.dynamodb.meta.client or app.dynamodb  # resource or client 両対応
-        # 最大数回リトライ
-        for _ in range(5):
+
+        client = dynamodb.meta.client if hasattr(dynamodb, "meta") else dynamodb
+
+        for attempt in range(5):
             resp = client.batch_get_item(RequestItems=unprocessed)
-            responses.extend(resp.get("Responses", {}).get(app.table_name, []))
+            responses.extend(resp.get("Responses", {}).get(table_name, []))
             unprocessed = resp.get("UnprocessedKeys") or {}
             if not unprocessed:
                 break
-            # （必要なら短いスリープ）
+            time.sleep(0.1 * (attempt + 1))
 
-        # 3) 応答を map 化（元の並びを維持して組み立て）
         by_id = {it["user#user_id"]: it for it in responses}
 
         for uid in ids:
             user = by_id.get(uid)
             if user:
-                # 数値整形
                 raw_score = user.get("skill_score")
                 skill_score = int(raw_score) if isinstance(raw_score, (int, float, Decimal)) else None
+
                 raw_practice = user.get("practice_count")
                 join_count = int(raw_practice) if isinstance(raw_practice, (int, float, Decimal)) else None
 
-                # URL 正規化（空/空白/"None" は None へ）
                 url = (user.get("profile_image_url") or "").strip()
                 profile_image_url = url if url and url.lower() != "none" else None
 
@@ -757,8 +759,9 @@ def get_participants_info(schedule):
                     "is_deleted": True,
                     "is_valid": False,
                 })
+
     except Exception as e:
-        logger.error(f"参加者情報の取得中にエラー: {e}")
+        logger.exception(f"参加者情報の取得中にエラー: {e}")
 
     return participants_info
 

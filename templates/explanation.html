@@ -183,7 +183,7 @@
                                             <div class="col-md-4 col-sm-6 mb-2">
                                                 <div class="card">
                                                     <div class="card-body py-2">
-                                                         <a href="{{ url_for('user_profile', user_id=participant.user_id) }}" 
+                                                         <a href="{{ url_for('users.user_profile', user_id=participant.user_id) }}">
                                                         class="participant-name"
                                                         onclick="event.stopPropagation();">  <!-- イベントの伝播を停止 -->
                                                             {{ participant.display_name }}
