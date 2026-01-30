@@ -15,6 +15,10 @@ load_dotenv()
 import boto3
 import os
 
+JST = ZoneInfo("Asia/Tokyo")
+
+def get_today_jst():
+    return datetime.now(JST).date()
 
     
 ISO_RE = re.compile(
@@ -653,7 +657,7 @@ class DynamoDB:
             items.extend(resp.get("Items", []))
 
         # 現在の日付（未来の参加を除外するため）
-        today = datetime.now().date()
+        today = datetime.now(JST).date()
         
         dates = []
         for it in items:
@@ -760,7 +764,7 @@ class DynamoDB:
             print(f"[DEBUG] DynamoDBから取得した生レコード数: {len(items)}件")
             
             # 現在の日付（未来の参加を除外）
-            today = datetime.now().date()
+            today = datetime.now(JST).date()
             print(f"[DEBUG] 今日の日付: {today}")
             
             # 日付ごとの最も遅い登録時刻を保持する辞書
@@ -777,38 +781,33 @@ class DynamoDB:
                 print(f"[DEBUG] 生データ: {item}")
                 
                 try:
-                    # statusフィールドの確認
-                    status = item.get("status", "未設定")
+                    # statusフィールドの確認（正規化）
+                    status = (item.get("status") or "registered").lower()
                     print(f"[DEBUG] status: {status}")
-                    
-                    # キャンセル済みは除外
-                    if item.get("status") == "cancelled":
-                        print(f"[DEBUG] ✗ キャンセル済みをスキップ: {item.get('date')}")
-                        cancelled_count += 1
-                        continue
-                    
+
                     # 必要なフィールドの確認
                     if "date" not in item:
                         print(f"[DEBUG] ✗ dateフィールドなし")
                         parse_error_count += 1
                         continue
-                        
-                    if "joined_at" not in item:
-                        print(f"[DEBUG] ✗ joined_atフィールドなし")
+
+                    if "joined_at" not in item and "created_at" not in item and "registered_at" not in item:
+                        # joined_at が無い古いデータもあるので、候補が全部無い場合だけ弾く
+                        print(f"[DEBUG] ✗ timestamp系フィールドなし (joined_at/created_at/registered_at)")
                         parse_error_count += 1
                         continue
-                    
+
                     event_date_str = item["date"]
                     print(f"[DEBUG] event_date: {event_date_str}")
-                    
+
                     event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
-                    
+
                     # 未来の日付は除外
                     if event_date > today:
                         print(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
                         future_count += 1
                         continue
-                    
+
                     # joined_at のパース（ISOでない joined_at も救う）
                     joined_at_raw = item.get("joined_at")
                     joined_at_str = str(joined_at_raw or "").strip()
@@ -830,30 +829,41 @@ class DynamoDB:
                         continue
 
                     print(f"[DEBUG] registered_at(変換後): {registered_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                    
+
+                    # cancelled の件数はカウント（ただし continue しない）
+                    if status == "cancelled":
+                        cancelled_count += 1
+                        print(f"[DEBUG] (keep) cancelled record: {event_date_str}")
+
+                    # --- ここで new_rec を作る ---
+                    new_rec = {
+                        "event_date": event_date_str,
+                        "registered_at": registered_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": status,
+                    }
+
                     # 同じ日付の場合、より遅い登録時刻を採用（再参加を反映）
                     if event_date_str not in date_records:
-                        date_records[event_date_str] = {
-                            'event_date': event_date_str,
-                            'registered_at': registered_at.strftime('%Y-%m-%d %H:%M:%S')
-                        }
-                        print(f"[DEBUG] ✓ 新規参加記録として登録: {event_date_str} - {registered_at.strftime('%H:%M:%S')}")
+                        date_records[event_date_str] = new_rec
+                        print(f"[DEBUG] ✓ 新規参加記録として登録: {event_date_str} - {registered_at.strftime('%H:%M:%S')} status={status}")
                         processed_count += 1
                     else:
-                        # 既存のレコードより遅い登録時刻なら更新（再参加）
                         existing_registered_at = datetime.strptime(
-                            date_records[event_date_str]['registered_at'], 
-                            '%Y-%m-%d %H:%M:%S'
+                            date_records[event_date_str]["registered_at"],
+                            "%Y-%m-%d %H:%M:%S"
                         )
-                        print(f"[DEBUG] 既存レコードと比較: 既存={existing_registered_at.strftime('%H:%M:%S')}, 新={registered_at.strftime('%H:%M:%S')}")
-                        
+                        print(
+                            f"[DEBUG] 既存レコードと比較: "
+                            f"既存={existing_registered_at.strftime('%H:%M:%S')}({date_records[event_date_str].get('status')}), "
+                            f"新={registered_at.strftime('%H:%M:%S')}({status})"
+                        )
+
                         if registered_at > existing_registered_at:
-                            print(f"[DEBUG] ✓ 再参加検出（より遅い時刻に更新）: {event_date_str}")
-                            print(f"[DEBUG]   {existing_registered_at.strftime('%H:%M:%S')} → {registered_at.strftime('%H:%M:%S')}")
-                            date_records[event_date_str]['registered_at'] = registered_at.strftime('%Y-%m-%d %H:%M:%S')
+                            date_records[event_date_str] = new_rec
+                            print(f"[DEBUG] ✓ 更新（より遅い時刻を採用）: {event_date_str} -> status={status}")
                         else:
-                            print(f"[DEBUG] ✗ 古い参加記録をスキップ: {event_date_str} - {registered_at.strftime('%H:%M:%S')}")
-                    
+                            print(f"[DEBUG] ✗ 古い参加記録をスキップ: {event_date_str} - {registered_at.strftime('%H:%M:%S')} status={status}")
+
                 except Exception as e:
                     print(f"[WARN] ✗ レコード処理エラー: {e}")
                     import traceback
@@ -861,8 +871,9 @@ class DynamoDB:
                     parse_error_count += 1
                     continue
             
-            # リストに変換してソート
-            records = sorted(date_records.values(), key=lambda x: x['event_date'])
+            # リストに変換してソート（全件→cancelled除外）
+            records_all = sorted(date_records.values(), key=lambda x: x["event_date"])
+            records = [r for r in records_all if (r.get("status") or "").lower() != "cancelled"]
             
             print(f"\n[DEBUG] ========================================")
             print(f"[DEBUG] 処理結果サマリー")
@@ -923,13 +934,13 @@ class DynamoDB:
             points = 0
             registration_type = "✗ 当日登録"
 
-        print(
-            f"    参加ポイント判定 - イベント日: {event_date:%Y-%m-%d}, "
-            f"登録日時: {registered_at:%Y-%m-%d %H:%M:%S}"
-        )
-        print(f"      3日前締切: {three_days_deadline:%Y-%m-%d %H:%M:%S}")
-        print(f"      前日締切: {one_day_deadline:%Y-%m-%d %H:%M:%S}")
-        print(f"      → {registration_type}: +{points}P")
+        # print(
+        #     f"    参加ポイント判定 - イベント日: {event_date:%Y-%m-%d}, "
+        #     f"登録日時: {registered_at:%Y-%m-%d %H:%M:%S}"
+        # )
+        # print(f"      3日前締切: {three_days_deadline:%Y-%m-%d %H:%M:%S}")
+        # print(f"      前日締切: {one_day_deadline:%Y-%m-%d %H:%M:%S}")
+        # print(f"      → {registration_type}: +{points}P")
 
         return points   
     
@@ -956,10 +967,10 @@ class DynamoDB:
 
     def get_user_participation_history(self, user_id: str):
         from datetime import datetime
-        
-        # 現在の日付
-        today = datetime.now().strftime('%Y-%m-%d')
-        
+
+        # 現在の日付（JST）
+        today = datetime.now(JST).date()
+
         items, resp = [], self.part_history.query(
             KeyConditionExpression=Key("user_id").eq(user_id)
         )
@@ -970,30 +981,35 @@ class DynamoDB:
                 ExclusiveStartKey=resp["LastEvaluatedKey"]
             )
             items.extend(resp.get("Items", []))
-        
-        # ↓↓↓ ここを修正：キャンセル済みを除外 ↓↓↓
+
         valid_dates = []
         for it in items:
-            if "date" not in it:
+            d_str = it.get("date")
+            if not d_str:
                 continue
-            
+
             # キャンセル済みは除外
-            if it.get("status") == "cancelled":
-                print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
+            if (it.get("status") or "").lower() == "cancelled":
+                print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
                 continue
-            
-            # 未来の日付は除外
-            if it["date"] <= today:
-                valid_dates.append(it["date"])
-        
-        # 重複を削除してソート
+
+            # 文字列 → date に変換して未来除外
+            try:
+                d = datetime.strptime(d_str, "%Y-%m-%d").date()
+            except ValueError:
+                print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
+                continue
+
+            if d <= today:
+                valid_dates.append(d_str)
+
+        # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
         dates = sorted(set(valid_dates))
-        # ↑↑↑ ここまで修正 ↑↑↑
-        
+
         print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
         for i, date in enumerate(dates):
             print(f"[DEBUG] 参加日 {i+1}: {date}")
-        
+
         return dates  # 'YYYY-MM-DD' の文字列配列
     
     def get_all_past_schedules(self, until_date):
@@ -1062,7 +1078,7 @@ class DynamoDB:
             if isinstance(birth_date, str):
                 birth_date = datetime.strptime(birth_date, '%Y-%m-%d')
             
-            today = datetime.now()
+            today = datetime.now(JST).date()
             
             # 年齢を計算
             age = today.year - birth_date.year
@@ -1980,20 +1996,27 @@ class DynamoDB:
                     'base_points': 0,
                 }
 
-            # 参加履歴をdatetimeにしてソート
+            # 参加履歴をdatetimeにしてソート（cancelled除外）
             participation_records = []
             for record in participation_history:
                 try:
-                    event_date = datetime.strptime(record['event_date'], '%Y-%m-%d')
-                    registered_at = datetime.strptime(record['registered_at'], '%Y-%m-%d %H:%M:%S')
+                    status = (record.get("status") or "registered").lower()
+                    if status == "cancelled":
+                        continue
+
+                    event_date = datetime.strptime(record["event_date"], "%Y-%m-%d")
+                    registered_at = datetime.strptime(record["registered_at"], "%Y-%m-%d %H:%M:%S")
+
                     participation_records.append({
-                        'event_date': event_date,
-                        'registered_at': registered_at
+                        "event_date": event_date,
+                        "registered_at": registered_at,
+                        "status": status,  # デバッグ用に残してもOK
                     })
+
                 except (ValueError, KeyError) as e:
                     print(f"[WARN] 不正なレコード形式: {record}, エラー: {e}")
 
-            participation_records.sort(key=lambda x: x['event_date'])
+            participation_records.sort(key=lambda x: x["event_date"])
 
             # 表示用の全参加回数（50日ルール適用外）
             total_participation_all_time = len(participation_records)
@@ -2054,6 +2077,9 @@ class DynamoDB:
             cumulative_bonus_points = 0
             cumulative_milestones = []
 
+            # ★ 生涯初回日（cancelled除外後の最初）
+            first_ever_date = participation_records[0]["event_date"]
+
             for idx, record in enumerate(participation_records_for_points, start=1):
                 base_points = self._is_early_registration(record)
 
@@ -2064,21 +2090,17 @@ class DynamoDB:
                     direct_registration_count += 1
                 # 0点はカウントしない
 
-                # 実際に付けるポイント
-                is_first_ever = (total_participation_all_time == 1)
-
-                if is_first_ever and idx == 1:
-                    # 本当に生涯初回の1回だけ200P
+                # 実際に付けるポイント（生涯初回の1回だけ200P）
+                if record["event_date"] == first_ever_date:
                     pts = int(FIRST_PARTICIPATION_POINTS * point_multiplier)
                     participation_points += pts
                     print(f"[DEBUG] 初回参加(生涯初回) → +{pts}P")
                 else:
-                    # それ以外は早期/直前/当日(0)のみ
                     pts = int(base_points * point_multiplier)
                     participation_points += pts
-                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")               
+                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")
 
-                # 累計ボーナス（5回ごとに250P）
+                # 累計ボーナス（5回ごとに +500P）
                 cumulative_count += 1
                 if cumulative_count % 5 == 0:
                     bonus = int(500 * point_multiplier)
@@ -2094,7 +2116,7 @@ class DynamoDB:
             print(f"[DEBUG] 累計参加ボーナス合計: {cumulative_bonus_points}P")
 
             # ===== 連続参加ボーナス =====
-            today = datetime.now().date()
+            today = datetime.now(JST).date()
             all_schedules = self.get_all_past_schedules(today)            
             all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
 
@@ -2218,21 +2240,21 @@ class DynamoDB:
                 print(f"[DEBUG] {reset_date_str} 以降の支払いのみを集計")
 
             for payment in payments:
-                points_used = int(payment.get('points_used') or 0)
-                if points_used > 0:
-                    total_points_used += points_used
+                points_used = int(payment.get("points_used") or 0)
+                if points_used <= 0:
+                    continue
 
-                    event_date = payment.get('event_date') or '不明'
+                total_points_used += points_used
+                event_date = payment.get("event_date") or "不明"
 
-                    paid_at_raw = (
-                    payment.get('date')  # ← get_point_transactions の "date"
-                    or payment.get('created_at')
-                    or payment.get('transaction_date')
-                    or payment.get('paid_at')
-                    or '不明'
+                paid_at_raw = (
+                    payment.get("date")
+                    or payment.get("created_at")
+                    or payment.get("transaction_date")
+                    or payment.get("paid_at")
+                    or "不明"
                 )
-
-                paid_at = iso_to_jst(paid_at_raw) if paid_at_raw != '不明' else '不明'
+                paid_at = iso_to_jst(paid_at_raw) if paid_at_raw != "不明" else "不明"
 
                 print(f"[DEBUG] {event_date} ポイント支払い: {points_used}P (支払日時: {paid_at})")
 
