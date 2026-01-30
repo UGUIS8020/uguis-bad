@@ -763,6 +763,9 @@ def get_participants_info(schedule):
     except Exception as e:
         logger.exception(f"参加者情報の取得中にエラー: {e}")
 
+    participants_info.sort(
+        key=lambda x: (x.get("join_count") is None, (x.get("join_count") or 0), x.get("display_name",""))
+    )
     return participants_info
 
 
@@ -869,18 +872,27 @@ def index():
                            or "")
                     url = url.strip() if isinstance(url, str) else None
 
+                    raw_practice = user.get("practice_count")
+                    try:
+                        join_count = int(raw_practice) if raw_practice is not None else 0
+                    except (ValueError, TypeError):
+                        join_count = 0
+
                     participants_info.append({
                         "user_id": user["user#user_id"],
                         "display_name": user.get("display_name", "不明"),
                         "profile_image_url": url if url and url.lower() != "none" else None,
                         "is_admin": bool(user.get("administrator")),
+                        "join_count": join_count,   # ★これが必要
                     })
                 except Exception:
                     # 個別の取得失敗はスキップ（全体は継続）
                     pass
 
             # 管理者を先頭にソート
-            participants_info.sort(key=lambda x: not x.get("is_admin", False))
+            participants_info.sort(
+                key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
+            )
             schedule["participants_info"] = participants_info
 
             # --- たら参加者 ---

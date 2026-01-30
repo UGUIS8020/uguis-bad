@@ -369,26 +369,31 @@
                             参加者一覧 ({{ schedule.participants_count }}人)
                             </a>
                         </h5>
+
                         {% if schedule.participants_info %}
+                        <div id="participants-{{ schedule.schedule_id }}">
                         <div class="row">
-                        {% for participant in schedule.participants_info %}
-                        <div class="col-md-3 col-sm-4 mb-1">
-                            <div class="card">
+                            {% for participant in schedule.participants_info %}
+                            <div class="col-md-3 col-sm-4 mb-1">
+                                <div class="card">
                                 <div class="card-body py-2 d-flex justify-content-between align-items-center">
                                     <a href="{{ url_for('users.user_profile', user_id=participant.get('user_id') or participant.get('user#user_id')) }}"
-                                    class="participant-name text-decoration-none text-dark flex-grow-1">
-                                        {{ participant.display_name }}
+                                    class="participant-name text-decoration-none text-dark flex-grow-1"
+                                    data-count="{{ participant.get('join_count', 0) }}">
+                                    {{ participant.display_name }}
                                     </a>
-                                    <!-- 削除ボタン -->
-                                    <button class="btn btn-sm btn-danger ms-2" 
+
+                                    <!-- 削除ボタン（印刷では消すなら no-print を付ける） -->
+                                    <button class="btn btn-sm btn-danger ms-2 no-print"
                                             onclick="removeParticipant('{{ schedule.schedule_id }}', '{{ participant.get('user_id') or participant.get('user#user_id') }}', '{{ schedule.date }}')"
                                             title="参加者を削除">
-                                        ×
+                                    ×
                                     </button>
                                 </div>
+                                </div>
                             </div>
+                            {% endfor %}
                         </div>
-                        {% endfor %}
                         </div>
                         {% else %}
                         <p class="text-muted">まだ参加者がいません</p>
@@ -422,6 +427,15 @@
                         <p class="text-muted">たらはいません</p>
                         {% endif %}
                         </div>
+
+                        <div>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary no-print"
+                                onclick="printParticipantsTable('{{ schedule.date }}', 'participants-{{ schedule.schedule_id }}')">
+                        印刷
+                        </button>
+                        </div>
+                        
                     </div>
                     </div>
                     {% endif %}
@@ -1024,6 +1038,84 @@ async function removeParticipant(scheduleId, userId, scheduleDate) {
     }
 }
     </script>
+
+<!-- 印刷用 -->
+    <script>
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function printParticipantsTable(date, containerId) {
+  const src = document.getElementById(containerId);
+  if (!src) return;
+
+  // 参加者名を抽出（a.participant-name から取る）
+  const names = Array.from(src.querySelectorAll("a.participant-name"))
+    .map(a => a.textContent.trim())
+    .filter(Boolean);
+
+  const n = names.length;
+  const rows = Math.ceil(n / 2); // 2列なので行数は半分（端数切り上げ）
+
+  let tableRows = "";
+  for (let i = 0; i < rows; i++) {
+    const left = names[i] ?? "";
+    const right = names[i + rows] ?? "";
+    tableRows += `
+      <tr>
+        <td class="name">${escapeHtml(left)}</td>
+        <td class="name">${escapeHtml(right)}</td>
+      </tr>
+    `;
+  }
+
+  const html = `
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>参加者一覧 ${escapeHtml(date)}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px; }
+    h2 { margin: 0 0 16px 0; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    td { padding: 20px 12px; vertical-align: top; }
+    td.name { width: 50%; font-size: 22px; }
+    /* 印刷時にいい感じに */
+    @media print {
+      body { padding: 12mm; }
+      td { padding: 4mm 6mm; }
+    }
+  </style>
+</head>
+<body>
+  <h2>${escapeHtml(date)}</h2>
+
+  <table>
+    <tbody>
+      ${tableRows}
+    </tbody>
+  </table>
+
+  <script>
+    window.onload = () => { window.print(); window.close(); };
+  <\/script>
+</body>
+</html>
+`;
+
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) return;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+</script>
 
         
 {% endblock %}
