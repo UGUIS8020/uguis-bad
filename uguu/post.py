@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, g
 from flask_login import current_user, login_required
 from .dynamo import db
-from utils.s3 import upload_image_to_s3, delete_image_from_s3
+from utils.s3 import upload_image_to_s3
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -237,44 +237,4 @@ def delete_post(post_id):
         print(f"[delete_post route] error: {e}")
         flash('投稿の削除に失敗しました', 'error')
         return redirect(url_for('uguu.show_timeline')) 
-
-
-
-# def delete_post(post_id):
-#     """投稿を削除"""
-#     try:
-#         # 投稿を取得して存在確認
-#         post_data = db.get_post(post_id)
-#         if not post_data:
-#             flash('投稿が見つかりません', 'error')
-#             return redirect(url_for('uguu.show_timeline'))
-        
-#         # 投稿者本人か確認
-#         if str(post_data['user_id']) != str(current_user.id):
-#             flash('投稿を削除する権限がありません', 'error')
-#             return redirect(url_for('uguu.show_timeline'))
-        
-#         # S3から画像を削除（もし画像がある場合）
-#         if post_data.get('image_url'):
-#             try:
-#                 delete_image_from_s3(post_data['image_url'])
-#             except Exception as e:
-#                 pass  # S3削除に失敗してもDynamoDB削除は続行
-        
-#         # DynamoDBから投稿を削除
-#         db.delete_post(post_id)
-        
-#         # 関連するいいねや返信も削除
-#         try:
-#             db.delete_post_likes(post_id)
-#             db.delete_post_replies(post_id)
-#         except Exception as e:
-#             pass  # 関連データ削除に失敗しても続行
-        
-#         flash('投稿を削除しました', 'success')
-        
-#     except Exception as e:
-#         flash('投稿の削除に失敗しました', 'error')
-    
-#     return redirect(url_for('uguu.show_timeline'))
 

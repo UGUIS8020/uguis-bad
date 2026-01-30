@@ -121,7 +121,7 @@ def user_profile(user_id):
             user=user,
             posts=user_posts,
             posts_count=len(user_posts) if user_posts else 0,
-            past_participation_count=user_stats['total_participation'],
+            past_participation_count=int(user.get("practice_count") or 0),
             participation_points=user_stats['uguu_points'],  # ←「うぐポイント」残高を表示するならこのままでOK
             followers_count=0,
             following_count=0,
