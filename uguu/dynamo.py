@@ -1925,8 +1925,8 @@ class DynamoDB:
         うぐポイントを計算（中学生は半分のポイント）
 
         【重要な仕様】
-        - 参加回数表示：45日ルール適用外（全履歴をカウント）
-        - ポイント計算：45日ルール適用（45日以上空いたらリセット）
+        - 参加回数表示：50日ルール適用外（全履歴をカウント）
+        - ポイント計算：50日ルール適用（50日以上空いたらリセット）
         - 初回参加だけ200Pを固定で付与する
         - 月内の参加回数に応じてボーナスを付与する（5,7,10,15,20回）
         - 5回ごとの累計ボーナス（+500P）は継続
@@ -1995,7 +1995,7 @@ class DynamoDB:
 
             participation_records.sort(key=lambda x: x['event_date'])
 
-            # 表示用の全参加回数（45日ルール適用外）
+            # 表示用の全参加回数（50日ルール適用外）
             total_participation_all_time = len(participation_records)
             print(f"\n[DEBUG] 全参加回数（表示用）: {total_participation_all_time}回")
 
@@ -2012,7 +2012,7 @@ class DynamoDB:
 
             print(f"[DEBUG] 全履歴の早期登録: 〜3日前(100)={all_time_early_count}回, 2日前〜前日(50)={all_time_direct_count}回")
 
-            RESET_DAYS = 45  # 45日ルール（46日以上空いたらリセット）
+            RESET_DAYS = 50  # 50日ルール（51日以上空いたらリセット）
 
             print(f"\n[DEBUG] {RESET_DAYS}日ルールチェック（ポイント計算用）")
             last_reset_index = 0
@@ -2065,19 +2065,23 @@ class DynamoDB:
                 # 0点はカウントしない
 
                 # 実際に付けるポイント
-                if idx == 1:
-                    pts = int(FIRST_PARTICIPATION_POINTS * point_multiplier)  # 初回200
+                is_first_ever = (total_participation_all_time == 1)
+
+                if is_first_ever and idx == 1:
+                    # 本当に生涯初回の1回だけ200P
+                    pts = int(FIRST_PARTICIPATION_POINTS * point_multiplier)
                     participation_points += pts
-                    print(f"[DEBUG] 初回参加 → +{pts}P")
+                    print(f"[DEBUG] 初回参加(生涯初回) → +{pts}P")
                 else:
+                    # それ以外は早期/直前/当日(0)のみ
                     pts = int(base_points * point_multiplier)
                     participation_points += pts
-                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")                
+                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")               
 
                 # 累計ボーナス（5回ごとに250P）
                 cumulative_count += 1
                 if cumulative_count % 5 == 0:
-                    bonus = int(250 * point_multiplier)
+                    bonus = int(500 * point_multiplier)
                     cumulative_bonus_points += bonus
                     cumulative_milestones.append({
                         'date': record['event_date'].strftime('%Y-%m-%d'),
@@ -2167,13 +2171,13 @@ class DynamoDB:
 
             print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
 
-            # ===== 月間ボーナス（係数適用、45日ルール適用後） =====
+            # ===== 月間ボーナス（係数適用、50日ルール適用後） =====
             monthly_participation = defaultdict(int)
             for record in participation_records_for_points:
                 month_key = record['event_date'].strftime("%Y-%m")
                 monthly_participation[month_key] += 1
 
-            print(f"\n[DEBUG] 月間ボーナス計算（45日ルール適用後）")
+            print(f"\n[DEBUG] 月間ボーナス計算（50日ルール適用後）")
             monthly_bonuses = {}
             monthly_bonus_points = 0
 
@@ -2295,7 +2299,7 @@ class DynamoDB:
             print(f"\n[DEBUG] === 最終結果 ===")
             print(f"[DEBUG] 表示用参加回数: {total_participation_all_time}回")
             if is_reset:
-                print(f"[DEBUG] ポイントは45日ルールにより途中から計算されています")
+                print(f"[DEBUG] ポイントは50日ルールにより途中から計算されています")
                 print(f"[DEBUG] ポイント計算に使った参加回数: {len(participation_records_for_points)}回")
             if is_junior_high:
                 print(f"[DEBUG] 中学生係数 {point_multiplier}倍 が適用されています")
