@@ -802,6 +802,15 @@ class DynamoDB:
 
                     event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
 
+                    now_jst_local = datetime.now(JST)
+                    today_local = now_jst_local.date()
+
+                    print("[DEBUG] now_jst_local:", now_jst_local)
+                    print("[DEBUG] today_local:", today_local)
+                    print("[DEBUG] today(in func):", today)  # 既に作ってる today を確認したいなら
+                    print("[DEBUG] event_date(date):", event_date)
+                    print("[DEBUG] event_date_str:", event_date_str)
+
                     # 未来の日付は除外
                     if event_date > today:
                         print(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
@@ -2103,7 +2112,7 @@ class DynamoDB:
                 # 累計ボーナス（5回ごとに +500P）
                 cumulative_count += 1
                 if cumulative_count % 5 == 0:
-                    bonus = int(500 * point_multiplier)
+                    bonus = int(200 * point_multiplier)
                     cumulative_bonus_points += bonus
                     cumulative_milestones.append({
                         'date': record['event_date'].strftime('%Y-%m-%d'),
