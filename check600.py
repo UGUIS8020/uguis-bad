@@ -1,113 +1,202 @@
-import os, csv
+import os
+import sys
+import argparse
+from datetime import datetime
 import boto3
-from decimal import Decimal
-from botocore.config import Config
-from botocore.exceptions import ClientError, NoCredentialsError
-from dotenv import load_dotenv
+from boto3.dynamodb.conditions import Key
 
-load_dotenv()
 
-TABLE_NAME = "bad-users-history"
-REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "ap-northeast-1"
+def list_tables(region: str, limit: int = 50):
+    client = boto3.client("dynamodb", region_name=region)
+    resp = client.list_tables(Limit=limit)
+    tables = resp.get("TableNames", [])
+    return tables
 
-# オプション
-NUMERIC_ONLY = True             # True: 数値として 600 のみ。False: 文字列に "600" を含むもマッチ
-EXCLUDE_FIELDS = {"joined_at"}  # ここに含まれる属性名は文字列照合をスキップ（NUMERIC_ONLY=Falseのとき有効）
-EXPORT_CSV = False              # True で CSV 出力
-CSV_PATH = "hits_600.csv"
 
-def _is_num_600(v):
-    if isinstance(v, (int, float, Decimal)):
-        try:
-            return Decimal(v) == Decimal(600)
-        except Exception:
-            return False
-    return False
-
-def _is_str_contains_600(v):
-    return isinstance(v, str) and ("600" in v)
-
-def _walk(item, path=""):
+def audit_part_history_for_user(table, user_id: str):
     """
-    アイテムを再帰的に探索し、マッチした (path, value) を yield
-    path 例: "points", "meta.scores[2].value"
+    user_id で Query して、変なレコード（参加履歴ではない / 欠損 / 形式崩れ）を表示
     """
-    if isinstance(item, dict):
-        for k, v in item.items():
-            subpath = f"{path}.{k}" if path else k
-            yield from _walk(v, subpath)
-    elif isinstance(item, list):
-        for i, v in enumerate(item):
-            subpath = f"{path}[{i}]"
-            yield from _walk(v, subpath)
-    else:
-        # 葉ノード
-        if NUMERIC_ONLY:
-            if _is_num_600(item):
-                yield (path, item)
-        else:
-            # 数値 600 も OK、文字列 "600" も OK（ただし除外フィールドの直下は除く）
-            if _is_num_600(item):
-                yield (path, item)
-            else:
-                # 除外フィールド直下の文字列はスキップ
-                direct_field = path.split(".", 1)[0] if path else ""
-                if direct_field not in EXCLUDE_FIELDS and _is_str_contains_600(item):
-                    yield (path, item)
+    items = []
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items.extend(resp.get("Items", []))
 
-def key_str(item, key_schema):
-    parts = []
-    for ks in key_schema:
-        name = ks["AttributeName"]
-        parts.append(f"{name}={item.get(name)}")
-    return ", ".join(parts) if parts else "(no key info)"
+    while "LastEvaluatedKey" in resp:
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id),
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        items.extend(resp.get("Items", []))
+
+    print(f"[INFO] items(query result): {len(items)}")
+
+    suspicious = 0
+    for it in items:
+        reasons = []
+
+        # 参加履歴として期待しているキー
+        has_date = "date" in it
+        has_any_ts = any(k in it for k in ("joined_at", "created_at", "registered_at"))
+
+        # 支払い系が混ざっていないか
+        looks_like_payment = ("payment_type" in it) or (it.get("entity_type") == "point_transaction")
+
+        if looks_like_payment:
+            reasons.append("looks_like_payment(point_transaction)")
+        if not has_date:
+            reasons.append("missing_date_field")
+        if not has_any_ts:
+            reasons.append("missing_timestamp_fields")
+
+        # date の形式チェック
+        if has_date:
+            d = str(it.get("date") or "").strip()
+            try:
+                datetime.strptime(d, "%Y-%m-%d")
+            except Exception:
+                reasons.append(f"bad_date_format:{repr(d)}")
+
+        # joined_at が points#... の形式なら混在の強い証拠
+        ja = it.get("joined_at")
+        if isinstance(ja, str) and ja.startswith("points#"):
+            reasons.append("joined_at_points_format")
+
+        if reasons:
+            suspicious += 1
+            print("\n[FOUND] suspicious item")
+            print("reasons:", reasons)
+            keys_to_show = [
+                "user_id", "date", "event_date", "status",
+                "joined_at", "created_at", "registered_at",
+                "entity_type", "payment_type", "reason", "tx_id",
+                "schedule_id",
+            ]
+            for k in keys_to_show:
+                if k in it:
+                    print(f"  {k}: {it[k]}")
+
+    print("\n====================")
+    print("Query summary")
+    print("====================")
+    print("total:", len(items))
+    print("suspicious:", suspicious)
+
+
+def audit_all_part_history_table(table, limit: int = 200):
+    """
+    テーブル全体を Scan して、混在・欠損などをサンプル抽出
+    """
+    scanned = 0
+    suspicious = 0
+    last_evaluated_key = None
+
+    while True:
+        kwargs = {"Limit": min(limit - scanned, 200)}
+        if last_evaluated_key:
+            kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+        resp = table.scan(**kwargs)
+        items = resp.get("Items", [])
+
+        for it in items:
+            scanned += 1
+            reasons = []
+
+            has_date = "date" in it
+            has_any_ts = any(k in it for k in ("joined_at", "created_at", "registered_at"))
+            looks_like_payment = ("payment_type" in it) or (it.get("entity_type") == "point_transaction")
+
+            if looks_like_payment:
+                reasons.append("looks_like_payment(point_transaction)")
+            if not has_date:
+                reasons.append("missing_date_field")
+            if not has_any_ts:
+                reasons.append("missing_timestamp_fields")
+
+            if has_date:
+                d = str(it.get("date") or "").strip()
+                try:
+                    datetime.strptime(d, "%Y-%m-%d")
+                except Exception:
+                    reasons.append(f"bad_date_format:{repr(d)}")
+
+            ja = it.get("joined_at")
+            if isinstance(ja, str) and ja.startswith("points#"):
+                reasons.append("joined_at_points_format")
+
+            if reasons:
+                suspicious += 1
+                print("\n[FOUND] suspicious item (scan)")
+                print("reasons:", reasons)
+                keys_to_show = [
+                    "user_id", "date", "event_date", "status",
+                    "joined_at", "created_at", "registered_at",
+                    "entity_type", "payment_type", "reason", "tx_id",
+                    "schedule_id",
+                ]
+                for k in keys_to_show:
+                    if k in it:
+                        print(f"  {k}: {it[k]}")
+
+            if scanned >= limit:
+                break
+
+        if scanned >= limit:
+            break
+
+        last_evaluated_key = resp.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    print("\n====================")
+    print("Scan summary")
+    print("====================")
+    print("scanned:", scanned)
+    print("suspicious:", suspicious)
+
 
 def main():
-    session = boto3.session.Session(region_name=REGION)
-    creds = session.get_credentials()
-    if not creds or not creds.access_key:
-        raise NoCredentialsError()
+    print("[BOOT] check600.py started")
 
-    dynamodb = session.resource("dynamodb", config=Config(retries={"max_attempts": 10, "mode": "standard"}))
-    table = dynamodb.Table(TABLE_NAME)
-    key_schema = table.key_schema
-    client = table.meta.client
-    paginator = client.get_paginator("scan")
+    parser = argparse.ArgumentParser(description="Audit participation history table")
+    parser.add_argument("--region", default=os.getenv("AWS_REGION", "ap-northeast-1"))
+    parser.add_argument("--table", default=os.getenv("DYNAMO_PART_HISTORY_TABLE", ""))
+    parser.add_argument("--user", default=os.getenv("USER_ID", ""))
+    parser.add_argument("--scan", action="store_true", help="scan table sample (default: off)")
+    parser.add_argument("--limit", type=int, default=200, help="scan sample limit (default: 200)")
+    args = parser.parse_args()
 
-    print(f"=== SCAN {TABLE_NAME} (region={REGION}) ===")
-    total_hits = 0
-    csv_rows = []
+    if not args.table:
+        print("[ERROR] table name is empty.")
+        print("Set env DYNAMO_PART_HISTORY_TABLE or pass --table <name>\n")
+        print("[HINT] Tables in this region (first 50):")
+        try:
+            for t in list_tables(args.region, limit=50):
+                print(" -", t)
+        except Exception as e:
+            print("[ERROR] failed to list tables:", e)
+        return
 
-    try:
-        for page in paginator.paginate(TableName=TABLE_NAME, ReturnConsumedCapacity="NONE"):
-            for item in page.get("Items", []):
-                matches = list(_walk(item))
-                if matches:
-                    total_hits += 1
-                    print(f"- HIT #{total_hits} @ {key_str(item, key_schema)}")
-                    for (p, v) in matches:
-                        print(f"    • {p} -> {v}")
-                        if EXPORT_CSV:
-                            csv_rows.append({
-                                "hit_index": total_hits,
-                                "key": key_str(item, key_schema),
-                                "path": p,
-                                "value": str(v)
-                            })
-        print(f"-> {total_hits} item(s) with 600 in {TABLE_NAME}")
+    dynamodb = boto3.resource("dynamodb", region_name=args.region)
+    table = dynamodb.Table(args.table)
 
-        if EXPORT_CSV and csv_rows:
-            with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["hit_index", "key", "path", "value"])
-                writer.writeheader()
-                writer.writerows(csv_rows)
-            print(f"[Saved] {CSV_PATH}")
-    except ClientError as e:
-        code = e.response["Error"]["Code"]
-        msg = e.response["Error"]["Message"]
-        print(f"[ERROR] {code}: {msg}")
-        if code in ("AccessDeniedException", "UnrecognizedClientException"):
-            print("※ dynamodb:Scan 権限とリージョン/アカウントをご確認ください。")
+    print(f"[INFO] region={args.region}")
+    print(f"[INFO] table={args.table}")
+
+    # user指定があれば userのquery監査
+    if args.user:
+        print(f"[INFO] auditing user_id={args.user}")
+        audit_part_history_for_user(table, args.user)
+    else:
+        print("[WARN] --user not provided; skip Query audit (user_id)")
+
+    # --scan が指定されたらテーブル全体サンプルスキャン
+    if args.scan:
+        print(f"[INFO] scanning table sample limit={args.limit}")
+        audit_all_part_history_table(table, limit=args.limit)
+
+    print("[DONE] check600.py finished")
+
 
 if __name__ == "__main__":
     main()

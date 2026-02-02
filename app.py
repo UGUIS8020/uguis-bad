@@ -11,17 +11,15 @@ from decimal import Decimal
 from urllib.parse import urlparse, urljoin
 from flask import current_app
 import time
-from decimal import Decimal
 
 # --- サードパーティライブラリ ---
 from dotenv import load_dotenv
-import pytz
+from utils.timezone import JST
 import requests
 from PIL import Image, ExifTags
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.exceptions import ClientError
-
 # --- Flask関連 ---
 from flask import (
     Flask, render_template, request, redirect, url_for, flash,
@@ -57,6 +55,10 @@ from utils.db import (
 
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
+from uguu.dynamo import DynamoDB
+
+# DynamoDBインスタンスを作成（グローバルに1つ）
+uguu_db = DynamoDB()
 
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.WARNING)
@@ -150,7 +152,7 @@ def create_app():
 app = create_app()
 
 def tokyo_time():
-    return datetime.now(pytz.timezone('Asia/Tokyo'))
+    return datetime.now(JST)
 
 
 @login_manager.user_loader
@@ -1126,95 +1128,120 @@ def day_of_participants():
 @login_required
 def join_schedule(schedule_id):
     try:
-        # リクエストデータの取得
-        data = request.get_json()
-        date = data.get('date')
+        data = request.get_json() or {}
+        date = (data.get('date') or "").strip()
 
         if not date:
             app.logger.warning(f"'date' is not provided for schedule_id={schedule_id}")
             return jsonify({'status': 'error', 'message': '日付が不足しています。'}), 400
 
-        # スケジュールの取得
         schedule_table = app.dynamodb.Table(app.table_name_schedule)
-        response = schedule_table.get_item(
-            Key={
-                'schedule_id': schedule_id,
-                'date': date
-            }
-        )
+
+        # スケジュール取得
+        response = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
         schedule = response.get('Item')
         if not schedule:
             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません。'}), 404
 
-        # 参加者リストの更新
-        participants = schedule.get('participants', [])
-        
-        # ★★★ 「たら」参加者リストの取得 ★★★
-        tara_participants = schedule.get('tara_participants', [])
-        
-        if current_user.id in participants:
-            participants.remove(current_user.id)
+        user_id = current_user.id
+
+        # 現在の参加者 / たら参加者
+        participants = schedule.get('participants', []) or []
+        tara_participants = schedule.get('tara_participants', []) or []
+
+        history_table = app.dynamodb.Table("bad-users-history")
+
+        # timezone-aware UTC（DynamoDB保存はこれで統一推奨）
+        now_utc_iso = datetime.now(timezone.utc).isoformat()
+
+        # 参加キャンセル
+        if user_id in participants:
+            participants.remove(user_id)
             message = "参加をキャンセルしました"
             is_joining = False
-            
-            # ★★★ ここに追加：bad-users-historyのstatusを更新 ★★★
-            # ★ schedule_idも渡す
-            db.cancel_participation(current_user.id, date, schedule_id)
-            app.logger.info(f"✓ ユーザー {current_user.id} の参加履歴をキャンセル済みに更新しました (date={date})")
-            # ★★★ ここまで追加 ★★★
-            
+
+            # 1) 既存の履歴を「cancelled」に更新（あなたの既存関数を利用）
+            try:
+                db.cancel_participation(user_id, date, schedule_id)
+                app.logger.info(
+                    f"✓ ユーザー {user_id} の参加履歴をキャンセル済みに更新しました (date={date}, schedule_id={schedule_id})"
+                )
+            except Exception as e:
+                app.logger.error(f"[cancel_participation エラー]: {e}")
+
+            # 2) 保険として「キャンセル」履歴も1件追加（後の集計が安定）
+            #    ※この1件が最新になり、同日の状態が cancelled として扱われます。
+            try:
+                history_table.put_item(
+                    Item={
+                        "user_id": user_id,
+                        "joined_at": now_utc_iso,
+                        "schedule_id": schedule_id,
+                        "date": date,
+                        "location": schedule.get("location") or schedule.get("venue") or "未設定",
+                        "status": "cancelled",
+                        "action": "cancel",
+                    }
+                )
+            except Exception as e:
+                app.logger.error(f"[キャンセル履歴保存エラー] bad-users-history: {e}")
+
+        # 参加登録（正式参加）
         else:
-            participants.append(current_user.id)
+            participants.append(user_id)
             message = "参加登録が完了しました！"
             is_joining = True
-            
-            # ★★★ 重要：参加した場合、「たら」リストから自動的に削除 ★★★
-            if current_user.id in tara_participants:
-                tara_participants.remove(current_user.id)
-                app.logger.info(f"✓ ユーザー {current_user.id} の「たら」を自動削除しました")
-            
-            if is_joining and not previously_joined(schedule_id, current_user.id):
-                increment_practice_count(current_user.id)
-                try:
-                    history_table = app.dynamodb.Table("bad-users-history")
-                    history_table.put_item(
-                        Item={
-                            "user_id": current_user.id,
-                            "joined_at": datetime.utcnow().isoformat(),
-                            "schedule_id": schedule_id,
-                            "date": date,
-                            "location": schedule.get("location", "未設定"),
-                            "status": "registered"  # ★★★ これも追加 ★★★
-                        }
-                    )
-                except Exception as e:
-                    app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
 
-        # ★★★ DynamoDB の更新（tara_participantsも含める） ★★★
+            # 正式参加したら「たら」から自動削除
+            if user_id in tara_participants:
+                tara_participants.remove(user_id)
+                app.logger.info(f"✓ ユーザー {user_id} の「たら」を自動削除しました (schedule_id={schedule_id}, date={date})")
+
+            # 参加回数カウントは初回だけ（従来仕様を維持）
+            if not previously_joined(schedule_id, user_id):
+                try:
+                    increment_practice_count(user_id)
+                except Exception as e:
+                    app.logger.error(f"[practice_count 更新エラー]: {e}")
+
+            # 履歴は「毎回」追加してOK（同日の最新レコードが正式参加として残る）
+            try:
+                history_table.put_item(
+                    Item={
+                        "user_id": user_id,
+                        "joined_at": now_utc_iso,
+                        "schedule_id": schedule_id,
+                        "date": date,
+                        "location": schedule.get("location") or schedule.get("venue") or "未設定",
+                        "status": "registered",
+                        "action": "join",
+                    }
+                )
+            except Exception as e:
+                app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
+
+        # スケジュール更新（participants / count / tara も一緒に更新）
         schedule_table.update_item(
-            Key={
-                'schedule_id': schedule_id,
-                'date': date
-            },
-            UpdateExpression="SET participants = :participants, participants_count = :count, tara_participants = :tara",
+            Key={'schedule_id': schedule_id, 'date': date},
+            UpdateExpression="SET participants = :participants, participants_count = :count, tara_participants = :tara, updated_at = :ua",
             ExpressionAttributeValues={
                 ':participants': participants,
                 ':count': len(participants),
-                ':tara': tara_participants  # ★ 追加
+                ':tara': tara_participants,
+                ':ua': now_utc_iso,  # ここもUTCで統一
             }
         )
 
-        # キャッシュのリセット
+        # キャッシュリセット
         cache.delete_memoized(get_schedules_with_formatting)
 
-        # 成功レスポンス
         return jsonify({
             'status': 'success',
             'message': message,
             'is_joining': is_joining,
             'participants': participants,
             'participants_count': len(participants),
-            'tara_participants': tara_participants  # ★ 追加（オプション）
+            'tara_participants': tara_participants,
         })
 
     except ClientError as e:
@@ -1232,80 +1259,86 @@ def tara_join():
         data = request.get_json()
         schedule_id = data.get('schedule_id')
         schedule_date = data.get('schedule_date')
-        
+
         if not schedule_id or not schedule_date:
             return jsonify({'status': 'error', 'message': '必要なデータが不足しています'}), 400
-        
+
         schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        history_table  = app.dynamodb.Table("bad-users-history")
+
         user_id = current_user.id
-        
-        # 現在のスケジュール情報を取得
+        now_utc = datetime.now(timezone.utc).isoformat()
+
+        # スケジュール取得
         response = schedule_table.get_item(
-            Key={
-                'schedule_id': schedule_id,
-                'date': schedule_date
-            }
+            Key={'schedule_id': schedule_id, 'date': schedule_date}
         )
-        
         if 'Item' not in response:
             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません'}), 404
-            
+
         schedule = response['Item']
-        
-        # 現在のたら参加者を取得
         tara_participants = schedule.get('tara_participants', [])
-        
-        # 「たら」参加の切り替え
+
         is_tara_joined = user_id in tara_participants
-        
+
         if is_tara_joined:
-            # 「たら」参加解除
+            # 解除
             tara_participants.remove(user_id)
             message = '「たら」参加を解除しました'
-        else:
-            # 「たら」参加追加
-            tara_participants.append(user_id)
-            message = '「たら」参加しました'
-            
-            # 履歴保存
+
+            # ★解除も履歴に残す（後から正しく判定できる）
             try:
-                history_table = app.dynamodb.Table("bad-users-history")
                 history_table.put_item(
                     Item={
                         "user_id": user_id,
-                        "joined_at": datetime.utcnow().isoformat(),
+                        "joined_at": now_utc,
                         "schedule_id": schedule_id,
                         "date": schedule_date,
                         "action": "tara_join",
-                        "location": schedule.get("venue", "未設定")
+                        "status": "cancelled",  # ★解除は cancelled
+                        "location": schedule.get("venue", schedule.get("location", "未設定")),
+                    }
+                )
+            except Exception as e:
+                app.logger.error(f"[たら解除 履歴保存エラー]: {e}")
+
+        else:
+            # 追加
+            tara_participants.append(user_id)
+            message = '「たら」参加しました'
+
+            # ★たらは tentative（仮参加）として保存
+            try:
+                history_table.put_item(
+                    Item={
+                        "user_id": user_id,
+                        "joined_at": now_utc,
+                        "schedule_id": schedule_id,
+                        "date": schedule_date,
+                        "action": "tara_join",
+                        "status": "tentative",  # ★重要
+                        "location": schedule.get("venue", schedule.get("location", "未設定")),
                     }
                 )
             except Exception as e:
                 app.logger.error(f"[たら履歴保存エラー]: {e}")
-        
-        # DynamoDBを更新（シンプルにたら参加者のみ）
+
+        # 更新
         schedule_table.update_item(
-            Key={
-                'schedule_id': schedule_id,
-                'date': schedule_date
-            },
+            Key={'schedule_id': schedule_id, 'date': schedule_date},
             UpdateExpression="SET tara_participants = :tp, updated_at = :ua",
-            ExpressionAttributeValues={
-                ':tp': tara_participants,
-                ':ua': datetime.utcnow().isoformat()
-            }
+            ExpressionAttributeValues={':tp': tara_participants, ':ua': now_utc}
         )
-        
-        # キャッシュのリセット
+
         cache.delete_memoized(get_schedules_with_formatting)
-        
+
         return jsonify({
             'status': 'success',
             'message': message,
             'tara_count': len(tara_participants),
-            'is_tara_joined': not is_tara_joined  # 切り替わった後の状態
+            'is_tara_joined': not is_tara_joined
         })
-        
+
     except Exception as e:
         app.logger.error(f"「たら」参加処理エラー: {e}")
         return jsonify({'status': 'error', 'message': '処理中にエラーが発生しました'}), 500
@@ -1607,6 +1640,10 @@ def logout():
 @login_required
 def user_maintenance():
     try:
+        # ソートパラメータを取得
+        sort_by = request.args.get('sort_by', 'created_at')  # デフォルトは作成日
+        order = request.args.get('order', 'desc')  # デフォルトは降順
+        
         # テーブルからすべてのユーザーを取得
         response = app.table.scan()
         
@@ -1615,25 +1652,49 @@ def user_maintenance():
         for user in users:
             if 'user#user_id' in user:
                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
+            
+            # ポイント情報を取得
+            try:
+                user_stats = uguu_db.get_user_stats(user['user_id'])
+                user['points'] = user_stats.get('uguu_points', 0)
+                user['total_participation'] = user_stats.get('total_participation', 0)
+                
+                # デバッグ出力（最初のユーザーのみ）
+                if users.index(user) == 0:
+                    print(f"[DEBUG] First user - user_id: {user['user_id']}")
+                    print(f"[DEBUG] uguu_points: {user['points']}")
+                    print(f"[DEBUG] total_participation: {user['total_participation']}")
+            except Exception as e:
+                print(f"[ERROR] Failed to get stats for user {user.get('user_id', 'unknown')}: {e}")
+                user['points'] = 0
+                user['total_participation'] = 0
         
-        # created_at の降順でソート（新しい順）
-        sorted_users = sorted(users, 
-                            key=lambda x: x.get('created_at'),
-                            reverse=True)
+        # ソート処理
+        reverse = (order == 'desc')
         
-        # ログ出力を削除
+        if sort_by == 'points':
+            sorted_users = sorted(users, key=lambda x: x.get('points', 0), reverse=reverse)
+        elif sort_by == 'total_participation':
+            sorted_users = sorted(users, key=lambda x: x.get('total_participation', 0), reverse=reverse)
+        elif sort_by == 'user_name':
+            sorted_users = sorted(users, key=lambda x: x.get('user_name', ''), reverse=reverse)
+        elif sort_by == 'created_at':
+            sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=reverse)
+        else:
+            sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=True)
         
         return render_template("user_maintenance.html", 
                              users=sorted_users, 
                              page=1, 
-                             has_next=False)
-
-    except ClientError as e:
-        # エラーログは重要なので残す（エラー発生時のデバッグに必要）
-        app.logger.error(f"DynamoDB error: {str(e)}")
-        flash('ユーザー情報の取得に失敗しました。', 'error')
+                             has_next=False,
+                             sort_by=sort_by,
+                             order=order)
+    except Exception as e:
+        print(f"[ERROR] Error in user_maintenance: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        flash('ユーザー一覧の読み込み中にエラーが発生しました。', 'error')
         return redirect(url_for('index'))
-      
 
 @app.route("/table_info")
 def get_table_info():
