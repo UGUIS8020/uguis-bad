@@ -2565,6 +2565,45 @@ class DynamoDB:
         print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(items)}"
             + (f" / since={since}" if since else ""))
         return total   
+
+    # ===== ポイント失効関連メソッド =====
+    
+    def disable_user_points(self, user_id):
+        """ユーザーのポイントを失効させる"""
+        try:
+            self.users_table.update_item(
+                Key={'user_id': user_id},
+                UpdateExpression='SET points_disabled = :val',
+                ExpressionAttributeValues={':val': True}
+            )
+            print(f"[INFO] ポイント失効: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] ポイント失効失敗: {e}")
+            return False
+
+    def enable_user_points(self, user_id):
+        """ユーザーのポイント失効を解除"""
+        try:
+            self.users_table.update_item(
+                Key={'user_id': user_id},
+                UpdateExpression='SET points_disabled = :val',
+                ExpressionAttributeValues={':val': False}
+            )
+            print(f"[INFO] ポイント失効解除: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] ポイント失効解除失敗: {e}")
+            return False
+
+    def get_display_points(self, user_data):
+        """
+        表示用のポイントを取得
+        points_disabled=Trueの場合は0を返す
+        """
+        if user_data.get('points_disabled', False):
+            return 0
+        return user_data.get('points', 0)
     
 
 def record_spend(history_table, *, user_id: str, points_used: int,

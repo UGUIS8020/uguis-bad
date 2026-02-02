@@ -2780,6 +2780,35 @@ def remove_participant(schedule_id, user_id):
         app.logger.error(f"Unexpected error in remove_participant: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': '予期しないエラーが発生しました。'}), 500
 
+@app.route('/admin/user/<user_id>/disable_points', methods=['POST'])
+@login_required
+def disable_points(user_id):
+    if session.get('user_id') != 'admin_user_id':  # 管理者チェック
+        flash('権限がありません', 'danger')
+        return redirect(url_for('index'))
+    
+    db = DynamoDB()
+    if db.disable_user_points(user_id):
+        flash('ポイントを失効しました', 'success')
+    else:
+        flash('ポイント失効に失敗しました', 'danger')
+    
+    return redirect(url_for('user_detail', user_id=user_id))
+
+@app.route('/admin/user/<user_id>/enable_points', methods=['POST'])
+@login_required
+def enable_points(user_id):
+    if session.get('user_id') != 'admin_user_id':  # 管理者チェック
+        flash('権限がありません', 'danger')
+        return redirect(url_for('index'))
+    
+    db = DynamoDB()
+    if db.enable_user_points(user_id):
+        flash('ポイント失効を解除しました', 'success')
+    else:
+        flash('ポイント失効解除に失敗しました', 'danger')
+    
+    return redirect(url_for('user_detail', user_id=user_id))
 
 from uguu.timeline import uguu
 from uguu.users import users

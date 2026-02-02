@@ -410,11 +410,28 @@
     </div>
 
     <!-- 右：うぐポイント -->
+    <!-- ▼ 1. うぐポイント表示部分（行94付近） -->
     <div class="flex-grow-1">
       <h5 class="card-title mb-2">うぐポイント</h5>
-      <p class="display-4 mb-3">{{ participation_points }}P</p>
+      
+      {# ポイント失効対応 #}
+      {% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
+      
+      <p class="display-4 mb-3">
+        {{ display_points }}P
+        {% if user.get('points_disabled', False) %}
+        <span class="badge bg-secondary ms-2" style="font-size: 0.5em; vertical-align: middle;">失効</span>
+        {% endif %}
+      </p>
 
-      {% if days_until_reset is not none %}
+      {# ポイント失効時は警告表示、それ以外は通常のカウントダウン #}
+      {% if user.get('points_disabled', False) %}
+        <div class="alert alert-danger" role="alert">
+          <i class="fas fa-ban"></i>
+          <strong>ポイントが失効されています</strong><br>
+          管理者にお問い合わせください
+        </div>
+      {% elif days_until_reset is not none %}
         {% if days_until_reset <= 0 %}
           <div class="alert alert-danger" role="alert">
             <i class="fas fa-exclamation-triangle"></i>
@@ -474,20 +491,28 @@
 
 </div>          
 
-                <!-- 改行して「うぐポイントで参加」ボタン -->
+                <!-- ▼ 2. うぐポイントで参加ボタン（行180付近） -->
                 {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
                 <div class="mt-3 text-center">
+                    {# ポイント失効対応 #}
+                    {% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
+                    {% set is_disabled = display_points < 1 or user.get('points_disabled', False) %}
+                    
                     <button class="btn btn-point-pay px-4 py-2"
                             data-bs-toggle="modal" 
                             data-bs-target="#pointParticipationModal"
-                            {% if participation_points|default(0) < 1 %}disabled{% endif %}>
+                            {% if is_disabled %}disabled{% endif %}>
                     <i class="fas fa-ticket-alt me-2"></i>
                     うぐポイントで参加
                     </button>
 
-                    {% if participation_points|default(0) < 1 %}
+                    {% if user.get('points_disabled', False) %}
                     <div class="text-danger small mt-2">
-                    ポイントが不足しています（現在: {{ participation_points|default(0) }}P）
+                      <i class="fas fa-ban me-1"></i>ポイントが失効されています
+                    </div>
+                    {% elif display_points < 1 %}
+                    <div class="text-danger small mt-2">
+                      ポイントが不足しています（現在: {{ display_points }}P）
                     </div>
                     {% endif %}
                 </div>
@@ -679,19 +704,33 @@
                 <h5 class="modal-title">ポイントで参加</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
+            <!-- ▼ 3. モーダル内のポイント表示（行270付近） -->
             <div class="modal-body">
-                <p class="text-muted small mb-3">現在のポイント: <strong>{{ participation_points|default(0) }}P</strong></p>
+                {# ポイント失効対応 #}
+                {% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
+    
+            <p class="text-muted small mb-3">
+              現在のポイント: <strong>{{ display_points }}P</strong>
+              {% if user.get('points_disabled', False) %}
+              <span class="badge bg-secondary ms-1">失効</span>
+              {% endif %}
+            </p>
                 
+                <!-- ▼ 4. モーダル内のポイント入力フィールド（行278付近） -->
                 <div class="mb-3">
+                    {# ポイント失効対応 #}
+                    {% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
+                    
                     <label for="points-cost" class="form-label">消費ポイント</label>
                     <input type="number" 
-                           class="form-control" 
-                           id="points-cost" 
-                           value="600" 
-                           min="100" 
-                           max="{{ participation_points|default(0) }}"
-                           step="100"
-                           required>
+                          class="form-control" 
+                          id="points-cost" 
+                          value="600" 
+                          min="100" 
+                          max="{{ display_points }}"
+                          step="100"
+                          {% if user.get('points_disabled', False) %}disabled{% endif %}
+                          required>
                     <div class="form-text">消費するポイント数を入力してください（100P単位、デフォルト: 600P）</div>
                 </div>
                 
@@ -730,20 +769,33 @@
     </div>
 </div>
 
+
 <script>
+// ポイント失効対応
+{% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
+const isPointsDisabled = {{ 'true' if user.get('points_disabled', False) else 'false' }};
+const currentPoints = {{ display_points }};
+
+// ポイント数変更時の表示更新
 document.getElementById('points-cost')?.addEventListener('input', function() {
   const points = this.value;
   document.getElementById('confirm-button-text').textContent = points + 'P';
 });
 
+// ポイント参加確定ボタン
 document.getElementById('confirmPointParticipation')?.addEventListener('click', async function() {
+  // ポイント失効チェック
+  if (isPointsDisabled) {
+    alert('ポイントが失効されています。管理者にお問い合わせください。');
+    return;
+  }
+
   // hiddenから取得
   const scheduleIdEl = document.getElementById('event-schedule-id');
   const eventDateEl = document.getElementById('event-date');
   const scheduleId = scheduleIdEl ? scheduleIdEl.value : '';
   const eventDate = eventDateEl ? eventDateEl.value : '';
   const pointsCost = parseInt(document.getElementById('points-cost').value);
-  const currentPoints = {{ participation_points|default(0) }};
 
   // バリデーション
   if (!scheduleId || !eventDate) {
@@ -766,6 +818,11 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
     return;
   }
 
+  // ボタン無効化（二重送信防止）
+  const btn = this;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>処理中...';
+
   try {
     const response = await fetch('/uguu/point-participation', {
       method: 'POST',
@@ -785,10 +842,16 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
       location.reload();
     } else {
       alert('エラー: ' + (result.error || '支払いに失敗しました'));
+      // ボタンを再度有効化
+      btn.disabled = false;
+      btn.innerHTML = `<span id="confirm-button-text">${pointsCost}P</span>で参加する`;
     }
   } catch (error) {
     console.error('Error:', error);
     alert('通信エラーが発生しました');
+    // ボタンを再度有効化
+    btn.disabled = false;
+    btn.innerHTML = `<span id="confirm-button-text">${pointsCost}P</span>で参加する`;
   }
 });
 
