@@ -2406,7 +2406,7 @@ class DynamoDB:
  
     # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
     def get_user_stats(self, user_id: str):
-        rules = PointRules(reset_days=50, first_participation_points=200)
+        rules = PointRules(reset_days=60, first_participation_points=200)
 
         manual_points = self.get_manual_points(user_id)
 
@@ -2457,6 +2457,11 @@ class DynamoDB:
         print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
         print("[DBG] records_for_points dates=", [r.event_date.strftime("%Y-%m-%d") for r in records_for_points])
 
+        # ★リセットが発生している場合、手動ポイントもリセット
+        if last_reset_index > 0:
+            print(f"[DBG] Reset occurred at index {last_reset_index}, clearing manual_points")
+            manual_points = 0
+
         # calc_registration_counts が "event_date/registered_at を持つオブジェクト" に対応していればOK
         # もし dict 前提の実装なら point.py 側を直す（下に対応版を書きます）
         all_time_early, all_time_direct = calc_registration_counts(records_all, self._is_early_registration)
@@ -2476,13 +2481,28 @@ class DynamoDB:
 
         monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
 
+        # ★ここに移動
+        print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
+        print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
+
+        monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
+
         streak_points = 0
         current_streak_count = 0
         current_streak_start = None
 
-        total_points_used = 0
+        spends = self.list_point_spends(user_id, limit=1000)
 
-        # ★ここが今回の修正ポイント
+        # リセット後のみカウント
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            spends_after_reset = [s for s in spends if s.get("event_date", "") >= reset_date]
+            total_points_used = sum(s.get("amount", 0) for s in spends_after_reset)
+            print(f"[DBG] Reset at {reset_date}: points_used={total_points_used} from {len(spends_after_reset)}/{len(spends)} records")
+        else:
+            total_points_used = sum(s.get("amount", 0) for s in spends)
+            print(f"[DBG] total_points_used={total_points_used} from {len(spends)} records")
+
         last_dt = records_all[-1].event_date
         days_until_reset = calc_days_until_reset(last_dt, rules.reset_days)
 
@@ -2496,6 +2516,21 @@ class DynamoDB:
             + manual_points
             - total_points_used
         )
+
+        print(f"[DEBUG] Before reset check: uguu_points={uguu_points}, is_reset={is_reset}")
+
+        # ★50日ルールで失効している場合は全ポイントを0にする
+        if is_reset:
+            print(f"[DEBUG] Resetting points! Before: uguu={uguu_points}, participation={participation_points}")
+            uguu_points = 0
+            participation_points = 0
+            streak_points = 0
+            monthly_bonus_points = 0
+            cumulative_bonus_points = 0
+            manual_points = 0
+            print(f"[DEBUG] After reset: uguu={uguu_points}")
+
+        print(f"[DEBUG] Final uguu_points={uguu_points}")
 
         return {
             'uguu_points': uguu_points,

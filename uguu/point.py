@@ -33,13 +33,29 @@ def normalize_participation_history(raw_history: List[Dict[str, Any]]) -> List[P
     return records
 
 def calc_reset_index(records: List[ParticipationRecord], reset_days: int) -> Tuple[int, bool]:
+    """
+    参加記録をチェックして、50日ルールでリセットされているか判定
+    - 参加記録間の間隔が50日超 → その地点でリセット（ポイント計算範囲を制限）
+    - 最後の参加日から現在まで50日超 → 現在リセット中（is_reset=True）
+    """
+    from datetime import datetime
+    
     last_reset_index = 0
-    is_reset = False
+    
+    # 参加記録間の間隔をチェック（ポイント計算範囲の制限のみ）
     for i in range(1, len(records)):
         diff = (records[i].event_date - records[i-1].event_date).days
         if diff > reset_days:
             last_reset_index = i
+    
+    # ★最後の参加日から現在までの日数だけでis_resetを判定
+    is_reset = False
+    if records:
+        now = datetime.now()
+        days_since_last = (now - records[-1].event_date).days
+        if days_since_last > reset_days:
             is_reset = True
+    
     return last_reset_index, is_reset
 
 def slice_records_for_points(records: List[ParticipationRecord], last_reset_index: int) -> List[ParticipationRecord]:
@@ -83,14 +99,19 @@ def calc_participation_and_cumulative(
 
     first_ever_date = records_all[0].event_date
 
-    for rec in records_for_points:
+    for i, rec in enumerate(records_for_points):
         base = is_early_registration_fn({"event_date": rec.event_date, "registered_at": rec.registered_at})
+        
+        if base not in (100, 50):
+            base = 10
+        
         if base == 100:
             early_count += 1
         elif base == 50:
             direct_count += 1
 
-        if rec.event_date == first_ever_date:
+        # ★全履歴の初回 OR カムバック参加（records_for_pointsの最初）
+        if rec.event_date == first_ever_date or i == 0:
             pts = int(rules.first_participation_points * point_multiplier)
         else:
             pts = int(base * point_multiplier)
