@@ -84,15 +84,19 @@ def user_profile(user_id):
         if user_posts:
             user_posts = sorted(user_posts, key=lambda x: x.get('created_at', ''), reverse=True)
 
-        # 統計（ポイント/参加回数）
-        user_stats = db.get_user_stats(user_id) or {}
+        # ==========================================================
+        # ★ここが重要：参加履歴 / spend は1回だけ取得して使い回す
+        # ==========================================================
+        raw_history = db.get_user_participation_history_with_timestamp(user_id) or []
 
-        # 直近のポイント支払い（spend履歴）
+        # 直近のポイント支払い（spend履歴） ← 先に作る！
         point_spends = db.list_point_spends(user_id, limit=20) or []
+
+        # 統計（ポイント/参加回数） ← 取得済み raw_history / point_spends を渡す
+        user_stats = db.get_user_stats(user_id, raw_history=raw_history, spends=point_spends) or {}
 
         # spend合計（amount ではなく points_used / delta_points を優先）
         def _pick_spend_amount(s: dict) -> int:
-            # 1) points_used: 600 の形式
             v = s.get("points_used")
             if v is not None:
                 try:
@@ -100,7 +104,6 @@ def user_profile(user_id):
                 except Exception:
                     pass
 
-            # 2) delta_points: -600 の形式
             v = s.get("delta_points")
             if v is not None:
                 try:
@@ -108,7 +111,6 @@ def user_profile(user_id):
                 except Exception:
                     pass
 
-            # 3) amount が存在する場合のフォールバック
             v = s.get("amount")
             if v is not None:
                 try:
@@ -142,14 +144,14 @@ def user_profile(user_id):
 
         if is_admin:
             try:
-                records = db.get_user_participation_history_with_timestamp(user_id) or []
+                # ★ここも raw_history を使い回す（DynamoDBを再queryしない）
+                records = raw_history
                 youbi = ['月', '火', '水', '木', '金', '土', '日']
 
                 formatted = []
                 skipped = 0
 
                 for r in records:
-                    # 1) dict じゃない場合（文字列など）は日付として扱う
                     if not isinstance(r, dict):
                         dt = _parse_ymd10(r)
                         if not dt:
@@ -158,7 +160,6 @@ def user_profile(user_id):
                         formatted.append(f"{dt.strftime('%Y年%m月%d日')}（{youbi[dt.weekday()]}）")
                         continue
 
-                    # 2) status を判定（無い場合は action から推定）
                     st = (r.get("status") or "").lower().strip()
                     if not st:
                         act = (r.get("action") or "").lower().strip()
@@ -171,7 +172,6 @@ def user_profile(user_id):
                         skipped += 1
                         continue
 
-                    # 3) 日付キー候補（date / event_date など）
                     date_raw = r.get("date") or r.get("event_date") or r.get("eventDay")
                     dt = _parse_ymd10(date_raw)
                     if not dt:
@@ -182,33 +182,10 @@ def user_profile(user_id):
 
                 admin_participation_dates = sorted(formatted)
                 print(f"[DEBUG] admin_participation_dates: total_records={len(records)}, kept={len(admin_participation_dates)}, skipped={skipped}")
-                print(f"[DEBUG] admin_participation_dates(formatted): {admin_participation_dates}")
 
             except Exception as e:
                 print(f"[WARN] failed to build admin_participation_dates: {e}")
                 admin_participation_dates = []
-
-        # ===== デバッグ：ポイント内訳ログ（DEBUG_POINTS=1 のときだけ） =====
-        if os.getenv("DEBUG_POINTS", "0") == "1":
-            try:
-                balance = user_stats.get("uguu_points", 0)
-
-                keys = set()
-                for s in point_spends:
-                    keys.update(list(s.keys()))
-
-                print("[DEBUG] ========================================")
-                print(f"[DEBUG] points summary - user_id={user_id}")
-                print(f"[DEBUG]   balance(user_stats['uguu_points']) = {balance}")
-                print(f"[DEBUG]   point_spends items = {len(point_spends)}")
-                print(f"[DEBUG]   point_spends keys sample = {sorted(list(keys))}")
-                print(f"[DEBUG]   point_total_spent_recent = {point_total_spent_recent}")
-                if point_spends:
-                    print(f"[DEBUG]   spend[0] sample = {point_spends[0]}")
-                print("[DEBUG] ========================================")
-            except Exception as e:
-                print(f"[WARN] points debug failed: {e}")
-        # ===============================================================
 
         return render_template(
             'uguu/users.html',
@@ -217,7 +194,6 @@ def user_profile(user_id):
             posts_count=len(user_posts) if user_posts else 0,
             past_participation_count=int(user.get("practice_count") or 0),
 
-            # 残高（KeyError回避で get）
             participation_points=user_stats.get('uguu_points', 0),
 
             followers_count=0,
@@ -227,7 +203,6 @@ def user_profile(user_id):
             days_until_reset=user_stats.get('days_until_reset'),
             upcoming_schedules=upcoming_schedules,
 
-            # テンプレ表示用
             point_spends=point_spends,
             point_total_spent_recent=point_total_spent_recent,
         )
@@ -238,7 +213,8 @@ def user_profile(user_id):
         traceback.print_exc()
         flash('プロフィールの読み込み中にエラーが発生しました。', 'error')
         return redirect(url_for('index'))
-
+    
+    
 @users.route('/point-participation', methods=['POST'])
 @login_required
 def point_participation():

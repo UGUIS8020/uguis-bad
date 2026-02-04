@@ -160,8 +160,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_participation = defaultdict(int)
     for r in records_for_points:
         monthly_participation[r.event_date.strftime("%Y-%m")] += 1
-
-    print("[DBG monthly keys]", sorted(r.event_date.strftime("%Y-%m-%d") for r in records_for_points))
+    
     print("[DBG monthly counts]", dict(sorted(monthly_participation.items())))
 
     monthly_bonus_points = 0
@@ -223,64 +222,92 @@ def calc_streak_points(
 ) -> Tuple[int, int, int, str]:
     """
     連続参加ボーナス計算
-    
-    Args:
-        records_for_points: ポイント計算対象の参加記録
-        all_schedules: 全練習日スケジュール [{"date": "YYYY-MM-DD"}, ...]
-        rules: PointRules
-        point_multiplier: ポイント倍率
-    
     Returns:
         (streak_points, current_streak, max_streak, streak_start_date)
     """
+    import os
+
+    DEBUG = os.getenv("POINT_LOG", "1") == "1"               # サマリー/重要イベント
+    DEBUG_DETAIL = os.getenv("POINT_LOG_DETAIL", "0") == "1" # 逐次ログ（重い）
+
+    def dbg(msg: str):
+        if DEBUG:
+            print(msg)
+
+    def dbg_detail(msg: str):
+        if DEBUG_DETAIL:
+            print(msg)
+
     # 参加日のセット
     user_participated_dates = {r.event_date.strftime("%Y-%m-%d") for r in records_for_points}
-    
-    print(f"[DEBUG] 対象練習回数: {len(all_schedules)}回")
-    print(f"[DEBUG] ユーザー参加: {len(user_participated_dates)}回")
-    
+
+    # サマリーは最初に1回だけ
+    dbg(f"[STREAK] schedules={len(all_schedules)} participated={len(user_participated_dates)}")
+
     streak_points = 0
     current_streak = 0
     max_streak = 0
     streak_start = None
-    
+
     # マイルストーン管理
-    milestones = {5: False, 10: False, 15: False, 20: False, 25: False}
     milestone_values = {5: 500, 10: 1000, 15: 1500, 20: 2000, 25: 2500}
-    
+    milestones = {k: False for k in milestone_values.keys()}
+
+    resets = 0
+    reset_events = []   # DETAIL用（多いので通常表示しない）
+    bonus_events = []   # DETAIL用（必要なら）
+
     for schedule in all_schedules:
-        schedule_date = schedule['date']
+        schedule_date = schedule["date"]
         is_participated = schedule_date in user_participated_dates
-        
+
         if is_participated:
             current_streak += 1
             if streak_start is None:
                 streak_start = schedule_date
-            
+
             # 連続2回目以降は毎回50P
             if current_streak >= 2:
                 sp = int(rules.streak_per_participation_after_2 * point_multiplier)
                 streak_points += sp
-                print(f"[DEBUG] {schedule_date} 参加 → 連続{current_streak}回目 +{sp}P")
-            
-            # マイルストーンボーナス
+                # ← これが大量ログの原因：DETAIL の時だけ
+                dbg_detail(f"[STREAK][step] {schedule_date} +{sp} (streak={current_streak})")
+
+            # マイルストーンボーナス（ここは残してOK）
             if current_streak in milestone_values and not milestones[current_streak]:
                 bonus = int(milestone_values[current_streak] * point_multiplier)
                 streak_points += bonus
                 milestones[current_streak] = True
-                print(f"[DEBUG] 連続{current_streak}回達成ボーナス +{bonus}P")
-            
+
+                # 通常ログでも「達成」は出してOK（分析に効く）
+                dbg(f"[STREAK][bonus] date={schedule_date} streak={current_streak} bonus=+{bonus}")
+
+                if DEBUG_DETAIL:
+                    bonus_events.append((schedule_date, current_streak, bonus))
+
             max_streak = max(max_streak, current_streak)
+
         else:
-            # 欠席 → リセット
+            # 欠席 → リセット（ここも残してOK。ただし多ければDETAIL化しても良い）
             if current_streak > 0:
-                print(f"[DEBUG][streak] reset at date={schedule_date} streak_was={current_streak}")
+                resets += 1
+                # resetは分析に効くので通常は残す（静かにしたければ dbg_detail に落とす）
+                dbg(f"[STREAK][reset] date={schedule_date} streak_was={current_streak}")
+                if DEBUG_DETAIL:
+                    reset_events.append((schedule_date, current_streak))
+
             current_streak = 0
             streak_start = None
-            milestones = {5: False, 10: False, 15: False, 20: False, 25: False}
-    
-    print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
-    
+            milestones = {k: False for k in milestone_values.keys()}
+
+    # 最後に合計を1回だけ
+    dbg(f"[STREAK][sum] points={streak_points} current_streak={current_streak} max_streak={max_streak} resets={resets}")
+
+    # DETAIL時だけサンプル表示（必要なら）
+    if DEBUG_DETAIL:
+        dbg_detail(f"[STREAK][detail] reset_events(sample up to 10)={reset_events[:10]}")
+        dbg_detail(f"[STREAK][detail] bonus_events(sample up to 10)={bonus_events[:10]}")
+
     return streak_points, current_streak, max_streak, streak_start or ""
 
 

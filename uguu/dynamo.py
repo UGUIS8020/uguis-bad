@@ -740,54 +740,41 @@ class DynamoDB:
         返却形式（従来通り）:
             [{"event_date":"YYYY-MM-DD","registered_at":"YYYY-MM-DD HH:MM:SS","status":"registered"}, ...]
         """
+        import os
         from datetime import datetime, time
         from boto3.dynamodb.conditions import Key
 
-        DEBUG = True          # 重要なログ（サマリー・エラー）
-        DEBUG_DETAIL = False  # 詳細なレコード処理ログ ← 追加
-        
+        # ------------- logging switch -------------
+        # 例:
+        #   POINT_LOG=1 でサマリーを表示
+        #   POINT_LOG_DETAIL=1 で詳細を表示
+        DEBUG = os.getenv("POINT_LOG", "1") == "1"
+        DEBUG_DETAIL = os.getenv("POINT_LOG_DETAIL", "0") == "1"
+
         def dbg(msg: str):
-            """重要なログ（常に表示）"""
             if DEBUG:
                 print(msg)
-        
+
         def dbg_detail(msg: str):
-            """詳細ログ（オプション）"""
             if DEBUG_DETAIL:
                 print(msg)
 
         # --- 判定ポリシー（必要ならここを調整） ---
         TARA_ACTION = "tara_join"
-        EXCLUDE_ACTIONS = {"admin_manual_point"}  # 参加履歴として採用しない action
+        EXCLUDE_ACTIONS = {"admin_manual_point"}
 
         def classify_local(rec: dict) -> str:
-            """
-            - official : 正式参加（参加ボタン）
-            - tara     : “たら”
-            - cancelled: キャンセル
-            - other    : 参加履歴として扱わないもの（手動ポイント等）
-            """
             status = (rec.get("status") or "registered").lower()
             action = rec.get("action")
-
             if status == "cancelled":
                 return "cancelled"
             if action in EXCLUDE_ACTIONS:
                 return "other"
             if action == TARA_ACTION:
                 return "tara"
-            # action が無い正規参加データがある前提 → official 扱い
             return "official"
 
         def better_local(new: dict, old: dict) -> bool:
-            """
-            old を new に置き換えるべきなら True
-            ルール:
-            - official と tara が競合したら official を必ず優先（時刻に関わらず）
-            - other は絶対に採用しない（other vs official/tara/cancelled なら other は負け）
-            - cancelled と non-cancelled は時刻が新しい方（再参加・再キャンセルを反映）
-            - それ以外も基本は時刻が新しい方
-            """
             cn, co = classify_local(new), classify_local(old)
 
             # other は参加履歴の採用対象外
@@ -802,7 +789,7 @@ class DynamoDB:
             if cn == "tara" and co == "official":
                 return False
 
-            # それ以外は時刻で比較（再参加・再キャンセルも反映）
+            # それ以外は時刻で比較
             tn = new.get("registered_at_dt")
             to = old.get("registered_at_dt")
             if tn and to:
@@ -814,32 +801,20 @@ class DynamoDB:
             return False
 
         try:
-            dbg("\n[DEBUG] ========================================")
-            dbg("[DEBUG] タイムスタンプ付き参加履歴取得開始")
-            dbg(f"[DEBUG] user_id: {user_id}")
-            dbg(f"[DEBUG] JST: {JST!r} / type={type(JST)}")
-            dbg("[DEBUG] ========================================")
-
             # ---- DynamoDB query ----
             items = []
-            resp = self.part_history.query(
-                KeyConditionExpression=Key("user_id").eq(user_id)
-            )
+            resp = self.part_history.query(KeyConditionExpression=Key("user_id").eq(user_id))
             items.extend(resp.get("Items", []))
-
             while resp.get("LastEvaluatedKey"):
                 resp = self.part_history.query(
                     KeyConditionExpression=Key("user_id").eq(user_id),
-                    ExclusiveStartKey=resp["LastEvaluatedKey"]
+                    ExclusiveStartKey=resp["LastEvaluatedKey"],
                 )
                 items.extend(resp.get("Items", []))
 
-            dbg(f"[DEBUG] DynamoDBから取得した生レコード数: {len(items)}件")
-
             today = datetime.now(JST).date()
-            dbg(f"[DEBUG] 今日の日付(JST): {today}")
 
-            # event_date_str -> 採用レコード（registered_at_dt は aware(JST)）
+            # event_date_str -> 採用レコード
             date_records: dict[str, dict] = {}
 
             cancelled_count = 0
@@ -848,38 +823,33 @@ class DynamoDB:
             rescued_no_ts_count = 0
             processed_count = 0
 
-            for idx, item in enumerate(items, 1):
-                dbg_detail(f"\n[DEBUG] --- レコード {idx}/{len(items)} ---")
-                dbg_detail(f"[DEBUG] 生データ: {item}")
+            # 詳細時にだけ「問題のあった日」などを残す
+            rescued_dates = []
+            parse_error_dates = []
 
+            for idx, item in enumerate(items, 1):
                 try:
                     status = (item.get("status") or "registered").lower()
                     action = item.get("action")
-                    dbg_detail(f"[DEBUG] status: {status}")
-                    dbg_detail(f"[DEBUG] action: {action}")
 
                     event_date_str = (item.get("date") or item.get("event_date") or "").strip()
                     if not event_date_str:
-                        dbg_detail("[DEBUG] ✗ date/event_date フィールドなし")
                         parse_error_count += 1
+                        if DEBUG_DETAIL:
+                            parse_error_dates.append("(no date field)")
                         continue
 
-                    dbg_detail(f"[DEBUG] event_date: {event_date_str}")
                     event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
-
                     if event_date > today:
-                        dbg_detail(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
                         future_count += 1
                         continue
 
                     joined_at_raw = item.get("joined_at")
                     joined_at_str = str(joined_at_raw or "").strip()
-                    dbg_detail(f"[DEBUG] joined_at(元): {joined_at_str}")
 
-                    # timestamp 候補を拾う
+                    # timestamp 候補を拾う（優先キー）
                     iso_candidate = None
                     iso_source = None
-
                     for key in ("created_at", "registered_at", "transaction_date", "paid_at"):
                         v = item.get(key)
                         if v:
@@ -893,25 +863,16 @@ class DynamoDB:
                             iso_candidate = extracted
                             iso_source = "joined_at(extract_iso)"
 
-                    dbg_detail(f"[DEBUG] iso_candidate: {iso_candidate} (source={iso_source})")
-
                     registered_at = parse_dt_safe(iso_candidate, default_tz=JST)
 
-                    if registered_at:
-                        dbg_detail(f"[DEBUG] parse_dt_safe -> {registered_at.isoformat()} tzinfo={registered_at.tzinfo}")
-                    else:
-                        dbg_detail("[DEBUG] parse_dt_safe -> None")
-
-                    # 救済：timestamp無しは「その日の最初」に置く
+                    # 救済：timestamp無しは「その日の最初」に置く（←ここは警告だけ残す）
                     if not registered_at:
                         registered_at = datetime.combine(event_date, time(0, 0, 0), tzinfo=JST)
                         rescued_no_ts_count += 1
-                        dbg(f"[WARN] timestamp無しを救済(00:00:00): {event_date_str} -> {registered_at.isoformat()}")
-
-                    dbg_detail(
-                        "[DEBUG] registered_at(変換後): "
-                        f"{registered_at.strftime('%Y-%m-%d %H:%M:%S')} (tzinfo={registered_at.tzinfo})"
-                    )
+                        if DEBUG:
+                            dbg(f"[WARN] timestamp無しを救済(00:00:00): {event_date_str}")
+                        if DEBUG_DETAIL:
+                            rescued_dates.append(event_date_str)
 
                     if status == "cancelled":
                         cancelled_count += 1
@@ -922,83 +883,82 @@ class DynamoDB:
                         "status": status,
                         "action": action,
                         "iso_source": iso_source,
-                        "iso_candidate": str(iso_candidate) if iso_candidate else None,
                     }
 
                     if event_date_str not in date_records:
                         date_records[event_date_str] = new_rec
                         processed_count += 1
-                        dbg_detail(
-                            f"[DEBUG] ✓ 新規登録: {event_date_str} "
-                            f"{registered_at.strftime('%H:%M:%S')} status={status} action={action}"
-                        )
                     else:
                         existing = date_records[event_date_str]
-                        dbg_detail(
-                            "[DEBUG] 既存と比較: "
-                            f"既存={existing['registered_at_dt'].strftime('%H:%M:%S')} "
-                            f"({existing.get('status')}, action={existing.get('action')}) / "
-                            f"新={registered_at.strftime('%H:%M:%S')} "
-                            f"({status}, action={action})"
-                        )
-
                         if better_local(new_rec, existing):
                             date_records[event_date_str] = new_rec
-                            dbg_detail(f"[DEBUG] ✓ 採用更新: {event_date_str}")
-                        else:
-                            dbg_detail(f"[DEBUG] ✗ 既存維持: {event_date_str}")
+
+                    # ここから下は詳細時のみ
+                    if DEBUG_DETAIL:
+                        dbg_detail(
+                            f"[DETAIL] {idx}/{len(items)} "
+                            f"date={event_date_str} status={status} action={action} "
+                            f"ts={registered_at.strftime('%H:%M:%S')} src={iso_source}"
+                        )
 
                 except Exception as e:
-                    dbg(f"[WARN] ✗ レコード処理エラー: {e}")
-                    import traceback
-                    traceback.print_exc()
                     parse_error_count += 1
+                    if DEBUG:
+                        dbg(f"[WARN] レコード処理エラー: date={item.get('date') or item.get('event_date')} err={e}")
+                    if DEBUG_DETAIL:
+                        parse_error_dates.append(str(item.get("date") or item.get("event_date") or "unknown"))
+                        import traceback
+                        traceback.print_exc()
                     continue
 
             # event_date順に整列
             records_all_raw = sorted(date_records.values(), key=lambda x: x["event_date"])
 
-            dbg_detail("\n[DEBUG] === 日付ごとの最終採用結果（date_records） ===")
-            for r in records_all_raw:
-                dt = r["registered_at_dt"]
-                dbg_detail(
-                    f"[DEBUG] {r['event_date']} -> {dt.strftime('%H:%M:%S')} "
-                    f"status={r['status']} action={r.get('action')} src={r.get('iso_source')}"
-                )
-
-            # ======================================================
-            # ★ここが重要：参加として返すのは official のみ
-            # ======================================================
+            # official のみ返す
             kept_raw = [r for r in records_all_raw if classify_local(r) == "official"]
 
-            # ---- 返却形式（従来通り）----
             records = [
                 {
                     "event_date": r["event_date"],
                     "registered_at": r["registered_at_dt"].strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": r["status"],  # registered のはず
+                    "status": r["status"],
                 }
                 for r in kept_raw
             ]
 
-            dbg("\n[DEBUG] ========================================")
-            dbg("[DEBUG] 処理結果サマリー")
-            dbg("[DEBUG] ========================================")
-            dbg(f"[DEBUG] 生レコード総数: {len(items)}件")
-            dbg(f"[DEBUG] キャンセル済み: {cancelled_count}件")
-            dbg(f"[DEBUG] 未来の日付: {future_count}件")
-            dbg(f"[DEBUG] パースエラー: {parse_error_count}件")
-            dbg(f"[DEBUG] 救済(timestamp無し): {rescued_no_ts_count}件")
-            dbg(f"[DEBUG] 新規登録(初登場日): {processed_count}件")
-            dbg(f"[DEBUG] 重複除外後(officialのみ): {len(records)}件")
-            dbg("[DEBUG] ========================================\n")
+            # ---------------- summary (1 line) ----------------
+            if DEBUG:
+                if records:
+                    first_day = records[0]["event_date"]
+                    last_day = records[-1]["event_date"]
+                    day_range = f"{first_day}..{last_day}"
+                else:
+                    day_range = "-"
+
+                dbg(
+                    "[POINT][history] "
+                    f"user_id={user_id} "
+                    f"raw={len(items)} official={len(records)} "
+                    f"cancelled={cancelled_count} future={future_count} "
+                    f"parse_err={parse_error_count} rescued_no_ts={rescued_no_ts_count} "
+                    f"range={day_range}"
+                )
+
+            # 詳細時だけ「問題一覧」を少しだけ出す（全件は出さない）
+            if DEBUG_DETAIL:
+                if rescued_dates:
+                    dbg_detail(f"[DETAIL] rescued_dates(sample up to 10)={rescued_dates[:10]}")
+                if parse_error_dates:
+                    dbg_detail(f"[DETAIL] parse_error_dates(sample up to 10)={parse_error_dates[:10]}")
 
             return records
 
         except Exception as e:
-            dbg(f"[ERROR] get_user_participation_history_with_timestamp エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if DEBUG:
+                dbg(f"[ERROR] get_user_participation_history_with_timestamp: {e}")
+            if DEBUG_DETAIL:
+                import traceback
+                traceback.print_exc()
             return []
 
     
@@ -1257,58 +1217,92 @@ class DynamoDB:
 
     def get_upcoming_schedules(self, limit: int = 10, today_only: bool = False):
         """今後の予定を取得（today_only=True で当日の最初の1件だけ）"""
+        import os
+        from datetime import datetime
+
+        # ログ制御（既存の方式に合わせて環境変数でON/OFF）
+        DEBUG = os.getenv("POINT_LOG", "1") == "1"               # サマリー/重要だけ
+        DEBUG_DETAIL = os.getenv("POINT_LOG_DETAIL", "0") == "1" # 詳細（配列表示など）
+
+        def dbg(msg: str):
+            if DEBUG:
+                print(msg)
+
+        def dbg_detail(msg: str):
+            if DEBUG_DETAIL:
+                print(msg)
+
         try:
             # === タイムゾーン設定 ===
             today_date = datetime.now(JST).date()
-            today_str = today_date.strftime('%Y-%m-%d')
-            print(f"[DEBUG] get_upcoming_schedules - today(JST): {today_str}")
+            today_str = today_date.strftime("%Y-%m-%d")
+            dbg(f"[SCHEDULE] upcoming today={today_str} today_only={today_only} limit={limit}")
 
             # === スケジュール取得 ===
             response = self.schedule_table.scan()
-            schedules = response.get('Items', [])
+            schedules = response.get("Items", [])
 
-            while 'LastEvaluatedKey' in response:
+            while "LastEvaluatedKey" in response:
                 response = self.schedule_table.scan(
-                    ExclusiveStartKey=response['LastEvaluatedKey']
+                    ExclusiveStartKey=response["LastEvaluatedKey"]
                 )
-                schedules.extend(response.get('Items', []))
+                schedules.extend(response.get("Items", []))
 
-            print(f"[DEBUG] 全スケジュール取得: {len(schedules)}件")
+            dbg(f"[SCHEDULE] total_schedules={len(schedules)}")
 
             upcoming = []
+            warn_count = 0
+
             for schedule in schedules:
                 try:
-                    s_date = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
-
+                    s_date = datetime.strptime(schedule["date"], "%Y-%m-%d").date()
                     cond = (s_date == today_date) if today_only else (s_date >= today_date)
+
                     if cond:
-                        item = {
-                            'schedule_id': schedule.get('schedule_id'),
-                            'date': schedule['date'],
-                            'day_of_week': schedule.get('day_of_week', ''),
-                            'start_time': schedule.get('start_time', ''),
-                            'end_time': schedule.get('end_time', '')
-                        }
-                        upcoming.append(item)
-                        print(f"[DEBUG] 対象の予定: {item['date']} {item.get('start_time','')}")
+                        upcoming.append({
+                            "schedule_id": schedule.get("schedule_id"),
+                            "date": schedule["date"],
+                            "day_of_week": schedule.get("day_of_week", ""),
+                            "start_time": schedule.get("start_time", ""),
+                            "end_time": schedule.get("end_time", ""),
+                        })
+
                 except Exception as e:
-                    print(f"[WARN] スケジュール処理エラー: {schedule} - {e}")
+                    warn_count += 1
+                    # エラーは残す（ただし大量なら抑制）
+                    if warn_count <= 5:
+                        print(f"[WARN] スケジュール処理エラー: {schedule} - {e}")
                     continue
+
+            if warn_count > 5:
+                print(f"[WARN] スケジュール処理エラー: {warn_count}件（最初の5件のみ表示）")
 
             # === 当日のみ ===
             if today_only:
                 if not upcoming:
-                    print("[DEBUG] 本日の予定なし")
+                    dbg("[SCHEDULE] today_upcoming=0")
                     return []
-                upcoming.sort(key=lambda x: x.get('start_time', '00:00'))
+
+                upcoming.sort(key=lambda x: x.get("start_time", "00:00"))
                 result = [upcoming[0]]
-                print(f"[DEBUG] 本日の予定（1件）: {result[0]['date']} {result[0].get('start_time','')}")
+
+                dbg(f"[SCHEDULE] today_upcoming=1 first={result[0]['date']} {result[0].get('start_time','')}")
+                dbg_detail(f"[SCHEDULE][detail] result={result}")
                 return result
 
             # === 未来分 ===
-            upcoming.sort(key=lambda x: (x['date'], x.get('start_time', '')))
+            upcoming.sort(key=lambda x: (x["date"], x.get("start_time", "")))
             result = upcoming[:limit]
-            print(f"[DEBUG] 今後の予定（{limit}件まで）: {len(result)}件")
+
+            # 要約ログ（ここだけで十分）
+            if result:
+                first = result[0]
+                last = result[-1]
+                dbg(f"[SCHEDULE] upcoming={len(result)}/{len(upcoming)} range={first['date']} {first.get('start_time','')}..{last['date']} {last.get('start_time','')}")
+            else:
+                dbg(f"[SCHEDULE] upcoming=0/{len(upcoming)}")
+
+            dbg_detail(f"[SCHEDULE][detail] result={result}")
             return result
 
         except Exception as e:
@@ -2410,10 +2404,11 @@ class DynamoDB:
     #             'is_junior_high': False,
     #             'is_reset': False,
     #             'days_until_reset': None
-    #         }        
+    #         }   
+    #      
  
     # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
-    def get_user_stats(self, user_id: str):
+    def get_user_stats(self, user_id: str, raw_history=None, spends=None):
         rules = PointRules(reset_days=60, first_participation_points=200)
 
         manual_points = self.get_manual_points(user_id)
@@ -2430,9 +2425,10 @@ class DynamoDB:
             else 1.0
         )
 
-        raw_history = self.get_user_participation_history_with_timestamp(user_id)
+        # ★ raw_history が渡ってきたらそれを使う
+        if raw_history is None:
+            raw_history = self.get_user_participation_history_with_timestamp(user_id)
 
-        # ※ point.py の normalize が ParticipationRecord を返す前提
         records_all = normalize_participation_history(raw_history)
 
         if not records_all:
@@ -2459,19 +2455,16 @@ class DynamoDB:
                 'manual_points': manual_points,
             }
 
-        # 50日ルール判定
+        # リセット判定
         last_reset_index, is_reset = calc_reset_index(records_all, rules.reset_days)
         records_for_points = slice_records_for_points(records_all, last_reset_index)
         print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
-        print("[DBG] records_for_points dates=", [r.event_date.strftime("%Y-%m-%d") for r in records_for_points])
 
         # ★リセットが発生している場合、手動ポイントもリセット
         if last_reset_index > 0:
             print(f"[DBG] Reset occurred at index {last_reset_index}, clearing manual_points")
             manual_points = 0
 
-        # calc_registration_counts が "event_date/registered_at を持つオブジェクト" に対応していればOK
-        # もし dict 前提の実装なら point.py 側を直す（下に対応版を書きます）
         all_time_early, all_time_direct = calc_registration_counts(records_all, self._is_early_registration)
 
         pc = calc_participation_and_cumulative(
@@ -2489,17 +2482,15 @@ class DynamoDB:
 
         monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
 
-        # ★ここに移動
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
 
-        # ★連続ポイント計算
+        # 連続ポイント
         from datetime import datetime
         today = datetime.now(JST).date()
         all_schedules = self.get_all_past_schedules(today)
         all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
 
-        # リセット後の日付でフィルタ
         if last_reset_index > 0 and records_for_points:
             reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
             all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
@@ -2516,17 +2507,43 @@ class DynamoDB:
 
         print(f"[DBG] streak_points={streak_points}, current_streak={current_streak_count}")
 
-        # 以下は既存コードそのまま
-        spends = self.list_point_spends(user_id, limit=1000)
+        # ★ spend 合計の取り方（amount 以外も吸収）
+        def _pick_spend_amount(s: dict) -> int:
+            v = s.get("points_used")
+            if v is not None:
+                try:
+                    return int(v)
+                except Exception:
+                    pass
 
-        # リセット後のみカウント
+            v = s.get("delta_points")
+            if v is not None:
+                try:
+                    return abs(int(v))
+                except Exception:
+                    pass
+
+            v = s.get("amount")
+            if v is not None:
+                try:
+                    return int(v)
+                except Exception:
+                    pass
+
+            return 0
+
+        # ★spends も渡ってきたらそれを使う（二重取得防止）
+        # ※注意：spends が「直近20件」だと合計がズレるので、渡す側は limit=1000 推奨
+        if spends is None:
+            spends = self.list_point_spends(user_id, limit=1000)
+
         if last_reset_index > 0 and records_for_points:
             reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
-            spends_after_reset = [s for s in spends if s.get("event_date", "") >= reset_date]
-            total_points_used = sum(s.get("amount", 0) for s in spends_after_reset)
+            spends_after_reset = [s for s in spends if (s.get("event_date", "") or "") >= reset_date]
+            total_points_used = sum(_pick_spend_amount(s) for s in spends_after_reset)
             print(f"[DBG] Reset at {reset_date}: points_used={total_points_used} from {len(spends_after_reset)}/{len(spends)} records")
         else:
-            total_points_used = sum(s.get("amount", 0) for s in spends)
+            total_points_used = sum(_pick_spend_amount(s) for s in spends)
             print(f"[DBG] total_points_used={total_points_used} from {len(spends)} records")
 
         last_dt = records_all[-1].event_date
@@ -2545,7 +2562,6 @@ class DynamoDB:
 
         print(f"[DEBUG] Before reset check: uguu_points={uguu_points}, is_reset={is_reset}")
 
-        # ★50日ルールで失効している場合は全ポイントを0にする
         if is_reset:
             print(f"[DEBUG] Resetting points! Before: uguu={uguu_points}, participation={participation_points}")
             uguu_points = 0
