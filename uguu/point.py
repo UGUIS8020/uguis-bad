@@ -168,7 +168,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 5 else count * 100  # ← 5回=500、6回=600…段階なし
+        base_bonus = 0 if count < 4 else 400 + (count - 4) * 200
         bonus = int(base_bonus * point_multiplier)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
@@ -213,6 +213,76 @@ PRIORITY = {
     "cancelled": 1,
     "other": 0,
 }
+
+
+def calc_streak_points(
+    records_for_points: List[ParticipationRecord],
+    all_schedules: List[Dict[str, Any]],
+    rules: PointRules,
+    point_multiplier: float,
+) -> Tuple[int, int, int, str]:
+    """
+    連続参加ボーナス計算
+    
+    Args:
+        records_for_points: ポイント計算対象の参加記録
+        all_schedules: 全練習日スケジュール [{"date": "YYYY-MM-DD"}, ...]
+        rules: PointRules
+        point_multiplier: ポイント倍率
+    
+    Returns:
+        (streak_points, current_streak, max_streak, streak_start_date)
+    """
+    # 参加日のセット
+    user_participated_dates = {r.event_date.strftime("%Y-%m-%d") for r in records_for_points}
+    
+    print(f"[DEBUG] 対象練習回数: {len(all_schedules)}回")
+    print(f"[DEBUG] ユーザー参加: {len(user_participated_dates)}回")
+    
+    streak_points = 0
+    current_streak = 0
+    max_streak = 0
+    streak_start = None
+    
+    # マイルストーン管理
+    milestones = {5: False, 10: False, 15: False, 20: False, 25: False}
+    milestone_values = {5: 500, 10: 1000, 15: 1500, 20: 2000, 25: 2500}
+    
+    for schedule in all_schedules:
+        schedule_date = schedule['date']
+        is_participated = schedule_date in user_participated_dates
+        
+        if is_participated:
+            current_streak += 1
+            if streak_start is None:
+                streak_start = schedule_date
+            
+            # 連続2回目以降は毎回50P
+            if current_streak >= 2:
+                sp = int(rules.streak_per_participation_after_2 * point_multiplier)
+                streak_points += sp
+                print(f"[DEBUG] {schedule_date} 参加 → 連続{current_streak}回目 +{sp}P")
+            
+            # マイルストーンボーナス
+            if current_streak in milestone_values and not milestones[current_streak]:
+                bonus = int(milestone_values[current_streak] * point_multiplier)
+                streak_points += bonus
+                milestones[current_streak] = True
+                print(f"[DEBUG] 連続{current_streak}回達成ボーナス +{bonus}P")
+            
+            max_streak = max(max_streak, current_streak)
+        else:
+            # 欠席 → リセット
+            if current_streak > 0:
+                print(f"[DEBUG][streak] reset at date={schedule_date} streak_was={current_streak}")
+            current_streak = 0
+            streak_start = None
+            milestones = {5: False, 10: False, 15: False, 20: False, 25: False}
+    
+    print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
+    
+    return streak_points, current_streak, max_streak, streak_start or ""
+
 
 def better(a, b) -> bool:
     """a を採用すべきなら True（b より良い）"""

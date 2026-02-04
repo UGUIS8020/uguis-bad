@@ -21,7 +21,9 @@ from uguu.point import (
     calc_monthly_bonus,
     calc_days_until_reset,
     classify,
-    better
+    better,
+    calc_streak_points
+
 
 )
 
@@ -731,8 +733,8 @@ class DynamoDB:
         参加履歴をタイムスタンプ付きで取得（重複除外）
         同じ日付が複数ある場合は、基本は「最も遅い登録時刻」を採用（再参加/再キャンセルを反映）
         ただし例外として、
-        - “たら”(tara_join) は単体では参加ではない
-        - 同日内に正式参加（参加ボタン）が1件でもあれば “たら” より正式参加を優先する
+        - "たら"(tara_join) は単体では参加ではない
+        - 同日内に正式参加（参加ボタン）が1件でもあれば "たら" より正式参加を優先する
         - 管理人手動ポイント(admin_manual_point)は参加履歴に混ぜない（必要なら変更可）
 
         返却形式（従来通り）:
@@ -741,9 +743,17 @@ class DynamoDB:
         from datetime import datetime, time
         from boto3.dynamodb.conditions import Key
 
-        DEBUG = True
+        DEBUG = True          # 重要なログ（サマリー・エラー）
+        DEBUG_DETAIL = False  # 詳細なレコード処理ログ ← 追加
+        
         def dbg(msg: str):
+            """重要なログ（常に表示）"""
             if DEBUG:
+                print(msg)
+        
+        def dbg_detail(msg: str):
+            """詳細ログ（オプション）"""
+            if DEBUG_DETAIL:
                 print(msg)
 
         # --- 判定ポリシー（必要ならここを調整） ---
@@ -839,36 +849,34 @@ class DynamoDB:
             processed_count = 0
 
             for idx, item in enumerate(items, 1):
-                dbg(f"\n[DEBUG] --- レコード {idx}/{len(items)} ---")
-                dbg(f"[DEBUG] 生データ: {item}")
+                dbg_detail(f"\n[DEBUG] --- レコード {idx}/{len(items)} ---")
+                dbg_detail(f"[DEBUG] 生データ: {item}")
 
                 try:
                     status = (item.get("status") or "registered").lower()
-                    action = item.get("action")  # ここが “たら” 判定のキー
-                    dbg(f"[DEBUG] status: {status}")
-                    dbg(f"[DEBUG] action: {action}")
+                    action = item.get("action")
+                    dbg_detail(f"[DEBUG] status: {status}")
+                    dbg_detail(f"[DEBUG] action: {action}")
 
-                    # date / event_date のどちらでも拾える
                     event_date_str = (item.get("date") or item.get("event_date") or "").strip()
                     if not event_date_str:
-                        dbg("[DEBUG] ✗ date/event_date フィールドなし")
+                        dbg_detail("[DEBUG] ✗ date/event_date フィールドなし")
                         parse_error_count += 1
                         continue
 
-                    dbg(f"[DEBUG] event_date: {event_date_str}")
+                    dbg_detail(f"[DEBUG] event_date: {event_date_str}")
                     event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
 
-                    # 未来は除外
                     if event_date > today:
-                        dbg(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
+                        dbg_detail(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
                         future_count += 1
                         continue
 
                     joined_at_raw = item.get("joined_at")
                     joined_at_str = str(joined_at_raw or "").strip()
-                    dbg(f"[DEBUG] joined_at(元): {joined_at_str}")
+                    dbg_detail(f"[DEBUG] joined_at(元): {joined_at_str}")
 
-                    # ---- timestamp 候補を拾う ----
+                    # timestamp 候補を拾う
                     iso_candidate = None
                     iso_source = None
 
@@ -885,22 +893,22 @@ class DynamoDB:
                             iso_candidate = extracted
                             iso_source = "joined_at(extract_iso)"
 
-                    dbg(f"[DEBUG] iso_candidate: {iso_candidate} (source={iso_source})")
+                    dbg_detail(f"[DEBUG] iso_candidate: {iso_candidate} (source={iso_source})")
 
                     registered_at = parse_dt_safe(iso_candidate, default_tz=JST)
 
                     if registered_at:
-                        dbg(f"[DEBUG] parse_dt_safe -> {registered_at.isoformat()} tzinfo={registered_at.tzinfo}")
+                        dbg_detail(f"[DEBUG] parse_dt_safe -> {registered_at.isoformat()} tzinfo={registered_at.tzinfo}")
                     else:
-                        dbg("[DEBUG] parse_dt_safe -> None")
+                        dbg_detail("[DEBUG] parse_dt_safe -> None")
 
-                    # ★救済：timestamp無しは「その日の最初」に置く（不確定が上書きしないため）
+                    # 救済：timestamp無しは「その日の最初」に置く
                     if not registered_at:
                         registered_at = datetime.combine(event_date, time(0, 0, 0), tzinfo=JST)
                         rescued_no_ts_count += 1
                         dbg(f"[WARN] timestamp無しを救済(00:00:00): {event_date_str} -> {registered_at.isoformat()}")
 
-                    dbg(
+                    dbg_detail(
                         "[DEBUG] registered_at(変換後): "
                         f"{registered_at.strftime('%Y-%m-%d %H:%M:%S')} (tzinfo={registered_at.tzinfo})"
                     )
@@ -910,7 +918,7 @@ class DynamoDB:
 
                     new_rec = {
                         "event_date": event_date_str,
-                        "registered_at_dt": registered_at,  # aware(JST)
+                        "registered_at_dt": registered_at,
                         "status": status,
                         "action": action,
                         "iso_source": iso_source,
@@ -920,13 +928,13 @@ class DynamoDB:
                     if event_date_str not in date_records:
                         date_records[event_date_str] = new_rec
                         processed_count += 1
-                        dbg(
+                        dbg_detail(
                             f"[DEBUG] ✓ 新規登録: {event_date_str} "
                             f"{registered_at.strftime('%H:%M:%S')} status={status} action={action}"
                         )
                     else:
                         existing = date_records[event_date_str]
-                        dbg(
+                        dbg_detail(
                             "[DEBUG] 既存と比較: "
                             f"既存={existing['registered_at_dt'].strftime('%H:%M:%S')} "
                             f"({existing.get('status')}, action={existing.get('action')}) / "
@@ -936,9 +944,9 @@ class DynamoDB:
 
                         if better_local(new_rec, existing):
                             date_records[event_date_str] = new_rec
-                            dbg(f"[DEBUG] ✓ 採用更新: {event_date_str}")
+                            dbg_detail(f"[DEBUG] ✓ 採用更新: {event_date_str}")
                         else:
-                            dbg(f"[DEBUG] ✗ 既存維持: {event_date_str}")
+                            dbg_detail(f"[DEBUG] ✗ 既存維持: {event_date_str}")
 
                 except Exception as e:
                     dbg(f"[WARN] ✗ レコード処理エラー: {e}")
@@ -947,13 +955,13 @@ class DynamoDB:
                     parse_error_count += 1
                     continue
 
-            # ---- event_date順に整列 ----
+            # event_date順に整列
             records_all_raw = sorted(date_records.values(), key=lambda x: x["event_date"])
 
-            dbg("\n[DEBUG] === 日付ごとの最終採用結果（date_records） ===")
+            dbg_detail("\n[DEBUG] === 日付ごとの最終採用結果（date_records） ===")
             for r in records_all_raw:
                 dt = r["registered_at_dt"]
-                dbg(
+                dbg_detail(
                     f"[DEBUG] {r['event_date']} -> {dt.strftime('%H:%M:%S')} "
                     f"status={r['status']} action={r.get('action')} src={r.get('iso_source')}"
                 )
@@ -2485,12 +2493,30 @@ class DynamoDB:
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
 
-        monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
+        # ★連続ポイント計算
+        from datetime import datetime
+        today = datetime.now(JST).date()
+        all_schedules = self.get_all_past_schedules(today)
+        all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
 
-        streak_points = 0
-        current_streak_count = 0
-        current_streak_start = None
+        # リセット後の日付でフィルタ
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
+            print(f"\n[DEBUG] 連続参加チェック（{reset_date} 以降のスケジュールのみ）")
+        else:
+            print(f"\n[DEBUG] 連続参加チェック（全スケジュール）")
 
+        streak_points, current_streak_count, max_streak, current_streak_start = calc_streak_points(
+            records_for_points=records_for_points,
+            all_schedules=all_schedules,
+            rules=rules,
+            point_multiplier=point_multiplier,
+        )
+
+        print(f"[DBG] streak_points={streak_points}, current_streak={current_streak_count}")
+
+        # 以下は既存コードそのまま
         spends = self.list_point_spends(user_id, limit=1000)
 
         # リセット後のみカウント

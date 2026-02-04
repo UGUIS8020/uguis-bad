@@ -330,6 +330,7 @@ def court_status_api():
 #get_players_status
 #主にコートの参加者（参加中 or 休憩中）のリスト表示やフィルタに使う。
 #user_id を指定した場合は、ログイン中ユーザーの status を確認する目的にも使える
+
 def get_players_status(status, user_id=None):
     try:
         match_table = current_app.dynamodb.Table("bad-game-match_entries")

@@ -149,6 +149,9 @@
             text-align: center;
         }
     </style>
+
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+
 </head>
 <body class="bg-light">
 
@@ -385,45 +388,37 @@
                 </div>
                 {% endif %}
                 
-                <form method="POST" action="{{ url_for('game.create_pairings') }}">
-                    <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
-                        <div class="d-flex align-items-center">
-                            <select name="max_courts" id="max_courts" 
-                                    class="form-select" 
-                                    {{ 'disabled' if has_ongoing_matches else '' }}>
-                                {% for i in range(1, 7) %}
-                                    <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
-                                {% endfor %}
-                            </select>
-                        </div>
+                <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
 
-                        <button type="submit" 
-                                class="btn btn-lg {{ 'btn-secondary' if has_ongoing_matches else 'btn-success' }}"
-                                {{ 'disabled' if has_ongoing_matches else '' }}>
-                            {% if has_ongoing_matches %}
-                                <i class="fa-solid fa-clock"></i>
-                                スコア入力待ち
-                            {% else %}
-                                <i class="fa-solid fa-circle-play"></i>
-                                ペアリングを実行する（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
-                            {% endif %}
-                        </button>
-                        
-                        <!-- 管理者用リセットボタン（進行中の試合がある場合のみ表示） -->
-                        {% if has_ongoing_matches and current_user.administrator %}
-                        <div class="ms-2">
-                            <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}" 
-                                  style="display: inline;"
-                                  onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
-                                <button type="submit" class="btn btn-warning btn-sm">
-                                    <i class="fa-solid fa-refresh"></i>
-                                    強制リセット
-                                </button>
-                            </form>
-                        </div>
-                        {% endif %}
-                    </div>
+                <form method="POST" action="{{ url_for('game.create_pairings') }}">
+                    <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% for i in range(1, 7) %}
+                        <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
+                    {% endfor %}
+                    </select>
+
+                    <button type="submit"
+                    class="btn btn-lg {{ 'btn-secondary' if has_ongoing_matches else 'btn-success' }}"
+                    {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% if has_ongoing_matches %}
+                        <i class="fa-solid fa-clock"></i> スコア入力待ち
+                    {% else %}
+                        <i class="fa-solid fa-circle-play"></i>
+                        ペアリングを実行する（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
+                    {% endif %}
+                    </button>
                 </form>
+
+                {% if has_ongoing_matches and current_user.administrator %}
+                <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
+                        onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
+                    <button type="submit" class="btn btn-warning">
+                    <i class="fa-solid fa-refresh"></i> 強制リセット
+                    </button>
+                </form>
+                {% endif %}
+
+                </div>
                 
                 <!-- デバッグ情報（一時的に表示） -->
                 {% if current_user.administrator %}
@@ -525,7 +520,11 @@
             }
 
             const playerElement = document.querySelector(`[data-player-id="${playerId}"]`);
-            const playerName = playerElement.getAttribute('data-player-name');
+            if (!playerElement) {
+            alert('エラー: プレイヤー要素が見つかりませんでした');
+            return;
+            }
+            const playerName = playerElement.getAttribute('data-player-name') || 'プレイヤー';
             
             const actionText = currentStatus === 'pending' ? '休憩' : '参加';
             
