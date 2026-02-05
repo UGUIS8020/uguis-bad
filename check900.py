@@ -8,7 +8,7 @@ from boto3.dynamodb.conditions import Key, Attr
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
 HISTORY_TABLE = os.getenv("DYNAMO_PART_HISTORY_TABLE", "bad-users-history")
 
-USER_ID = "c1c59d06-f3e8-4dad-a81f-973aefdf4978" 
+USER_ID = "eac198b8-eac4-49fd-bf77-8be0be12a028" 
 DATES = ["2025-11-04", "2025-11-08"]              # 問題の日付
 # ======================================
 
