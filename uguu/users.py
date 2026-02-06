@@ -131,6 +131,16 @@ def user_profile(user_id):
         is_admin = bool(getattr(current_user, "administrator", False))
         admin_participation_dates = []
 
+        def _to_float_or_none(v):
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except Exception:
+                return None
+
+        skill_score = _to_float_or_none(user.get("skill_score"))
+
         def _parse_ymd10(x):
             if x is None:
                 return None
@@ -224,9 +234,9 @@ def user_profile(user_id):
             admin_participation_dates=admin_participation_dates,
             days_until_reset=user_stats.get('days_until_reset'),
             upcoming_schedules=upcoming_schedules,
-
             point_spends=point_spends,
             point_total_spent_recent=point_total_spent_recent,
+            skill_score=skill_score,
         )
 
     except Exception as e:
