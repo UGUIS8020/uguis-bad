@@ -319,7 +319,31 @@
                     <i class="fas fa-user-plus me-1"></i>フォロー
                 </button>
                 {% endif %}
-            </div>
+            </div>           
+            
+            <p class="card-text mt-3 text-center">
+          <strong class="d-block mb-2">戦闘力</strong>
+
+          {% set is_me = (current_user.is_authenticated and current_user.id == user['user#user_id']) %}
+
+          <span id="skill-badge-profile"
+                class="badge {% if skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge fs-4 fw-bold d-inline-block"
+                {% if is_me %}
+                  onclick="editSkillScore('{{ user['user#user_id'] }}', '{{ user['user#user_id'] }}')"
+                  title="クリックして編集"
+                  style="cursor: pointer; padding: 0.6em 1em;"
+                {% else %}
+                  style="padding: 0.6em 1em;"
+                {% endif %}>
+            {% if skill_score is not none %}
+             {{ (skill_score|float)|round(2) }}
+            {% else %}
+              未設定
+            {% endif %}
+          </span>
+        </p>
+
+
             
             <!-- 統計情報 -->
             <style>
