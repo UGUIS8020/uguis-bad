@@ -725,13 +725,13 @@
                     <input type="number" 
                           class="form-control" 
                           id="points-cost" 
-                          value="600" 
+                          value="1000" 
                           min="100" 
                           max="{{ display_points }}"
                           step="100"
                           {% if user.get('points_disabled', False) %}disabled{% endif %}
                           required>
-                    <div class="form-text">消費するポイント数を入力してください（100P単位、デフォルト: 600P）</div>
+                    <div class="form-text">消費するポイント数を入力してください（100P単位、デフォルト: 1000P）</div>
                 </div>
                 
                 <div class="mb-3">
