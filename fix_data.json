@@ -1,0 +1,152 @@
+[
+  {
+    "user_id": "4d88d14d-81d7-44ee-9d6b-d0bd3e432091",
+    "username": "Unknown",
+    "joined_at": "2025-09-07T09:15:20.882220",
+    "schedule_id": "b9806f67-3118-44c1-a51a-6f4078a695bc",
+    "date": "2025-09-07",
+    "location": "越谷市立地域スポーツセンターA面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "4c7f822d-ff39-4797-9b7b-8ebc205490f5",
+    "username": "Unknown",
+    "joined_at": "2025-09-05T13:07:21.755740",
+    "schedule_id": "b9806f67-3118-44c1-a51a-6f4078a695bc",
+    "date": "2025-09-07",
+    "location": "越谷市立地域スポーツセンターA面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "ed1967da-0e91-46d6-b3e2-4a843cb80659",
+    "username": "Unknown",
+    "joined_at": "2025-10-10T09:38:21.228498",
+    "schedule_id": "95dd7d85-22ba-40b6-b022-de1a0730efaa",
+    "date": "2025-10-20",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "9361f999-985f-44e6-9e7b-475a86729abd",
+    "username": "Unknown",
+    "joined_at": "2025-10-26T06:54:11.304710",
+    "schedule_id": "49974757-c467-4432-9851-933e6af2b9e1",
+    "date": "2025-10-28",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "ed1967da-0e91-46d6-b3e2-4a843cb80659",
+    "username": "Unknown",
+    "joined_at": "2025-10-26T05:18:09.847317",
+    "schedule_id": "49974757-c467-4432-9851-933e6af2b9e1",
+    "date": "2025-10-28",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "7999d4c5-0d1b-4d00-bb3e-22b3da6a9394",
+    "username": "Unknown",
+    "joined_at": "2025-08-30T09:15:25.899034",
+    "schedule_id": "c68c7d6b-5b34-4135-8147-96d193af7d57",
+    "date": "2025-08-30",
+    "location": "越谷市立総合体育館第一体育室(6面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "1e14658d-0f86-4df3-9b33-f9b5ccc9a2aa",
+    "username": "Unknown",
+    "joined_at": "2025-09-11T07:07:53.518161",
+    "schedule_id": "0306450d-e51e-4cab-85e9-6e5842852bd4",
+    "date": "2025-09-11",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "4c7f822d-ff39-4797-9b7b-8ebc205490f5",
+    "username": "Unknown",
+    "joined_at": "2025-09-04T13:25:12.300816",
+    "schedule_id": "0306450d-e51e-4cab-85e9-6e5842852bd4",
+    "date": "2025-09-11",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "4c7f822d-ff39-4797-9b7b-8ebc205490f5",
+    "username": "Unknown",
+    "joined_at": "2025-09-18T15:38:49.341247",
+    "schedule_id": "8d2235ce-d63a-43e4-a67e-d54e01389dc5",
+    "date": "2025-09-20",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "5819b184-240a-4751-8d1f-498db7fafa27",
+    "username": "Unknown",
+    "joined_at": "2025-09-16T15:01:48.965500",
+    "schedule_id": "8d2235ce-d63a-43e4-a67e-d54e01389dc5",
+    "date": "2025-09-20",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "779669ac-86f2-4ef4-bbdf-d11949b1a6ff",
+    "username": "Unknown",
+    "joined_at": "2025-09-16T14:13:08.320959",
+    "schedule_id": "8d2235ce-d63a-43e4-a67e-d54e01389dc5",
+    "date": "2025-09-20",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "f8395ec1-2c6c-4e0d-b9d6-16fd26fbf274",
+    "username": "Unknown",
+    "joined_at": "2025-10-05T16:04:03.152035",
+    "schedule_id": "4a861bb2-ecd3-4db9-b320-73c3950d598e",
+    "date": "2025-10-16",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "e31424a2-a11f-46aa-9bf9-225dc46f3a62",
+    "username": "Unknown",
+    "joined_at": "2025-09-20T01:52:23.407719",
+    "schedule_id": "b718e3bd-7756-43a0-974c-a5aef60b289d",
+    "date": "2025-09-29",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "cf9c2a1b-2f5d-493d-83e5-b71be4ebd39f",
+    "username": "Unknown",
+    "joined_at": "2025-09-28T03:01:04.873455",
+    "schedule_id": "b718e3bd-7756-43a0-974c-a5aef60b289d",
+    "date": "2025-09-29",
+    "location": "越谷市立地域スポーツセンターB面(3面)",
+    "status": "registered",
+    "action": "join"
+  },
+  {
+    "user_id": "f0d33950-f74e-45c5-a511-bfa2afb20110",
+    "username": "Unknown",
+    "joined_at": "2025-10-01T10:50:44.413798",
+    "schedule_id": "60cb9c30-8993-41d7-a4ee-63816724e0ea",
+    "date": "2025-10-06",
+    "location": "越谷市立地域スポーツセンターA面(3面)",
+    "status": "registered",
+    "action": "join"
+  }
+]

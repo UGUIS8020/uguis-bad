@@ -89,10 +89,10 @@ def user_profile(user_id):
         # ==========================================================
         raw_history = db.get_user_participation_history_with_timestamp(user_id) or []
 
-        # 直近のポイント支払い（spend履歴） ← 先に作る！
-        point_spends = db.list_point_spends(user_id, limit=20) or []
+        # 直近のポイント支払い（spend履歴）
+        point_spends = db.list_point_spends(user_id, limit=1000) or []
 
-        # 統計（ポイント/参加回数） ← 取得済み raw_history / point_spends を渡す
+        # 統計（ポイント/参加回数）
         user_stats = db.get_user_stats(user_id, raw_history=raw_history, spends=point_spends) or {}
 
         # spend合計（amount ではなく points_used / delta_points を優先）
@@ -142,9 +142,29 @@ def user_profile(user_id):
             except ValueError:
                 return None
 
+        # ==========================================================
+        # ★追加：表示用「参加回数」（official_count）を履歴から算出
+        #   - status が無い場合は action から推定
+        #   - registered のみ数える（cancelled は除外）
+        # ==========================================================
+        def _is_registered(rec: dict) -> bool:
+            st = (rec.get("status") or "").lower().strip()
+            if not st:
+                act = (rec.get("action") or "").lower().strip()
+                if act in ("tara_join", "join", "register", "registered"):
+                    st = "registered"
+                elif act in ("tara_cancel", "cancel", "cancelled", "canceled"):
+                    st = "cancelled"
+            return st == "registered"
+
+        official_count = sum(
+            1 for r in (raw_history or [])
+            if isinstance(r, dict) and _is_registered(r)
+        )
+        print(f"[DBG] official_count(for display) = {official_count} (raw_history={len(raw_history)})")
+
         if is_admin:
             try:
-                # ★ここも raw_history を使い回す（DynamoDBを再queryしない）
                 records = raw_history
                 youbi = ['月', '火', '水', '木', '金', '土', '日']
 
@@ -192,7 +212,9 @@ def user_profile(user_id):
             user=user,
             posts=user_posts,
             posts_count=len(user_posts) if user_posts else 0,
-            past_participation_count=int(user.get("practice_count") or 0),
+
+            # ★ここを修正：practice_count ではなく official_count を表示
+            past_participation_count=int(official_count),
 
             participation_points=user_stats.get('uguu_points', 0),
 

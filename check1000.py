@@ -5,7 +5,7 @@ sys.path.insert(0, '.')
 from uguu.dynamo import DynamoDB
 db = DynamoDB()
 
-USER_ID = "eac198b8-eac4-49fd-bf77-8be0be12a028"
+USER_ID = "1d5b135f-368e-4917-81ee-44dbe7d6dac8"
 
 print(f"[INFO] Checking user: {USER_ID}\n")
 
