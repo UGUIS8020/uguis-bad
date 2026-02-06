@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
@@ -9,13 +8,29 @@ import json, base64
 from decimal import Decimal
 from botocore.exceptions import ClientError
 import re
+from utils.timezone import JST
+
+from uguu.point import (
+    PointRules,
+    normalize_participation_history,
+    calc_reset_index,
+    slice_records_for_points,
+    build_participated_date_set,
+    calc_registration_counts,
+    calc_participation_and_cumulative,
+    calc_monthly_bonus,
+    calc_days_until_reset,
+    classify,
+    better,
+    calc_streak_points
+
+
+)
 
 load_dotenv()
 
 import boto3
 import os
-
-JST = ZoneInfo("Asia/Tokyo")
 
 def get_today_jst():
     return datetime.now(JST).date()
@@ -31,26 +46,39 @@ def extract_iso_from_joined_at(s: str) -> str | None:
     m = ISO_RE.search(s)
     return m.group(1) if m else None
 
-def parse_dt_safe(s: str | None) -> datetime | None:
+def parse_dt_safe(s: str | None, *, default_tz=JST) -> datetime | None:
     if not s:
         return None
     s = str(s).strip()
+
     # fromisoformat は "Z" を直接食えないので +00:00 にする
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
+
+    dt = None
+
+    # 1) まずISO系を試す（"YYYY-MM-DDTHH:MM:SS" や tz付きもここでOK）
     try:
-        return datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(s)
     except ValueError:
-        # スペース区切りの "YYYY-MM-DD HH:MM:SS" を救う
+        # 2) スペース区切り救済
         try:
-            return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return None
+
+    # 3) ここが重要：naive→tz付与、aware→JSTへ変換（返り値を統一）
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=default_tz)       # naiveは「そのTZのローカル時刻」として扱う
+    else:
+        dt = dt.astimezone(default_tz)           # awareはJSTに寄せる
+
+    return dt
         
 def iso_to_jst(s: str) -> str:
     try:
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        return dt.astimezone(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d %H:%M:%S")
+        return dt.astimezone(JST).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return s
 
@@ -283,41 +311,7 @@ class DynamoDB:
             ReturnValues="NONE",
         )
         return True
-
-    # def delete_post(self, post_id):
-    #     """投稿を削除"""
-    #     try:
-    #         # 投稿を検索して実際のキー構造を確認
-    #         response = self.posts_table.scan()
-    #         posts = response.get('Items', [])
-            
-    #         target_post = None
-    #         for post in posts:
-    #             if str(post.get('post_id')) == str(post_id):
-    #                 target_post = post
-    #                 break
-            
-    #         if not target_post:
-    #             raise Exception(f"Post {post_id} not found")
-            
-    #         # 実際のキー構造に基づいて削除
-    #         if 'PK' in target_post and 'SK' in target_post:
-    #             # PK/SK構造の場合
-    #             delete_key = {
-    #                 'PK': target_post['PK'],
-    #                 'SK': target_post['SK']
-    #             }
-    #         else:
-    #             # post_id直接の場合
-    #             delete_key = {
-    #                 'post_id': post_id
-    #             }
-            
-    #         response = self.posts_table.delete_item(Key=delete_key)
-    #         return response
-            
-    #     except Exception as e:
-    #         raise Exception(f"投稿削除エラー: {str(e)}")
+ 
         
     def delete_post(self, post_id: str):
         """投稿(METADATA) + 返信(全件)を削除"""
@@ -737,162 +731,236 @@ class DynamoDB:
     def get_user_participation_history_with_timestamp(self, user_id):
         """
         参加履歴をタイムスタンプ付きで取得（重複除外）
-        同じ日付が複数ある場合は、最も遅い登録時刻を採用（再参加を反映）
+        同じ日付が複数ある場合は、基本は「最も遅い登録時刻」を採用（再参加/再キャンセルを反映）
+        ただし例外として、
+        - "たら"(tara_join) は単体では参加ではない
+        - 同日内に正式参加（参加ボタン）が1件でもあれば "たら" より正式参加を優先する
+        - 管理人手動ポイント(admin_manual_point)は参加履歴に混ぜない（必要なら変更可）
+
+        返却形式（従来通り）:
+            [{"event_date":"YYYY-MM-DD","registered_at":"YYYY-MM-DD HH:MM:SS","status":"registered"}, ...]
         """
-        from datetime import datetime
+        import os
+        from datetime import datetime, time
         from boto3.dynamodb.conditions import Key
-        
+
+        # ------------- logging switch -------------
+        # 例:
+        #   POINT_LOG=1 でサマリーを表示
+        #   POINT_LOG_DETAIL=1 で詳細を表示
+        DEBUG = os.getenv("POINT_LOG", "1") == "1"
+        DEBUG_DETAIL = os.getenv("POINT_LOG_DETAIL", "0") == "1"
+
+        def dbg(msg: str):
+            if DEBUG:
+                print(msg)
+
+        def dbg_detail(msg: str):
+            if DEBUG_DETAIL:
+                print(msg)
+
+        # --- 判定ポリシー（必要ならここを調整） ---
+        TARA_ACTION = "tara_join"
+        EXCLUDE_ACTIONS = {"admin_manual_point"}
+
+        def classify_local(rec: dict) -> str:
+            status = (rec.get("status") or "registered").lower()
+            action = rec.get("action")
+            if status == "cancelled":
+                return "cancelled"
+            if action in EXCLUDE_ACTIONS:
+                return "other"
+            if action == TARA_ACTION:
+                return "tara"
+            return "official"
+
+        def better_local(new: dict, old: dict) -> bool:
+            cn, co = classify_local(new), classify_local(old)
+
+            # other は参加履歴の採用対象外
+            if cn == "other" and co != "other":
+                return False
+            if co == "other" and cn != "other":
+                return True
+
+            # official と tara の競合は official を優先（時刻に関わらず）
+            if cn == "official" and co == "tara":
+                return True
+            if cn == "tara" and co == "official":
+                return False
+
+            # それ以外は時刻で比較
+            tn = new.get("registered_at_dt")
+            to = old.get("registered_at_dt")
+            if tn and to:
+                return tn > to
+            if tn and not to:
+                return True
+            if to and not tn:
+                return False
+            return False
+
         try:
-            print(f"\n[DEBUG] ========================================")
-            print(f"[DEBUG] タイムスタンプ付き参加履歴取得開始")
-            print(f"[DEBUG] user_id: {user_id}")
-            print(f"[DEBUG] ========================================")
-            
+            # ---- DynamoDB query ----
             items = []
-            resp = self.part_history.query(
-                KeyConditionExpression=Key("user_id").eq(user_id)
-            )
+            resp = self.part_history.query(KeyConditionExpression=Key("user_id").eq(user_id))
             items.extend(resp.get("Items", []))
-            
-            while "LastEvaluatedKey" in resp:
+            while resp.get("LastEvaluatedKey"):
                 resp = self.part_history.query(
                     KeyConditionExpression=Key("user_id").eq(user_id),
-                    ExclusiveStartKey=resp["LastEvaluatedKey"]
+                    ExclusiveStartKey=resp["LastEvaluatedKey"],
                 )
                 items.extend(resp.get("Items", []))
-            
-            print(f"[DEBUG] DynamoDBから取得した生レコード数: {len(items)}件")
-            
-            # 現在の日付（未来の参加を除外）
+
             today = datetime.now(JST).date()
-            print(f"[DEBUG] 今日の日付: {today}")
-            
-            # 日付ごとの最も遅い登録時刻を保持する辞書
-            date_records = {}
-            
-            # 統計用カウンター
+
+            # event_date_str -> 採用レコード
+            date_records: dict[str, dict] = {}
+
             cancelled_count = 0
             future_count = 0
             parse_error_count = 0
+            rescued_no_ts_count = 0
             processed_count = 0
-            
+
+            # 詳細時にだけ「問題のあった日」などを残す
+            rescued_dates = []
+            parse_error_dates = []
+
             for idx, item in enumerate(items, 1):
-                print(f"\n[DEBUG] --- レコード {idx}/{len(items)} ---")
-                print(f"[DEBUG] 生データ: {item}")
-                
                 try:
-                    # statusフィールドの確認（正規化）
                     status = (item.get("status") or "registered").lower()
-                    print(f"[DEBUG] status: {status}")
+                    action = item.get("action")
 
-                    # 必要なフィールドの確認
-                    if "date" not in item:
-                        print(f"[DEBUG] ✗ dateフィールドなし")
+                    event_date_str = (item.get("date") or item.get("event_date") or "").strip()
+                    if not event_date_str:
                         parse_error_count += 1
+                        if DEBUG_DETAIL:
+                            parse_error_dates.append("(no date field)")
                         continue
-
-                    if "joined_at" not in item and "created_at" not in item and "registered_at" not in item:
-                        # joined_at が無い古いデータもあるので、候補が全部無い場合だけ弾く
-                        print(f"[DEBUG] ✗ timestamp系フィールドなし (joined_at/created_at/registered_at)")
-                        parse_error_count += 1
-                        continue
-
-                    event_date_str = item["date"]
-                    print(f"[DEBUG] event_date: {event_date_str}")
 
                     event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
-
-                    # 未来の日付は除外
                     if event_date > today:
-                        print(f"[DEBUG] ✗ 未来の日付をスキップ: {event_date_str}")
                         future_count += 1
                         continue
 
-                    # joined_at のパース（ISOでない joined_at も救う）
                     joined_at_raw = item.get("joined_at")
                     joined_at_str = str(joined_at_raw or "").strip()
-                    print(f"[DEBUG] joined_at(元): {joined_at_str}")
 
-                    iso_candidate = (
-                        item.get("created_at")
-                        or item.get("registered_at")
-                        or item.get("transaction_date")
-                        or item.get("paid_at")
-                        or extract_iso_from_joined_at(joined_at_str)
-                    )
+                    # timestamp 候補を拾う（優先キー）
+                    iso_candidate = None
+                    iso_source = None
+                    for key in ("created_at", "registered_at", "transaction_date", "paid_at"):
+                        v = item.get(key)
+                        if v:
+                            iso_candidate = v
+                            iso_source = key
+                            break
 
-                    registered_at = parse_dt_safe(iso_candidate)
+                    if not iso_candidate:
+                        extracted = extract_iso_from_joined_at(joined_at_str)
+                        if extracted:
+                            iso_candidate = extracted
+                            iso_source = "joined_at(extract_iso)"
 
+                    registered_at = parse_dt_safe(iso_candidate, default_tz=JST)
+
+                    # 救済：timestamp無しは「その日の最初」に置く（←ここは警告だけ残す）
                     if not registered_at:
-                        print(f"[WARN] ✗ joined_at/created_at パースエラー: iso_candidate={repr(iso_candidate)} joined_at={repr(joined_at_str)}")
-                        parse_error_count += 1
-                        continue
+                        registered_at = datetime.combine(event_date, time(0, 0, 0), tzinfo=JST)
+                        rescued_no_ts_count += 1
+                        if DEBUG:
+                            dbg(f"[WARN] timestamp無しを救済(00:00:00): {event_date_str}")
+                        if DEBUG_DETAIL:
+                            rescued_dates.append(event_date_str)
 
-                    print(f"[DEBUG] registered_at(変換後): {registered_at.strftime('%Y-%m-%d %H:%M:%S')}")
-
-                    # cancelled の件数はカウント（ただし continue しない）
                     if status == "cancelled":
                         cancelled_count += 1
-                        print(f"[DEBUG] (keep) cancelled record: {event_date_str}")
 
-                    # --- ここで new_rec を作る ---
                     new_rec = {
                         "event_date": event_date_str,
-                        "registered_at": registered_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        "registered_at_dt": registered_at,
                         "status": status,
+                        "action": action,
+                        "iso_source": iso_source,
                     }
 
-                    # 同じ日付の場合、より遅い登録時刻を採用（再参加を反映）
                     if event_date_str not in date_records:
                         date_records[event_date_str] = new_rec
-                        print(f"[DEBUG] ✓ 新規参加記録として登録: {event_date_str} - {registered_at.strftime('%H:%M:%S')} status={status}")
                         processed_count += 1
                     else:
-                        existing_registered_at = datetime.strptime(
-                            date_records[event_date_str]["registered_at"],
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                        print(
-                            f"[DEBUG] 既存レコードと比較: "
-                            f"既存={existing_registered_at.strftime('%H:%M:%S')}({date_records[event_date_str].get('status')}), "
-                            f"新={registered_at.strftime('%H:%M:%S')}({status})"
-                        )
-
-                        if registered_at > existing_registered_at:
+                        existing = date_records[event_date_str]
+                        if better_local(new_rec, existing):
                             date_records[event_date_str] = new_rec
-                            print(f"[DEBUG] ✓ 更新（より遅い時刻を採用）: {event_date_str} -> status={status}")
-                        else:
-                            print(f"[DEBUG] ✗ 古い参加記録をスキップ: {event_date_str} - {registered_at.strftime('%H:%M:%S')} status={status}")
+
+                    # ここから下は詳細時のみ
+                    if DEBUG_DETAIL:
+                        dbg_detail(
+                            f"[DETAIL] {idx}/{len(items)} "
+                            f"date={event_date_str} status={status} action={action} "
+                            f"ts={registered_at.strftime('%H:%M:%S')} src={iso_source}"
+                        )
 
                 except Exception as e:
-                    print(f"[WARN] ✗ レコード処理エラー: {e}")
-                    import traceback
-                    traceback.print_exc()
                     parse_error_count += 1
+                    if DEBUG:
+                        dbg(f"[WARN] レコード処理エラー: date={item.get('date') or item.get('event_date')} err={e}")
+                    if DEBUG_DETAIL:
+                        parse_error_dates.append(str(item.get("date") or item.get("event_date") or "unknown"))
+                        import traceback
+                        traceback.print_exc()
                     continue
-            
-            # リストに変換してソート（全件→cancelled除外）
-            records_all = sorted(date_records.values(), key=lambda x: x["event_date"])
-            records = [r for r in records_all if (r.get("status") or "").lower() != "cancelled"]
-            
-            print(f"\n[DEBUG] ========================================")
-            print(f"[DEBUG] 処理結果サマリー")
-            print(f"[DEBUG] ========================================")
-            print(f"[DEBUG] 生レコード総数: {len(items)}件")
-            print(f"[DEBUG] キャンセル済み: {cancelled_count}件")
-            print(f"[DEBUG] 未来の日付: {future_count}件")
-            print(f"[DEBUG] パースエラー: {parse_error_count}件")
-            print(f"[DEBUG] 新規登録: {processed_count}件")
-            print(f"[DEBUG] 重複除外後: {len(records)}件")
-            print(f"[DEBUG] ========================================\n")
-            
+
+            # event_date順に整列
+            records_all_raw = sorted(date_records.values(), key=lambda x: x["event_date"])
+
+            # official のみ返す
+            kept_raw = [r for r in records_all_raw if classify_local(r) == "official"]
+
+            records = [
+                {
+                    "event_date": r["event_date"],
+                    "registered_at": r["registered_at_dt"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": r["status"],
+                }
+                for r in kept_raw
+            ]
+
+            # ---------------- summary (1 line) ----------------
+            if DEBUG:
+                if records:
+                    first_day = records[0]["event_date"]
+                    last_day = records[-1]["event_date"]
+                    day_range = f"{first_day}..{last_day}"
+                else:
+                    day_range = "-"
+
+                dbg(
+                    "[POINT][history] "
+                    f"user_id={user_id} "
+                    f"raw={len(items)} official={len(records)} "
+                    f"cancelled={cancelled_count} future={future_count} "
+                    f"parse_err={parse_error_count} rescued_no_ts={rescued_no_ts_count} "
+                    f"range={day_range}"
+                )
+
+            # 詳細時だけ「問題一覧」を少しだけ出す（全件は出さない）
+            if DEBUG_DETAIL:
+                if rescued_dates:
+                    dbg_detail(f"[DETAIL] rescued_dates(sample up to 10)={rescued_dates[:10]}")
+                if parse_error_dates:
+                    dbg_detail(f"[DETAIL] parse_error_dates(sample up to 10)={parse_error_dates[:10]}")
+
             return records
-            
+
         except Exception as e:
-            print(f"[ERROR] get_user_participation_history_with_timestamp エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if DEBUG:
+                dbg(f"[ERROR] get_user_participation_history_with_timestamp: {e}")
+            if DEBUG_DETAIL:
+                import traceback
+                traceback.print_exc()
             return []
+
     
     def _is_early_registration(self, record):
         """
@@ -1149,59 +1217,92 @@ class DynamoDB:
 
     def get_upcoming_schedules(self, limit: int = 10, today_only: bool = False):
         """今後の予定を取得（today_only=True で当日の最初の1件だけ）"""
+        import os
+        from datetime import datetime
+
+        # ログ制御（既存の方式に合わせて環境変数でON/OFF）
+        DEBUG = os.getenv("POINT_LOG", "1") == "1"               # サマリー/重要だけ
+        DEBUG_DETAIL = os.getenv("POINT_LOG_DETAIL", "0") == "1" # 詳細（配列表示など）
+
+        def dbg(msg: str):
+            if DEBUG:
+                print(msg)
+
+        def dbg_detail(msg: str):
+            if DEBUG_DETAIL:
+                print(msg)
+
         try:
             # === タイムゾーン設定 ===
-            JST = ZoneInfo("Asia/Tokyo")
             today_date = datetime.now(JST).date()
-            today_str = today_date.strftime('%Y-%m-%d')
-            print(f"[DEBUG] get_upcoming_schedules - today(JST): {today_str}")
+            today_str = today_date.strftime("%Y-%m-%d")
+            dbg(f"[SCHEDULE] upcoming today={today_str} today_only={today_only} limit={limit}")
 
             # === スケジュール取得 ===
             response = self.schedule_table.scan()
-            schedules = response.get('Items', [])
+            schedules = response.get("Items", [])
 
-            while 'LastEvaluatedKey' in response:
+            while "LastEvaluatedKey" in response:
                 response = self.schedule_table.scan(
-                    ExclusiveStartKey=response['LastEvaluatedKey']
+                    ExclusiveStartKey=response["LastEvaluatedKey"]
                 )
-                schedules.extend(response.get('Items', []))
+                schedules.extend(response.get("Items", []))
 
-            print(f"[DEBUG] 全スケジュール取得: {len(schedules)}件")
+            dbg(f"[SCHEDULE] total_schedules={len(schedules)}")
 
             upcoming = []
+            warn_count = 0
+
             for schedule in schedules:
                 try:
-                    s_date = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
-
+                    s_date = datetime.strptime(schedule["date"], "%Y-%m-%d").date()
                     cond = (s_date == today_date) if today_only else (s_date >= today_date)
+
                     if cond:
-                        item = {
-                            'schedule_id': schedule.get('schedule_id'),
-                            'date': schedule['date'],
-                            'day_of_week': schedule.get('day_of_week', ''),
-                            'start_time': schedule.get('start_time', ''),
-                            'end_time': schedule.get('end_time', '')
-                        }
-                        upcoming.append(item)
-                        print(f"[DEBUG] 対象の予定: {item['date']} {item.get('start_time','')}")
+                        upcoming.append({
+                            "schedule_id": schedule.get("schedule_id"),
+                            "date": schedule["date"],
+                            "day_of_week": schedule.get("day_of_week", ""),
+                            "start_time": schedule.get("start_time", ""),
+                            "end_time": schedule.get("end_time", ""),
+                        })
+
                 except Exception as e:
-                    print(f"[WARN] スケジュール処理エラー: {schedule} - {e}")
+                    warn_count += 1
+                    # エラーは残す（ただし大量なら抑制）
+                    if warn_count <= 5:
+                        print(f"[WARN] スケジュール処理エラー: {schedule} - {e}")
                     continue
+
+            if warn_count > 5:
+                print(f"[WARN] スケジュール処理エラー: {warn_count}件（最初の5件のみ表示）")
 
             # === 当日のみ ===
             if today_only:
                 if not upcoming:
-                    print("[DEBUG] 本日の予定なし")
+                    dbg("[SCHEDULE] today_upcoming=0")
                     return []
-                upcoming.sort(key=lambda x: x.get('start_time', '00:00'))
+
+                upcoming.sort(key=lambda x: x.get("start_time", "00:00"))
                 result = [upcoming[0]]
-                print(f"[DEBUG] 本日の予定（1件）: {result[0]['date']} {result[0].get('start_time','')}")
+
+                dbg(f"[SCHEDULE] today_upcoming=1 first={result[0]['date']} {result[0].get('start_time','')}")
+                dbg_detail(f"[SCHEDULE][detail] result={result}")
                 return result
 
             # === 未来分 ===
-            upcoming.sort(key=lambda x: (x['date'], x.get('start_time', '')))
+            upcoming.sort(key=lambda x: (x["date"], x.get("start_time", "")))
             result = upcoming[:limit]
-            print(f"[DEBUG] 今後の予定（{limit}件まで）: {len(result)}件")
+
+            # 要約ログ（ここだけで十分）
+            if result:
+                first = result[0]
+                last = result[-1]
+                dbg(f"[SCHEDULE] upcoming={len(result)}/{len(upcoming)} range={first['date']} {first.get('start_time','')}..{last['date']} {last.get('start_time','')}")
+            else:
+                dbg(f"[SCHEDULE] upcoming=0/{len(upcoming)}")
+
+            dbg_detail(f"[SCHEDULE][detail] result={result}")
             return result
 
         except Exception as e:
@@ -1215,77 +1316,7 @@ class DynamoDB:
         """
         ユーザーのポイント支払い履歴を取得
         """
-        return self.get_point_transactions(user_id, transaction_type='payment') 
-
-        
-    # def record_spend(history_table, *, user_id: str, points_used: int,
-    #              event_date: str, payment_type: str = "event_participation",
-    #              reason: str | None = None, created_by: str | None = None):
-    #     """
-    #     bad-users-history に消費(spend)トランザクションを1件保存する。
-    #     """
-    #     now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-    #     tx_id = str(uuid4())
-    #     joined_at = f"points#spend#{now}#{tx_id}"
-
-    #     item = {
-    #         "user_id": user_id,
-    #         "joined_at": joined_at,
-    #         "tx_id": tx_id,
-    #         "kind": "spend",                     # earn|spend|adjust
-    #         "delta_points": -int(points_used),   # 残高計算用（負）
-    #         "points_used": int(points_used),     # 互換のため（正）
-    #         "payment_type": payment_type,
-    #         "event_date": event_date,
-    #         "reason": reason or f"{event_date}の参加費",
-    #         "created_at": now,
-    #         "entity_type": "point_transaction",
-    #         "version": 1,
-    #     }
-
-    #     # 一意化（同じPK/SKの重複防止）
-    #     history_table.put_item(
-    #         Item=item,
-    #         ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(joined_at)"
-    #     )
-    #     return item
-        
-    # def record_point_earned(self, user_id: str, event_date: str,
-    #                     points: int, earn_type: str,
-    #                     details: dict = None, description: str = None):
-    #     """ポイント獲得を bad-users-history に記録（earn系は正の delta_points）"""
-    #     try:
-    #         now = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
-    #         tx_id = str(uuid4())
-    #         joined_at = f'points#earn#{now}#{tx_id}'
-
-    #         item = {
-    #             'user_id': user_id,          # PK
-    #             'joined_at': joined_at,      # SK
-    #             'tx_id': tx_id,
-    #             'kind': 'earn',              # earn|spend|adjust
-    #             'delta_points': int(points), # 正の値
-    #             'points': int(points),       # 互換フィールド（任意）
-    #             'earn_type': earn_type,      # participation/streak/milestone/monthly 等
-    #             'event_date': event_date,
-    #             'details': details or {},
-    #             'reason': description or "ポイント獲得",
-    #             'created_at': now,
-    #             'entity_type': 'point_transaction',
-    #             'version': 1,
-    #         }
-
-    #         self.part_history.put_item(
-    #             Item=item,
-    #             ConditionExpression='attribute_not_exists(user_id) AND attribute_not_exists(joined_at)'
-    #         )
-    #         print(f"[SUCCESS] 獲得記録保存 - user_id={user_id}, +{points}P, type={earn_type}")
-    #         return True
-
-    #     except Exception as e:
-    #         print(f"[ERROR] 獲得記録エラー: {e}")
-    #         import traceback; traceback.print_exc()
-    #         return False       
+        return self.get_point_transactions(user_id, transaction_type='payment')    
     
 
     def record_point_earned(
@@ -1649,13 +1680,27 @@ class DynamoDB:
 
                     # 日付は joined_at もフォールバックに入れる（「不明」回避）
                     joined_at = str(it.get("joined_at") or "")
-                    tx_date = (
-                        it.get("created_at")
-                        or it.get("transaction_date")
-                        or it.get("paid_at")
-                        or extract_iso_from_joined_at(joined_at)
-                        or None
-                    )
+
+                    # payed_at が混在している可能性があるなら両対応（不要なら消してOK）
+                    paid_at = it.get("paid_at") or it.get("payed_at")
+
+                    if kind == "spend":
+                        # 支払いは「支払い確定日時」を最優先にする
+                        tx_date = (
+                            paid_at
+                            or it.get("created_at")
+                            or it.get("transaction_date")
+                            or extract_iso_from_joined_at(joined_at)
+                            or None
+                        )
+                    else:
+                        # earn/adjust は「作成日時」を基本にする
+                        tx_date = (
+                            it.get("created_at")
+                            or it.get("transaction_date")
+                            or extract_iso_from_joined_at(joined_at)
+                            or None
+                        )
 
                     # ---- 重複排除キー ----
                     tx_id = it.get("tx_id")
@@ -1936,430 +1981,625 @@ class DynamoDB:
         return result["total_spent"]
 
     # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
-    def get_user_stats(self, user_id: str):
-        """
-        うぐポイントを計算（中学生は半分のポイント）
-
-        【重要な仕様】
-        - 参加回数表示：50日ルール適用外（全履歴をカウント）
-        - ポイント計算：50日ルール適用（50日以上空いたらリセット）
-        - 初回参加だけ200Pを固定で付与する
-        - 月内の参加回数に応じてボーナスを付与する（5,7,10,15,20回）
-        - 5回ごとの累計ボーナス（+500P）は継続
-        """
-        try:
-            from collections import defaultdict
-            from datetime import datetime
-
-            FIRST_PARTICIPATION_POINTS = 200  # 初回だけこれを付ける
-
-            print(f"\n[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
-            print("=" * 80)
-
-            # まず管理人付与分を必ず取る
-            manual_points = self.get_manual_points(user_id)
-            print(f"[DEBUG] 管理人付与ポイント: {manual_points}P")
-
-            # ユーザー情報を取得（生年月日を含む）
-            user_info = self.get_user_info(user_id)
-            is_junior_high = self._is_junior_high_student(user_info)
-            point_multiplier = 0.5 if is_junior_high else 1.0
-
-            if is_junior_high:
-                print(f"[DEBUG] 中学生判定 → ポイント係数: {point_multiplier}倍")
-
-            # タイムスタンプ付き参加履歴を取得
-            participation_history = self.get_user_participation_history_with_timestamp(user_id)
-
-            # 参加履歴が一件もない場合は管理人付与分だけ返す
-            if not participation_history:
-                print(f"[DEBUG] 参加履歴なし - user_id: {user_id}")
-                return {
-                    'uguu_points': manual_points,
-                    'participation_points': 0,
-                    'streak_points': 0,
-                    'monthly_bonus_points': 0,
-                    'cumulative_bonus_points': 0,
-                    'points_used': 0,
-                    'total_participation': 0,
-                    'last_participation_date': None,
-                    'current_streak_start': None,
-                    'current_streak_count': 0,
-                    'cumulative_count': 0,
-                    'monthly_bonuses': {},
-                    'early_registration_count': 0,                    
-                    'direct_registration_count': 0,
-                    'is_junior_high': is_junior_high,
-                    'is_reset': False,
-                    'days_until_reset': None,
-                    'manual_points': manual_points,
-                    'base_points': 0,
-                }
-
-            # 参加履歴をdatetimeにしてソート（cancelled除外）
-            participation_records = []
-            for record in participation_history:
-                try:
-                    status = (record.get("status") or "registered").lower()
-                    if status == "cancelled":
-                        continue
-
-                    event_date = datetime.strptime(record["event_date"], "%Y-%m-%d")
-                    registered_at = datetime.strptime(record["registered_at"], "%Y-%m-%d %H:%M:%S")
-
-                    participation_records.append({
-                        "event_date": event_date,
-                        "registered_at": registered_at,
-                        "status": status,  # デバッグ用に残してもOK
-                    })
-
-                except (ValueError, KeyError) as e:
-                    print(f"[WARN] 不正なレコード形式: {record}, エラー: {e}")
-
-            participation_records.sort(key=lambda x: x["event_date"])
-
-            # 表示用の全参加回数（50日ルール適用外）
-            total_participation_all_time = len(participation_records)
-            print(f"\n[DEBUG] 全参加回数（表示用）: {total_participation_all_time}回")
-
-            # ===== 全履歴の早期登録カウント（統計用） =====
-            all_time_early_count = 0   # 〜3日前(100)
-            all_time_direct_count = 0  # 2日前〜前日(50)
-
-            for record in participation_records:
-                base_points = self._is_early_registration(record)
-                if base_points == 100:
-                    all_time_early_count += 1
-                elif base_points == 50:
-                    all_time_direct_count += 1
-
-            print(f"[DEBUG] 全履歴の早期登録: 〜3日前(100)={all_time_early_count}回, 2日前〜前日(50)={all_time_direct_count}回")
-
-            RESET_DAYS = 50  # 50日ルール（51日以上空いたらリセット）
-
-            print(f"\n[DEBUG] {RESET_DAYS}日ルールチェック（ポイント計算用）")
-            last_reset_index = 0
-            is_reset = False
-
-            for i in range(1, len(participation_records)):
-                current_date = participation_records[i]["event_date"]
-                previous_date = participation_records[i - 1]["event_date"]
-                days_diff = (current_date - previous_date).days
-
-                if days_diff > RESET_DAYS:
-                    print(f"[DEBUG] {RESET_DAYS}日超の空白期間検出（{days_diff}日）")
-                    print(f"[DEBUG] {previous_date:%Y-%m-%d} → {current_date:%Y-%m-%d}")
-                    print(f"[DEBUG] → ポイントは {current_date:%Y-%m-%d} 以降のみ計算")
-                    last_reset_index = i
-                    is_reset = True
-
-            # RESET_DAYS ルール適用後の履歴（これでポイントを計算する）
-            if last_reset_index > 0:
-                participation_records_for_points = participation_records[last_reset_index:]
-                start_dt = participation_records_for_points[0]["event_date"]
-                print(f"[DEBUG] ポイントリセット: {start_dt:%Y-%m-%d} 以降の {len(participation_records_for_points)} 回のみ計算")
-                print(f"[DEBUG] 参加回数表示は全 {total_participation_all_time} 回")
-            else:
-                participation_records_for_points = participation_records
-                print(f"[DEBUG] リセットなし: 全 {total_participation_all_time} 回が有効")
-
-            # 連続参加チェック用に参加日セットを作る
-            user_participated_dates = {
-                r["event_date"].strftime("%Y-%m-%d") for r in participation_records_for_points
-            }
-
-            # ===== 参加ポイント（初回200P・それ以降は早期ポイント） =====
-            participation_points = 0
-            early_registration_count = 0   # 〜3日前(100)
-            direct_registration_count = 0  # 2日前〜前日(50)
-
-            cumulative_count = 0
-            cumulative_bonus_points = 0
-            cumulative_milestones = []
-
-            # ★ 生涯初回日（cancelled除外後の最初）
-            first_ever_date = participation_records[0]["event_date"]
-
-            for idx, record in enumerate(participation_records_for_points, start=1):
-                base_points = self._is_early_registration(record)
-
-                # 統計用カウント（リセット後の期間だけ）
-                if base_points == 100:
-                    early_registration_count += 1
-                elif base_points == 50:
-                    direct_registration_count += 1
-                # 0点はカウントしない
-
-                # 実際に付けるポイント（生涯初回の1回だけ200P）
-                if record["event_date"] == first_ever_date:
-                    pts = int(FIRST_PARTICIPATION_POINTS * point_multiplier)
-                    participation_points += pts
-                    print(f"[DEBUG] 初回参加(生涯初回) → +{pts}P")
-                else:
-                    pts = int(base_points * point_multiplier)
-                    participation_points += pts
-                    print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")
-
-                # 累計ボーナス（5回ごとに +500P）
-                cumulative_count += 1
-                if cumulative_count % 5 == 0:
-                    bonus = int(500 * point_multiplier)
-                    cumulative_bonus_points += bonus
-                    cumulative_milestones.append({
-                        'date': record['event_date'].strftime('%Y-%m-%d'),
-                        'count': cumulative_count,
-                        'bonus': bonus,
-                    })
-                    print(f"[DEBUG] 累計{cumulative_count}回達成 → ボーナス +{bonus}P")
-
-            print(f"[DEBUG] 参加ポイント合計: {participation_points}P")
-            print(f"[DEBUG] 累計参加ボーナス合計: {cumulative_bonus_points}P")
-
-            # ===== 連続参加ボーナス =====
-            today = datetime.now(JST).date()
-            all_schedules = self.get_all_past_schedules(today)            
-            all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
-
-            if last_reset_index > 0:
-                reset_date = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
-                all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
-                print(f"\n[DEBUG] 連続参加チェック（{reset_date} 以降のスケジュールのみ）")
-            else:
-                print(f"\n[DEBUG] 連続参加チェック（全スケジュール）")
-
-            print(f"[DEBUG] 対象練習回数: {len(all_schedules)}回")
-            print(f"[DEBUG] ユーザー参加: {len(user_participated_dates)}回")
-
-            streak_points = 0
-            current_streak = 0
-            max_streak = 0
-            streak_start = None
-
-            milestone_5_achieved = False
-            milestone_10_achieved = False
-            milestone_15_achieved = False
-            milestone_20_achieved = False
-            milestone_25_achieved = False
-
-            for schedule in all_schedules:
-                schedule_date = schedule['date']
-                is_participated = schedule_date in user_participated_dates
-
-                if is_participated:
-                    current_streak += 1
-                    print(f"[DEBUG][streak] participated date={schedule_date} current_streak(after_inc)={current_streak}")
-                    if streak_start is None:
-                        streak_start = schedule_date
-
-                    # 連続2回目以降は毎回50P
-                    if current_streak >= 2:
-                        sp = int(50 * point_multiplier)
-                        streak_points += sp
-                        print(f"[DEBUG] {schedule_date} 参加 → 連続{current_streak}回目 +{sp}P")
-
-                    # 連続マイルストーン
-                    milestone_bonus = 0
-                    if current_streak == 5 and not milestone_5_achieved:
-                        milestone_bonus = int(500 * point_multiplier)
-                        milestone_5_achieved = True
-                    elif current_streak == 10 and not milestone_10_achieved:
-                        milestone_bonus = int(1000 * point_multiplier)
-                        milestone_10_achieved = True
-                    elif current_streak == 15 and not milestone_15_achieved:
-                        milestone_bonus = int(1500 * point_multiplier)
-                        milestone_15_achieved = True
-                    elif current_streak == 20 and not milestone_20_achieved:
-                        milestone_bonus = int(2000 * point_multiplier)
-                        milestone_20_achieved = True
-                    elif current_streak == 25 and not milestone_25_achieved:
-                        milestone_bonus = int(2500 * point_multiplier)
-                        milestone_25_achieved = True
-
-                    if milestone_bonus > 0:
-                        streak_points += milestone_bonus
-                        print(f"[DEBUG] 連続{current_streak}回達成ボーナス +{milestone_bonus}P")
-
-                    max_streak = max(max_streak, current_streak)
-                else:
-                    if current_streak > 0:
-                        print(f"[DEBUG][streak] reset at date={schedule_date} streak_was={current_streak}")
-                    current_streak = 0
-                    streak_start = None
-                    milestone_5_achieved = False
-                    milestone_10_achieved = False
-                    milestone_15_achieved = False
-                    milestone_20_achieved = False
-                    milestone_25_achieved = False
-
-            print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
-
-            # ===== 月間ボーナス（係数適用、50日ルール適用後） =====
-            monthly_participation = defaultdict(int)
-            for record in participation_records_for_points:
-                month_key = record['event_date'].strftime("%Y-%m")
-                monthly_participation[month_key] += 1
-
-            print(f"\n[DEBUG] 月間ボーナス計算（50日ルール適用後）")
-            monthly_bonuses = {}
-            monthly_bonus_points = 0
-
-            for month, count in sorted(monthly_participation.items()):
-                print(f"[DEBUG] 月別参加回数 - {month}: {count}回")
-
-                base_bonus = 0
-                if count >= 5:
-                    base_bonus = 500
-                if count >= 8:
-                    base_bonus = 800
-                if count >= 10:
-                    base_bonus = 1000
-                if count >= 15:
-                    base_bonus = 1500
-                if count >= 20:
-                    base_bonus = 2000
-
-                bonus = int(base_bonus * point_multiplier)
-                monthly_bonuses[month] = {
-                    'participation_count': count,
-                    'bonus_points': bonus,
-                }
-
-                if bonus > 0:
-                    print(f"[DEBUG] {month} - {count}回参加 → 月間ボーナス: {bonus}P")
-
-                monthly_bonus_points += bonus
-
-            # ===== ポイント消費の集計 =====
-            print(f"\n[DEBUG] ポイント消費チェック")
-            total_points_used = 0
-            payments = self.get_user_payment_history(user_id)
-
-            if last_reset_index > 0:
-                reset_date_str = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
-                payments = [p for p in payments if p.get('event_date', '9999-99-99') >= reset_date_str]
-                print(f"[DEBUG] {reset_date_str} 以降の支払いのみを集計")
-
-            for payment in payments:
-                points_used = int(payment.get("points_used") or 0)
-                if points_used <= 0:
-                    continue
-
-                total_points_used += points_used
-                event_date = payment.get("event_date") or "不明"
-
-                paid_at_raw = (
-                    payment.get("date")
-                    or payment.get("created_at")
-                    or payment.get("transaction_date")
-                    or payment.get("paid_at")
-                    or "不明"
-                )
-                paid_at = iso_to_jst(paid_at_raw) if paid_at_raw != "不明" else "不明"
-
-                print(f"[DEBUG] {event_date} ポイント支払い: {points_used}P (支払日時: {paid_at})")
-
-            print(f"[DEBUG] 合計ポイント消費: {total_points_used}P")
-
-            # ===== 失効カウントダウン =====
-            days_until_reset = None
-            if participation_records:
-                last_participation_date_obj = participation_records[-1]["event_date"]  # datetime
-                today_datetime = datetime.now()
-
-                days_since_last = (today_datetime - last_participation_date_obj).days
-                days_until_reset = RESET_DAYS - days_since_last  # ★ ここを統一
-
-                print(f"\n[DEBUG] 失効カウントダウン")
-                print(f"[DEBUG] 最終参加日: {last_participation_date_obj:%Y-%m-%d}")
-                print(f"[DEBUG] 経過日数: {days_since_last}日")
-                print(f"[DEBUG] 残り日数: {days_until_reset}日")
-
-                # ★ リセット条件と矛盾しない判定
-                #   リセットは「46日以上空いたら」なので、失効状態は days_since_last > RESET_DAYS
-                if days_since_last > RESET_DAYS:
-                    print(f"[DEBUG] 失効状態です（{RESET_DAYS}日超過）")
-
-            # ===== 総ポイント計算 =====
-            uguu_points = (
-                participation_points
-                + streak_points
-                + monthly_bonus_points
-                + cumulative_bonus_points
-                + manual_points
-                - total_points_used
-            )
-
-            result = {
-                'uguu_points': uguu_points,
-                'participation_points': participation_points,
-                'streak_points': streak_points,
-                'monthly_bonus_points': monthly_bonus_points,
-                'cumulative_bonus_points': cumulative_bonus_points,
-                'points_used': total_points_used,
-
-                'total_participation': total_participation_all_time,
-
-                # リセット後期間の内訳
-                'early_registration_count': early_registration_count,   # 〜3日前(100)
-                'direct_registration_count': direct_registration_count, # 2日前〜前日(50)
-
-                # 全期間の内訳
-                'all_time_early_registration_count': all_time_early_count,
-                'all_time_direct_registration_count': all_time_direct_count,
-
-                'last_participation_date': participation_records[-1]['event_date'].strftime('%Y-%m-%d') if participation_records else None,
-                'current_streak_start': streak_start if streak_start else None,
-                'current_streak_count': current_streak,
-                'cumulative_count': cumulative_count,
-                'monthly_bonuses': monthly_bonuses,
-                'is_junior_high': is_junior_high,
-                'is_reset': is_reset,
-                'days_until_reset': days_until_reset,
-                'manual_points': manual_points,
-            }
-
-            print(f"\n[DEBUG] === 最終結果 ===")
-            print(f"[DEBUG] 表示用参加回数: {total_participation_all_time}回")
-            if is_reset:
-                print(f"[DEBUG] ポイントは50日ルールにより途中から計算されています")
-                print(f"[DEBUG] ポイント計算に使った参加回数: {len(participation_records_for_points)}回")
-            if is_junior_high:
-                print(f"[DEBUG] 中学生係数 {point_multiplier}倍 が適用されています")
-            print(f"[DEBUG] 参加ポイント: {participation_points}P")
-            print(f"[DEBUG] 連続ポイント: {streak_points}P")
-            print(f"[DEBUG] 月間ボーナス: {monthly_bonus_points}P")
-            print(f"[DEBUG] 累計ボーナス: {cumulative_bonus_points}P")
-            print(f"[DEBUG] 管理人付与: {manual_points}P")
-            print(f"[DEBUG] ポイント消費: -{total_points_used}P")
-            print(f"[DEBUG] 合計うぐポイント: {uguu_points}P")
-            print("=" * 80)
-
-            return result
-
-        except Exception as e:
-            print(f"[ERROR] うぐポイント計算エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
+    # def get_user_stats(self, user_id: str):
+    #     """
+    #     うぐポイントを計算（中学生は半分のポイント）
+
+    #     【重要な仕様】
+    #     - 参加回数表示：50日ルール適用外（全履歴をカウント）
+    #     - ポイント計算：50日ルール適用（50日以上空いたらリセット）
+    #     - 初回参加だけ200Pを固定で付与する
+    #     - 月内の参加回数に応じてボーナスを付与する（5,7,10,15,20回）
+    #     - 5回ごとの累計ボーナス（+500P）は継続
+    #     """
+    #     try:
+    #         from collections import defaultdict
+    #         from datetime import datetime
+
+    #         FIRST_PARTICIPATION_POINTS = 200  # 初回だけこれを付ける
+
+    #         print(f"\n[DEBUG] うぐポイント計算開始 - user_id: {user_id}")
+    #         print("=" * 80)
+
+    #         # まず管理人付与分を必ず取る
+    #         manual_points = self.get_manual_points(user_id)
+    #         print(f"[DEBUG] 管理人付与ポイント: {manual_points}P")
+
+    #         # ユーザー情報を取得（生年月日を含む）
+    #         user_info = self.get_user_info(user_id)
+    #         is_junior_high = self._is_junior_high_student(user_info)
+    #         point_multiplier = 0.5 if is_junior_high else 1.0
+
+    #         if is_junior_high:
+    #             print(f"[DEBUG] 中学生判定 → ポイント係数: {point_multiplier}倍")
+
+    #         # タイムスタンプ付き参加履歴を取得
+    #         participation_history = self.get_user_participation_history_with_timestamp(user_id)
+
+    #         # 参加履歴が一件もない場合は管理人付与分だけ返す
+    #         if not participation_history:
+    #             print(f"[DEBUG] 参加履歴なし - user_id: {user_id}")
+    #             return {
+    #                 'uguu_points': manual_points,
+    #                 'participation_points': 0,
+    #                 'streak_points': 0,
+    #                 'monthly_bonus_points': 0,
+    #                 'cumulative_bonus_points': 0,
+    #                 'points_used': 0,
+    #                 'total_participation': 0,
+    #                 'last_participation_date': None,
+    #                 'current_streak_start': None,
+    #                 'current_streak_count': 0,
+    #                 'cumulative_count': 0,
+    #                 'monthly_bonuses': {},
+    #                 'early_registration_count': 0,                    
+    #                 'direct_registration_count': 0,
+    #                 'is_junior_high': is_junior_high,
+    #                 'is_reset': False,
+    #                 'days_until_reset': None,
+    #                 'manual_points': manual_points,
+    #                 'base_points': 0,
+    #             }
+
+    #         # 参加履歴をdatetimeにしてソート（cancelled除外）
+    #         participation_records = []
+    #         for record in participation_history:
+    #             try:
+    #                 status = (record.get("status") or "registered").lower()
+    #                 if status == "cancelled":
+    #                     continue
+
+    #                 event_date = datetime.strptime(record["event_date"], "%Y-%m-%d")
+    #                 registered_at = datetime.strptime(record["registered_at"], "%Y-%m-%d %H:%M:%S")
+
+    #                 participation_records.append({
+    #                     "event_date": event_date,
+    #                     "registered_at": registered_at,
+    #                     "status": status,  # デバッグ用に残してもOK
+    #                 })
+
+    #             except (ValueError, KeyError) as e:
+    #                 print(f"[WARN] 不正なレコード形式: {record}, エラー: {e}")
+
+    #         participation_records.sort(key=lambda x: x["event_date"])
+
+    #         # 表示用の全参加回数（50日ルール適用外）
+    #         total_participation_all_time = len(participation_records)
+    #         print(f"\n[DEBUG] 全参加回数（表示用）: {total_participation_all_time}回")
+
+    #         # ===== 全履歴の早期登録カウント（統計用） =====
+    #         all_time_early_count = 0   # 〜3日前(100)
+    #         all_time_direct_count = 0  # 2日前〜前日(50)
+
+    #         for record in participation_records:
+    #             base_points = self._is_early_registration(record)
+    #             if base_points == 100:
+    #                 all_time_early_count += 1
+    #             elif base_points == 50:
+    #                 all_time_direct_count += 1
+
+    #         print(f"[DEBUG] 全履歴の早期登録: 〜3日前(100)={all_time_early_count}回, 2日前〜前日(50)={all_time_direct_count}回")
+
+    #         RESET_DAYS = 50  # 50日ルール（51日以上空いたらリセット）
+
+    #         print(f"\n[DEBUG] {RESET_DAYS}日ルールチェック（ポイント計算用）")
+    #         last_reset_index = 0
+    #         is_reset = False
+
+    #         for i in range(1, len(participation_records)):
+    #             current_date = participation_records[i]["event_date"]
+    #             previous_date = participation_records[i - 1]["event_date"]
+    #             days_diff = (current_date - previous_date).days
+
+    #             if days_diff > RESET_DAYS:
+    #                 print(f"[DEBUG] {RESET_DAYS}日超の空白期間検出（{days_diff}日）")
+    #                 print(f"[DEBUG] {previous_date:%Y-%m-%d} → {current_date:%Y-%m-%d}")
+    #                 print(f"[DEBUG] → ポイントは {current_date:%Y-%m-%d} 以降のみ計算")
+    #                 last_reset_index = i
+    #                 is_reset = True
+
+    #         # RESET_DAYS ルール適用後の履歴（これでポイントを計算する）
+    #         if last_reset_index > 0:
+    #             participation_records_for_points = participation_records[last_reset_index:]
+    #             start_dt = participation_records_for_points[0]["event_date"]
+    #             print(f"[DEBUG] ポイントリセット: {start_dt:%Y-%m-%d} 以降の {len(participation_records_for_points)} 回のみ計算")
+    #             print(f"[DEBUG] 参加回数表示は全 {total_participation_all_time} 回")
+    #         else:
+    #             participation_records_for_points = participation_records
+    #             print(f"[DEBUG] リセットなし: 全 {total_participation_all_time} 回が有効")
+
+    #         # 連続参加チェック用に参加日セットを作る
+    #         user_participated_dates = {
+    #             r["event_date"].strftime("%Y-%m-%d") for r in participation_records_for_points
+    #         }
+
+    #         # ===== 参加ポイント（初回200P・それ以降は早期ポイント） =====
+    #         participation_points = 0
+    #         early_registration_count = 0   # 〜3日前(100)
+    #         direct_registration_count = 0  # 2日前〜前日(50)
+
+    #         cumulative_count = 0
+    #         cumulative_bonus_points = 0
+    #         cumulative_milestones = []
+
+    #         # ★ 生涯初回日（cancelled除外後の最初）
+    #         first_ever_date = participation_records[0]["event_date"]
+
+    #         for idx, record in enumerate(participation_records_for_points, start=1):
+    #             base_points = self._is_early_registration(record)
+
+    #             # 統計用カウント（リセット後の期間だけ）
+    #             if base_points == 100:
+    #                 early_registration_count += 1
+    #             elif base_points == 50:
+    #                 direct_registration_count += 1
+    #             # 0点はカウントしない
+
+    #             # 実際に付けるポイント（生涯初回の1回だけ200P）
+    #             if record["event_date"] == first_ever_date:
+    #                 pts = int(FIRST_PARTICIPATION_POINTS * point_multiplier)
+    #                 participation_points += pts
+    #                 print(f"[DEBUG] 初回参加(生涯初回) → +{pts}P")
+    #             else:
+    #                 pts = int(base_points * point_multiplier)
+    #                 participation_points += pts
+    #                 print(f"[DEBUG] 通常参加 → base:{base_points}P → +{pts}P")
+
+    #             # 累計ボーナス（5回ごとに +500P）
+    #             cumulative_count += 1
+    #             if cumulative_count % 5 == 0:
+    #                 bonus = int(500 * point_multiplier)
+    #                 cumulative_bonus_points += bonus
+    #                 cumulative_milestones.append({
+    #                     'date': record['event_date'].strftime('%Y-%m-%d'),
+    #                     'count': cumulative_count,
+    #                     'bonus': bonus,
+    #                 })
+    #                 print(f"[DEBUG] 累計{cumulative_count}回達成 → ボーナス +{bonus}P")
+
+    #         print(f"[DEBUG] 参加ポイント合計: {participation_points}P")
+    #         print(f"[DEBUG] 累計参加ボーナス合計: {cumulative_bonus_points}P")
+
+    #         # ===== 連続参加ボーナス =====
+    #         today = datetime.now(JST).date()
+    #         all_schedules = self.get_all_past_schedules(today)            
+    #         all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
+
+    #         if last_reset_index > 0:
+    #             reset_date = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
+    #             all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
+    #             print(f"\n[DEBUG] 連続参加チェック（{reset_date} 以降のスケジュールのみ）")
+    #         else:
+    #             print(f"\n[DEBUG] 連続参加チェック（全スケジュール）")
+
+    #         print(f"[DEBUG] 対象練習回数: {len(all_schedules)}回")
+    #         print(f"[DEBUG] ユーザー参加: {len(user_participated_dates)}回")
+
+    #         streak_points = 0
+    #         current_streak = 0
+    #         max_streak = 0
+    #         streak_start = None
+
+    #         milestone_5_achieved = False
+    #         milestone_10_achieved = False
+    #         milestone_15_achieved = False
+    #         milestone_20_achieved = False
+    #         milestone_25_achieved = False
+
+    #         for schedule in all_schedules:
+    #             schedule_date = schedule['date']
+    #             is_participated = schedule_date in user_participated_dates
+
+    #             if is_participated:
+    #                 current_streak += 1
+    #                 print(f"[DEBUG][streak] participated date={schedule_date} current_streak(after_inc)={current_streak}")
+    #                 if streak_start is None:
+    #                     streak_start = schedule_date
+
+    #                 # 連続2回目以降は毎回50P
+    #                 if current_streak >= 2:
+    #                     sp = int(50 * point_multiplier)
+    #                     streak_points += sp
+    #                     print(f"[DEBUG] {schedule_date} 参加 → 連続{current_streak}回目 +{sp}P")
+
+    #                 # 連続マイルストーン
+    #                 milestone_bonus = 0
+    #                 if current_streak == 5 and not milestone_5_achieved:
+    #                     milestone_bonus = int(500 * point_multiplier)
+    #                     milestone_5_achieved = True
+    #                 elif current_streak == 10 and not milestone_10_achieved:
+    #                     milestone_bonus = int(1000 * point_multiplier)
+    #                     milestone_10_achieved = True
+    #                 elif current_streak == 15 and not milestone_15_achieved:
+    #                     milestone_bonus = int(1500 * point_multiplier)
+    #                     milestone_15_achieved = True
+    #                 elif current_streak == 20 and not milestone_20_achieved:
+    #                     milestone_bonus = int(2000 * point_multiplier)
+    #                     milestone_20_achieved = True
+    #                 elif current_streak == 25 and not milestone_25_achieved:
+    #                     milestone_bonus = int(2500 * point_multiplier)
+    #                     milestone_25_achieved = True
+
+    #                 if milestone_bonus > 0:
+    #                     streak_points += milestone_bonus
+    #                     print(f"[DEBUG] 連続{current_streak}回達成ボーナス +{milestone_bonus}P")
+
+    #                 max_streak = max(max_streak, current_streak)
+    #             else:
+    #                 if current_streak > 0:
+    #                     print(f"[DEBUG][streak] reset at date={schedule_date} streak_was={current_streak}")
+    #                 current_streak = 0
+    #                 streak_start = None
+    #                 milestone_5_achieved = False
+    #                 milestone_10_achieved = False
+    #                 milestone_15_achieved = False
+    #                 milestone_20_achieved = False
+    #                 milestone_25_achieved = False
+
+    #         print(f"[DEBUG] 連続ポイント合計: {streak_points}P")
+
+    #         # ===== 月間ボーナス（係数適用、50日ルール適用後） =====
+    #         monthly_participation = defaultdict(int)
+    #         for record in participation_records_for_points:
+    #             month_key = record['event_date'].strftime("%Y-%m")
+    #             monthly_participation[month_key] += 1
+
+    #         print(f"\n[DEBUG] 月間ボーナス計算（50日ルール適用後）")
+    #         monthly_bonuses = {}
+    #         monthly_bonus_points = 0
+
+    #         for month, count in sorted(monthly_participation.items()):
+    #             print(f"[DEBUG] 月別参加回数 - {month}: {count}回")
+
+    #             base_bonus = 0
+    #             if count >= 5:
+    #                 base_bonus = 500
+    #             if count >= 8:
+    #                 base_bonus = 800
+    #             if count >= 10:
+    #                 base_bonus = 1000
+    #             if count >= 15:
+    #                 base_bonus = 1500
+    #             if count >= 20:
+    #                 base_bonus = 2000
+
+    #             bonus = int(base_bonus * point_multiplier)
+    #             monthly_bonuses[month] = {
+    #                 'participation_count': count,
+    #                 'bonus_points': bonus,
+    #             }
+
+    #             if bonus > 0:
+    #                 print(f"[DEBUG] {month} - {count}回参加 → 月間ボーナス: {bonus}P")
+
+    #             monthly_bonus_points += bonus
+
+    #         # ===== ポイント消費の集計 =====
+    #         print(f"\n[DEBUG] ポイント消費チェック")
+    #         total_points_used = 0
+    #         payments = self.get_user_payment_history(user_id)
+
+    #         if last_reset_index > 0:
+    #             reset_date_str = participation_records_for_points[0]['event_date'].strftime('%Y-%m-%d')
+    #             payments = [p for p in payments if p.get('event_date', '9999-99-99') >= reset_date_str]
+    #             print(f"[DEBUG] {reset_date_str} 以降の支払いのみを集計")
+
+    #         for payment in payments:
+    #             points_used = int(payment.get("points_used") or 0)
+    #             if points_used <= 0:
+    #                 continue
+
+    #             total_points_used += points_used
+    #             event_date = payment.get("event_date") or "不明"
+
+    #             paid_at_raw = (
+    #                 payment.get("date")
+    #                 or payment.get("created_at")
+    #                 or payment.get("transaction_date")
+    #                 or payment.get("paid_at")
+    #                 or "不明"
+    #             )
+    #             paid_at = iso_to_jst(paid_at_raw) if paid_at_raw != "不明" else "不明"
+
+    #             print(f"[DEBUG] {event_date} ポイント支払い: {points_used}P (支払日時: {paid_at})")
+
+    #         print(f"[DEBUG] 合計ポイント消費: {total_points_used}P")
+
+    #         # ===== 失効カウントダウン =====
+    #         days_until_reset = None
+    #         if participation_records:
+    #             last_participation_date_obj = participation_records[-1]["event_date"]  # datetime
+    #             today_datetime = datetime.now()
+
+    #             days_since_last = (today_datetime - last_participation_date_obj).days
+    #             days_until_reset = RESET_DAYS - days_since_last  # ★ ここを統一
+
+    #             print(f"\n[DEBUG] 失効カウントダウン")
+    #             print(f"[DEBUG] 最終参加日: {last_participation_date_obj:%Y-%m-%d}")
+    #             print(f"[DEBUG] 経過日数: {days_since_last}日")
+    #             print(f"[DEBUG] 残り日数: {days_until_reset}日")
+
+    #             # ★ リセット条件と矛盾しない判定
+    #             #   リセットは「46日以上空いたら」なので、失効状態は days_since_last > RESET_DAYS
+    #             if days_since_last > RESET_DAYS:
+    #                 print(f"[DEBUG] 失効状態です（{RESET_DAYS}日超過）")
+
+    #         # ===== 総ポイント計算 =====
+    #         uguu_points = (
+    #             participation_points
+    #             + streak_points
+    #             + monthly_bonus_points
+    #             + cumulative_bonus_points
+    #             + manual_points
+    #             - total_points_used
+    #         )
+
+    #         result = {
+    #             'uguu_points': uguu_points,
+    #             'participation_points': participation_points,
+    #             'streak_points': streak_points,
+    #             'monthly_bonus_points': monthly_bonus_points,
+    #             'cumulative_bonus_points': cumulative_bonus_points,
+    #             'points_used': total_points_used,
+
+    #             'total_participation': total_participation_all_time,
+
+    #             # リセット後期間の内訳
+    #             'early_registration_count': early_registration_count,   # 〜3日前(100)
+    #             'direct_registration_count': direct_registration_count, # 2日前〜前日(50)
+
+    #             # 全期間の内訳
+    #             'all_time_early_registration_count': all_time_early_count,
+    #             'all_time_direct_registration_count': all_time_direct_count,
+
+    #             'last_participation_date': participation_records[-1]['event_date'].strftime('%Y-%m-%d') if participation_records else None,
+    #             'current_streak_start': streak_start if streak_start else None,
+    #             'current_streak_count': current_streak,
+    #             'cumulative_count': cumulative_count,
+    #             'monthly_bonuses': monthly_bonuses,
+    #             'is_junior_high': is_junior_high,
+    #             'is_reset': is_reset,
+    #             'days_until_reset': days_until_reset,
+    #             'manual_points': manual_points,
+    #         }
+
+    #         print(f"\n[DEBUG] === 最終結果 ===")
+    #         print(f"[DEBUG] 表示用参加回数: {total_participation_all_time}回")
+    #         if is_reset:
+    #             print(f"[DEBUG] ポイントは50日ルールにより途中から計算されています")
+    #             print(f"[DEBUG] ポイント計算に使った参加回数: {len(participation_records_for_points)}回")
+    #         if is_junior_high:
+    #             print(f"[DEBUG] 中学生係数 {point_multiplier}倍 が適用されています")
+    #         print(f"[DEBUG] 参加ポイント: {participation_points}P")
+    #         print(f"[DEBUG] 連続ポイント: {streak_points}P")
+    #         print(f"[DEBUG] 月間ボーナス: {monthly_bonus_points}P")
+    #         print(f"[DEBUG] 累計ボーナス: {cumulative_bonus_points}P")
+    #         print(f"[DEBUG] 管理人付与: {manual_points}P")
+    #         print(f"[DEBUG] ポイント消費: -{total_points_used}P")
+    #         print(f"[DEBUG] 合計うぐポイント: {uguu_points}P")
+    #         print("=" * 80)
+
+    #         return result
+
+    #     except Exception as e:
+    #         print(f"[ERROR] うぐポイント計算エラー: {str(e)}")
+    #         import traceback
+    #         traceback.print_exc()
+    #         return {
+    #             'uguu_points': 0,
+    #             'participation_points': 0,
+    #             'streak_points': 0,
+    #             'monthly_bonus_points': 0,
+    #             'cumulative_bonus_points': 0,
+    #             'points_used': 0,
+    #             'total_participation': 0,
+    #             'early_registration_count': 0,
+    #             'super_early_registration_count': 0,
+    #             'direct_registration_count': 0,
+    #             'last_participation_date': None,
+    #             'current_streak_start': None,
+    #             'current_streak_count': 0,
+    #             'cumulative_count': 0,
+    #             'monthly_bonuses': {},
+    #             'is_junior_high': False,
+    #             'is_reset': False,
+    #             'days_until_reset': None
+    #         }   
+    #      
+ 
+    # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
+    def get_user_stats(self, user_id: str, raw_history=None, spends=None):
+        rules = PointRules(reset_days=60, first_participation_points=200)
+
+        manual_points = self.get_manual_points(user_id)
+
+        ENABLE_JUNIOR_HIGH_DISCOUNT = False
+        JUNIOR_HIGH_MULTIPLIER = 0.5
+
+        user_info = self.get_user_info(user_id)
+        is_junior_high = self._is_junior_high_student(user_info)
+
+        point_multiplier = (
+            JUNIOR_HIGH_MULTIPLIER
+            if ENABLE_JUNIOR_HIGH_DISCOUNT and is_junior_high
+            else 1.0
+        )
+
+        # ★ raw_history が渡ってきたらそれを使う
+        if raw_history is None:
+            raw_history = self.get_user_participation_history_with_timestamp(user_id)
+
+        records_all = normalize_participation_history(raw_history)
+
+        if not records_all:
             return {
-                'uguu_points': 0,
+                'uguu_points': manual_points,
                 'participation_points': 0,
                 'streak_points': 0,
                 'monthly_bonus_points': 0,
                 'cumulative_bonus_points': 0,
                 'points_used': 0,
                 'total_participation': 0,
-                'early_registration_count': 0,
-                'super_early_registration_count': 0,
-                'direct_registration_count': 0,
                 'last_participation_date': None,
                 'current_streak_start': None,
                 'current_streak_count': 0,
                 'cumulative_count': 0,
                 'monthly_bonuses': {},
-                'is_junior_high': False,
+                'early_registration_count': 0,
+                'direct_registration_count': 0,
+                'all_time_early_registration_count': 0,
+                'all_time_direct_registration_count': 0,
+                'is_junior_high': is_junior_high,
                 'is_reset': False,
-                'days_until_reset': None
+                'days_until_reset': None,
+                'manual_points': manual_points,
             }
+
+        # リセット判定
+        last_reset_index, is_reset = calc_reset_index(records_all, rules.reset_days)
+        records_for_points = slice_records_for_points(records_all, last_reset_index)
+        print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
+
+        # ★リセットが発生している場合、手動ポイントもリセット
+        if last_reset_index > 0:
+            print(f"[DBG] Reset occurred at index {last_reset_index}, clearing manual_points")
+            manual_points = 0
+
+        all_time_early, all_time_direct = calc_registration_counts(records_all, self._is_early_registration)
+
+        pc = calc_participation_and_cumulative(
+            records_all=records_all,
+            records_for_points=records_for_points,
+            rules=rules,
+            point_multiplier=point_multiplier,
+            is_early_registration_fn=self._is_early_registration,
+        )
+        participation_points = pc.get("participation_points", 0)
+        cumulative_count = pc.get("cumulative_count", 0)
+        cumulative_bonus_points = pc.get("cumulative_bonus_points", 0)
+        early_registration_count = pc.get("early_registration_count", 0)
+        direct_registration_count = pc.get("direct_registration_count", 0)
+
+        monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
+
+        print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
+        print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
+
+        # 連続ポイント
+        from datetime import datetime
+        today = datetime.now(JST).date()
+        all_schedules = self.get_all_past_schedules(today)
+        all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
+
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            all_schedules = [s for s in all_schedules if s['date'] >= reset_date]
+            print(f"\n[DEBUG] 連続参加チェック（{reset_date} 以降のスケジュールのみ）")
+        else:
+            print(f"\n[DEBUG] 連続参加チェック（全スケジュール）")
+
+        streak_points, current_streak_count, max_streak, current_streak_start = calc_streak_points(
+            records_for_points=records_for_points,
+            all_schedules=all_schedules,
+            rules=rules,
+            point_multiplier=point_multiplier,
+        )
+
+        print(f"[DBG] streak_points={streak_points}, current_streak={current_streak_count}")
+
+        # ★ spend 合計の取り方（amount 以外も吸収）
+        def _pick_spend_amount(s: dict) -> int:
+            v = s.get("points_used")
+            if v is not None:
+                try:
+                    return int(v)
+                except Exception:
+                    pass
+
+            v = s.get("delta_points")
+            if v is not None:
+                try:
+                    return abs(int(v))
+                except Exception:
+                    pass
+
+            v = s.get("amount")
+            if v is not None:
+                try:
+                    return int(v)
+                except Exception:
+                    pass
+
+            return 0
+
+        # ★spends も渡ってきたらそれを使う（二重取得防止）
+        # ※注意：spends が「直近20件」だと合計がズレるので、渡す側は limit=1000 推奨
+        if spends is None:
+            spends = self.list_point_spends(user_id, limit=1000)
+
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            spends_after_reset = [s for s in spends if (s.get("event_date", "") or "") >= reset_date]
+            total_points_used = sum(_pick_spend_amount(s) for s in spends_after_reset)
+            print(f"[DBG] Reset at {reset_date}: points_used={total_points_used} from {len(spends_after_reset)}/{len(spends)} records")
+        else:
+            total_points_used = sum(_pick_spend_amount(s) for s in spends)
+            print(f"[DBG] total_points_used={total_points_used} from {len(spends)} records")
+
+        last_dt = records_all[-1].event_date
+        days_until_reset = calc_days_until_reset(last_dt, rules.reset_days)
+
+        total_participation_all_time = len(records_all)
+
+        uguu_points = (
+            participation_points
+            + streak_points
+            + monthly_bonus_points
+            + cumulative_bonus_points
+            + manual_points
+            - total_points_used
+        )
+
+        print(f"[DEBUG] Before reset check: uguu_points={uguu_points}, is_reset={is_reset}")
+
+        if is_reset:
+            print(f"[DEBUG] Resetting points! Before: uguu={uguu_points}, participation={participation_points}")
+            uguu_points = 0
+            participation_points = 0
+            streak_points = 0
+            monthly_bonus_points = 0
+            cumulative_bonus_points = 0
+            manual_points = 0
+            print(f"[DEBUG] After reset: uguu={uguu_points}")
+
+        print(f"[DEBUG] Final uguu_points={uguu_points}")
+
+        return {
+            'uguu_points': uguu_points,
+            'participation_points': participation_points,
+            'streak_points': streak_points,
+            'monthly_bonus_points': monthly_bonus_points,
+            'cumulative_bonus_points': cumulative_bonus_points,
+            'points_used': total_points_used,
+
+            'total_participation': total_participation_all_time,
+
+            'early_registration_count': early_registration_count,
+            'direct_registration_count': direct_registration_count,
+
+            'all_time_early_registration_count': all_time_early,
+            'all_time_direct_registration_count': all_time_direct,
+
+            'last_participation_date': last_dt.strftime('%Y-%m-%d') if last_dt else None,
+            'current_streak_start': current_streak_start,
+            'current_streak_count': current_streak_count,
+            'cumulative_count': cumulative_count,
+            'monthly_bonuses': monthly_bonuses,
+            'is_junior_high': is_junior_high,
+            'is_reset': is_reset,
+            'days_until_reset': days_until_reset,
+            'manual_points': manual_points,
+        }
         
     def calc_total_points_spent(self, user_id: str, since: str | None = None) -> int:
         """
@@ -2402,6 +2642,45 @@ class DynamoDB:
         print(f"[DEBUG] 合計ポイント消費(ledger): {total}P / 件数: {len(items)}"
             + (f" / since={since}" if since else ""))
         return total   
+
+    # ===== ポイント失効関連メソッド =====
+    
+    def disable_user_points(self, user_id):
+        """ユーザーのポイントを失効させる"""
+        try:
+            self.users_table.update_item(
+                Key={'user_id': user_id},
+                UpdateExpression='SET points_disabled = :val',
+                ExpressionAttributeValues={':val': True}
+            )
+            print(f"[INFO] ポイント失効: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] ポイント失効失敗: {e}")
+            return False
+
+    def enable_user_points(self, user_id):
+        """ユーザーのポイント失効を解除"""
+        try:
+            self.users_table.update_item(
+                Key={'user_id': user_id},
+                UpdateExpression='SET points_disabled = :val',
+                ExpressionAttributeValues={':val': False}
+            )
+            print(f"[INFO] ポイント失効解除: user_id={user_id}")
+            return True
+        except Exception as e:
+            print(f"[ERROR] ポイント失効解除失敗: {e}")
+            return False
+
+    def get_display_points(self, user_data):
+        """
+        表示用のポイントを取得
+        points_disabled=Trueの場合は0を返す
+        """
+        if user_data.get('points_disabled', False):
+            return 0
+        return user_data.get('points', 0)
     
 
 def record_spend(history_table, *, user_id: str, points_used: int,
@@ -2412,7 +2691,7 @@ def record_spend(history_table, *, user_id: str, points_used: int,
     """
     now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     tx_id = str(uuid4())
-    joined_at = f"points#spend#{now}#{tx_id}"
+    joined_at = f"points#spend#{now}#{tx_id}"  # ← 既存設計を維持するならそのまま
 
     item = {
         "user_id": user_id,
@@ -2424,10 +2703,14 @@ def record_spend(history_table, *, user_id: str, points_used: int,
         "payment_type": payment_type,
         "event_date": event_date,
         "reason": reason or f"{event_date}の参加費",
-        "created_at": now,
+        "created_at": now,   # レコード作成時刻
+        "paid_at": now,      # ★支払い確定時刻（新規追加）
         "entity_type": "point_transaction",
         "version": 1,
     }
+
+    if created_by is not None:
+        item["created_by"] = created_by
 
     history_table.put_item(
         Item=item,

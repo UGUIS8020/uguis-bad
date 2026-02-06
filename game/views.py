@@ -8,7 +8,7 @@ from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 from flask import session
 from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, Player, generate_balanced_pairs_and_matches, sync_match_entries_with_updated_skills
-import pytz
+from utils.timezone import JST
 import re
 from decimal import Decimal
 
@@ -119,7 +119,7 @@ def _now_utc_iso():
     return datetime.now(timezone.utc).isoformat()
 
 def _since_iso(hours=12):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="milliseconds")
 
 def _scan_all(table, **kwargs):
     """DynamoDB Scanのページネーション吸収（必要最小限で）"""
@@ -330,6 +330,7 @@ def court_status_api():
 #get_players_status
 #主にコートの参加者（参加中 or 休憩中）のリスト表示やフィルタに使う。
 #user_id を指定した場合は、ログイン中ユーザーの status を確認する目的にも使える
+
 def get_players_status(status, user_id=None):
     try:
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
@@ -878,7 +879,7 @@ def update_players_to_playing(matches, match_id, match_table):
     current_app.logger.info(f"🟢 [START] update_players_to_playing - match_id: {match_id}")
 
     # 例: 2025-09-02T14:25:00+09:00
-    now_iso = datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()
+    now_iso = datetime.now(JST).isoformat()
 
     for match_idx, match in enumerate(matches):
         try:
@@ -1134,7 +1135,7 @@ def finish_current_match():
                     ConditionExpression="entry_status = :playing AND match_id = :mid",
                     ExpressionAttributeValues={
                         ":pending": "pending",
-                        ":now": datetime.now(pytz.timezone("Asia/Tokyo")).isoformat(),
+                        ":now": datetime.now(JST).isoformat(),                        
                         ":playing": "playing",
                         ":mid": match_id,
                     }
@@ -1705,7 +1706,7 @@ def submit_score(match_id, court_number):
         result_table = current_app.dynamodb.Table("bad-game-results")
 
         # タイムスタンプを生成（タイムゾーン付き）
-        timestamp = datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()
+        timestamp = datetime.now(JST).isoformat()
         
         # 結果アイテムを作成
         result_item = {
