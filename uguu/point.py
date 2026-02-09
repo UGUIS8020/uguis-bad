@@ -1,8 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Set
+from utils.timezone import JST
 
 @dataclass(frozen=True)
 class ParticipationRecord:
@@ -131,30 +132,6 @@ def calc_participation_and_cumulative(
         "direct_registration_count": direct_count,
     }
 
-# def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_multiplier: float) -> Tuple[int, Dict[str, Any]]:
-#     monthly_participation = defaultdict(int)
-#     for r in records_for_points:
-#         monthly_participation[r.event_date.strftime("%Y-%m")] += 1
-
-#     print("[DBG monthly keys]", sorted(r.event_date.strftime("%Y-%m-%d") for r in records_for_points))
-#     print("[DBG monthly counts]", dict(sorted(monthly_participation.items())))
-
-#     monthly_bonus_points = 0
-#     monthly_bonuses: Dict[str, Any] = {}
-
-#     for month, count in sorted(monthly_participation.items()):
-#         base_bonus = 0
-#         if count >= 5: base_bonus = 500
-#         if count >= 8: base_bonus = 800
-#         if count >= 10: base_bonus = 1000
-#         if count >= 15: base_bonus = 1500
-#         if count >= 20: base_bonus = 2000
-
-#         bonus = int(base_bonus * point_multiplier)
-#         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
-#         monthly_bonus_points += bonus
-
-#     return monthly_bonus_points, monthly_bonuses
 
 def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_multiplier: float) -> Tuple[int, Dict[str, Any]]:
     monthly_participation = defaultdict(int)
@@ -167,7 +144,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 4 else 400 + (count - 4) * 200
+        base_bonus = 0 if count < 4 else 500 + (count - 4) * 200
         bonus = int(base_bonus * point_multiplier)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
@@ -333,3 +310,108 @@ def better(a, b) -> bool:
 
     # どちらも無ければ現状維持
     return False
+
+def _is_junior_high_student(self, user_info):
+        """
+        生年月日から中学生以下かどうかを判定
+        日本の学年は4月1日基準
+        生年月日がない場合は対象外とみなす
+        """
+        # ユーザー情報がない、または生年月日がない場合は対象外
+        if not user_info or not user_info.get('birth_date'):
+            print(f"[DEBUG] 生年月日なし → ポイント半減対象外として扱う")
+            return False
+        
+        try:
+            from datetime import datetime
+            
+            birth_date = user_info['birth_date']
+            
+            # 文字列の場合はdatetimeに変換
+            if isinstance(birth_date, str):
+                birth_date = datetime.strptime(birth_date, '%Y-%m-%d')
+            
+            today = datetime.now(JST).date()
+            
+            # 年齢を計算
+            age = today.year - birth_date.year
+            
+            # 誕生日前なら-1
+            if (today.month, today.day) < (birth_date.month, birth_date.day):
+                age -= 1
+            
+            # 学年を計算（4月1日基準）
+            # 4月1日以前なら、前の学年
+            if today.month < 4 or (today.month == 4 and today.day == 1):
+                school_year_age = age - 1
+            else:
+                school_year_age = age
+            
+            # 中学生以下は14歳以下
+            # 小学生：6～11歳、中学生：12～14歳
+            is_junior_high_or_below = school_year_age <= 14
+            
+            grade_info = ""
+            if 6 <= school_year_age <= 11:
+                grade_info = f"(小学{school_year_age - 5}年相当)"
+            elif 12 <= school_year_age <= 14:
+                grade_info = f"(中学{school_year_age - 11}年相当)"
+            elif school_year_age < 6:
+                grade_info = "(未就学)"
+            
+            print(f"[DEBUG] 生年月日: {birth_date.strftime('%Y-%m-%d')}, 年齢: {age}歳, 学年年齢: {school_year_age}歳{grade_info}, 中学生以下: {is_junior_high_or_below}")
+            
+            return is_junior_high_or_below
+            
+        except Exception as e:
+            print(f"[WARN] 中学生以下判定エラー: {str(e)} → ポイント半減対象外として扱う")
+            return False
+
+
+def _is_junior_high_or_below(user_info):  # ← selfを削除
+    """
+    生年月日から中学生以下（小学生＋中学生）かどうかを判定
+    日本の学年は4月1日基準
+    生年月日がない場合は対象外とみなす
+    """
+    if not user_info or not user_info.get('birth_date'):
+        print(f"[DEBUG] 生年月日なし → ポイント半減対象外として扱う")
+        return False
+    
+    try:
+        birth_date = user_info['birth_date']
+        
+        if isinstance(birth_date, str):
+            birth_date = datetime.strptime(birth_date, '%Y-%m-%d')
+        
+        today = datetime.now(JST).date()
+        
+        # 現在の年度を計算（4月1日は前年度扱い）
+        if today.month < 4 or (today.month == 4 and today.day == 1):
+            current_fiscal_year = today.year - 1
+        else:
+            current_fiscal_year = today.year
+        
+        # 生まれた年度を計算
+        if birth_date.month < 4 or (birth_date.month == 4 and birth_date.day == 1):
+            birth_fiscal_year = birth_date.year - 1
+        else:
+            birth_fiscal_year = birth_date.year
+        
+        # 学年を計算（小1=0, 中3=8, 高1=9）
+        school_grade = current_fiscal_year - birth_fiscal_year - 6
+        
+        # 中学生以下は学年0〜8
+        is_target = 0 <= school_grade <= 8
+        
+        age = today.year - birth_date.year
+        if (today.month, today.day) < (birth_date.month, birth_date.day):
+            age -= 1
+        
+        print(f"[DEBUG] 生年月日: {birth_date.strftime('%Y-%m-%d')}, 年齢: {age}歳, 中学生以下: {is_target}")
+        
+        return is_target
+        
+    except Exception as e:
+        print(f"[WARN] 中学生以下判定エラー: {str(e)} → ポイント半減対象外として扱う")
+        return False

@@ -834,23 +834,228 @@ def get_schedules():
     schedules = get_schedules_with_formatting()
     return jsonify(schedules)     
 
+# @app.route("/", methods=['GET'])
+# @app.route("/index", methods=['GET'])
+# def index():
+#     try:
+#         start_time = time.time()
+        
+#         # 軽量なスケジュール情報のみ取得
+#         schedules = get_schedules_with_formatting()
+
+#         # DynamoDB ユーザーテーブル
+#         user_table = current_app.dynamodb.Table(app.table_name)
+
+#         db_access_count = 0  # DynamoDBアクセス回数をカウント
+#         total_users = 0  # 取得したユーザー数
+        
+#         for schedule in schedules:
+#             # --- 参加者 ---
+#             participants_info = []
+#             raw_participants = schedule.get("participants", [])
+#             user_ids = []
+
+#             # 参加者IDの抽出（複数形式に対応）
+#             for item in raw_participants:
+#                 if isinstance(item, dict) and "S" in item:
+#                     user_ids.append(item["S"])
+#                 elif isinstance(item, dict) and "user_id" in item:
+#                     user_ids.append(item["user_id"])
+#                 elif isinstance(item, str):
+#                     user_ids.append(item)
+
+#             # ユーザー詳細を取得
+#             db_start = time.time()
+#             for uid in user_ids:
+#                 try:
+#                     res = user_table.get_item(Key={"user#user_id": uid})
+#                     db_access_count += 1  # アクセスカウント
+#                     user = res.get("Item")
+#                     if not user:
+#                         continue
+
+#                     total_users += 1
+
+#                     # 画像URLは複数候補からフォールバック
+#                     url = (user.get("profile_image_url")
+#                            or user.get("profileImageUrl")
+#                            or user.get("large_image_url")
+#                            or "")
+#                     url = url.strip() if isinstance(url, str) else None
+
+#                     raw_practice = user.get("practice_count")
+#                     try:
+#                         join_count = int(raw_practice) if raw_practice is not None else 0
+#                     except (ValueError, TypeError):
+#                         join_count = 0
+
+#                     participants_info.append({
+#                         "user_id": user["user#user_id"],
+#                         "display_name": user.get("display_name", "不明"),
+#                         "profile_image_url": url if url and url.lower() != "none" else None,
+#                         "is_admin": bool(user.get("administrator")),
+#                         "join_count": join_count,
+#                     })
+#                 except Exception as e:
+#                     logger.error(f"参加者取得エラー ({uid}): {e}")
+#                     pass
+
+#             # 管理者を先頭にソート
+#             participants_info.sort(
+#                 key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
+#             )
+#             schedule["participants_info"] = participants_info
+
+#             # --- たら参加者 ---
+#             tara_participants_info = []
+#             raw_tara = schedule.get("tara_participants", [])
+#             tara_ids = []
+
+#             for item in raw_tara:
+#                 if isinstance(item, dict) and "S" in item:
+#                     tara_ids.append(item["S"])
+#                 elif isinstance(item, dict) and "user_id" in item:
+#                     tara_ids.append(item["user_id"])
+#                 elif isinstance(item, str):
+#                     tara_ids.append(item)
+
+#             for uid in tara_ids:
+#                 try:
+#                     res = user_table.get_item(Key={"user#user_id": uid})
+#                     db_access_count += 1  # アクセスカウント
+#                     user = res.get("Item")
+#                     if not user:
+#                         continue
+
+#                     total_users += 1
+
+#                     url = (user.get("profile_image_url")
+#                            or user.get("profileImageUrl")
+#                            or user.get("large_image_url")
+#                            or "")
+#                     url = url.strip() if isinstance(url, str) else None
+
+#                     tara_participants_info.append({
+#                         "user_id": user["user#user_id"],
+#                         "display_name": user.get("display_name", "不明"),
+#                         "profile_image_url": url if url and url.lower() != "none" else None,
+#                         "is_admin": bool(user.get("administrator")),
+#                     })
+#                 except Exception as e:
+#                     logger.error(f"たら参加者取得エラー ({uid}): {e}")
+#                     pass
+
+#             tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
+#             schedule["tara_participants_info"] = tara_participants_info
+#             schedule["tara_participants"] = tara_ids
+#             schedule["tara_count"] = len(tara_ids)
+
+#         total_time = time.time() - start_time
+        
+#         # ★ パフォーマンスログ（旧方式）
+#         logger.info(f"[index:旧方式] DynamoDBアクセス回数: {db_access_count}回")
+#         logger.info(f"[index:旧方式] 取得ユーザー数: {total_users}人")
+#         logger.info(f"[index:旧方式] 合計処理時間: {total_time:.3f}秒")
+#         logger.info(f"[index:旧方式] 平均アクセス時間: {(total_time/db_access_count):.3f}秒/回" if db_access_count > 0 else "[index:旧方式] アクセスなし")
+
+#         # トップ画像
+#         image_files = [
+#             'images/top001.jpg',
+#             'images/top002.jpg',  # ★ typo修正
+#             'images/top003.jpg',
+#             'images/top004.jpg',
+#             'images/top005.jpg'
+#         ]
+#         selected_image = random.choice(image_files)
+
+#         return render_template(
+#             "index.html",
+#             schedules=schedules,
+#             selected_image=selected_image,
+#             canonical=url_for('index', _external=True)
+#         )
+
+#     except Exception as e:
+#         logger.error(f"[index] スケジュール取得エラー: {e}")
+#         flash('スケジュールの取得中にエラーが発生しました', 'error')
+#         return render_template(
+#             "index.html",
+#             schedules=[],
+#             selected_image='images/default.jpg'
+#         )
+
+
 @app.route("/", methods=['GET'])
 @app.route("/index", methods=['GET'])
 def index():
     try:
-        # 軽量なスケジュール情報のみ取得
+        start_time = time.time()
+        
         schedules = get_schedules_with_formatting()
-
-        # DynamoDB ユーザーテーブル
         user_table = current_app.dynamodb.Table(app.table_name)
-
+        
+        # ★ 全スケジュールから参加者IDを集める
+        all_user_ids = set()
+        for schedule in schedules:
+            # 参加者
+            for item in schedule.get("participants", []):
+                if isinstance(item, dict) and "S" in item:
+                    all_user_ids.add(item["S"])
+                elif isinstance(item, dict) and "user_id" in item:
+                    all_user_ids.add(item["user_id"])
+                elif isinstance(item, str):
+                    all_user_ids.add(item)
+            
+            # たら参加者
+            for item in schedule.get("tara_participants", []):
+                if isinstance(item, dict) and "S" in item:
+                    all_user_ids.add(item["S"])
+                elif isinstance(item, dict) and "user_id" in item:
+                    all_user_ids.add(item["user_id"])
+                elif isinstance(item, str):
+                    all_user_ids.add(item)
+        
+        logger.info(f"[index] 取得するユーザー数: {len(all_user_ids)}")
+        
+        # ★ バッチで一括取得（最大100件ずつ）
+        user_cache = {}
+        user_ids_list = list(all_user_ids)
+        batch_count = 0
+        
+        batch_start = time.time()
+        for i in range(0, len(user_ids_list), 100):
+            batch_ids = user_ids_list[i:i+100]
+            keys = [{"user#user_id": uid} for uid in batch_ids]
+            
+            try:
+                response = current_app.dynamodb.batch_get_item(
+                    RequestItems={
+                        app.table_name: {
+                            'Keys': keys
+                        }
+                    }
+                )
+                batch_count += 1
+                
+                for user in response.get('Responses', {}).get(app.table_name, []):
+                    user_id = user.get("user#user_id")
+                    if user_id:
+                        user_cache[user_id] = user
+                        
+            except Exception as e:
+                logger.error(f"バッチ取得エラー: {e}")
+        
+        batch_time = time.time() - batch_start
+        logger.info(f"[index] DynamoDBバッチ取得: {batch_count}回, {batch_time:.3f}秒, キャッシュ件数: {len(user_cache)}")
+        
+        # ★ キャッシュから参加者情報を構築
+        process_start = time.time()
         for schedule in schedules:
             # --- 参加者 ---
             participants_info = []
             raw_participants = schedule.get("participants", [])
             user_ids = []
-
-            # 参加者IDの抽出（複数形式に対応）
+            
             for item in raw_participants:
                 if isinstance(item, dict) and "S" in item:
                     user_ids.append(item["S"])
@@ -858,50 +1063,42 @@ def index():
                     user_ids.append(item["user_id"])
                 elif isinstance(item, str):
                     user_ids.append(item)
-
-            # ユーザー詳細を取得
+            
             for uid in user_ids:
+                user = user_cache.get(uid)
+                if not user:
+                    continue
+                
+                url = (user.get("profile_image_url")
+                       or user.get("profileImageUrl")
+                       or user.get("large_image_url")
+                       or "")
+                url = url.strip() if isinstance(url, str) else None
+                
+                raw_practice = user.get("practice_count")
                 try:
-                    res = user_table.get_item(Key={"user#user_id": uid})
-                    user = res.get("Item")
-                    if not user:
-                        continue
-
-                    # 画像URLは複数候補からフォールバック
-                    url = (user.get("profile_image_url")
-                           or user.get("profileImageUrl")
-                           or user.get("large_image_url")
-                           or "")
-                    url = url.strip() if isinstance(url, str) else None
-
-                    raw_practice = user.get("practice_count")
-                    try:
-                        join_count = int(raw_practice) if raw_practice is not None else 0
-                    except (ValueError, TypeError):
-                        join_count = 0
-
-                    participants_info.append({
-                        "user_id": user["user#user_id"],
-                        "display_name": user.get("display_name", "不明"),
-                        "profile_image_url": url if url and url.lower() != "none" else None,
-                        "is_admin": bool(user.get("administrator")),
-                        "join_count": join_count,   # ★これが必要
-                    })
-                except Exception:
-                    # 個別の取得失敗はスキップ（全体は継続）
-                    pass
-
-            # 管理者を先頭にソート
+                    join_count = int(raw_practice) if raw_practice is not None else 0
+                except (ValueError, TypeError):
+                    join_count = 0
+                
+                participants_info.append({
+                    "user_id": user["user#user_id"],
+                    "display_name": user.get("display_name", "不明"),
+                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "is_admin": bool(user.get("administrator")),
+                    "join_count": join_count,
+                })
+            
             participants_info.sort(
                 key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
             )
             schedule["participants_info"] = participants_info
-
+            
             # --- たら参加者 ---
             tara_participants_info = []
             raw_tara = schedule.get("tara_participants", [])
             tara_ids = []
-
+            
             for item in raw_tara:
                 if isinstance(item, dict) and "S" in item:
                     tara_ids.append(item["S"])
@@ -909,51 +1106,52 @@ def index():
                     tara_ids.append(item["user_id"])
                 elif isinstance(item, str):
                     tara_ids.append(item)
-
+            
             for uid in tara_ids:
-                try:
-                    res = user_table.get_item(Key={"user#user_id": uid})
-                    user = res.get("Item")
-                    if not user:
-                        continue
-
-                    url = (user.get("profile_image_url")
-                           or user.get("profileImageUrl")
-                           or user.get("large_image_url")
-                           or "")
-                    url = url.strip() if isinstance(url, str) else None
-
-                    tara_participants_info.append({
-                        "user_id": user["user#user_id"],
-                        "display_name": user.get("display_name", "不明"),
-                        "profile_image_url": url if url and url.lower() != "none" else None,
-                        "is_admin": bool(user.get("administrator")),
-                    })
-                except Exception:
-                    pass
-
+                user = user_cache.get(uid)
+                if not user:
+                    continue
+                
+                url = (user.get("profile_image_url")
+                       or user.get("profileImageUrl")
+                       or user.get("large_image_url")
+                       or "")
+                url = url.strip() if isinstance(url, str) else None
+                
+                tara_participants_info.append({
+                    "user_id": user["user#user_id"],
+                    "display_name": user.get("display_name", "不明"),
+                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "is_admin": bool(user.get("administrator")),
+                })
+            
             tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
             schedule["tara_participants_info"] = tara_participants_info
             schedule["tara_participants"] = tara_ids
             schedule["tara_count"] = len(tara_ids)
-
-        # トップ画像
+        
+        process_time = time.time() - process_start
+        total_time = time.time() - start_time
+        
+        logger.info(f"[index] 参加者情報処理: {process_time:.3f}秒")
+        logger.info(f"[index] 合計処理時間: {total_time:.3f}秒")
+        
         image_files = [
             'images/top001.jpg',
-            'images[top002.jpg',
+            'images/top002.jpg',
             'images/top003.jpg',
             'images/top004.jpg',
             'images/top005.jpg'
         ]
         selected_image = random.choice(image_files)
-
+        
         return render_template(
             "index.html",
             schedules=schedules,
             selected_image=selected_image,
             canonical=url_for('index', _external=True)
         )
-
+        
     except Exception as e:
         logger.error(f"[index] スケジュール取得エラー: {e}")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
@@ -962,6 +1160,7 @@ def index():
             schedules=[],
             selected_image='images/default.jpg'
         )
+    
     
 @app.route("/schedule_koyomi", methods=['GET'])
 @app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
