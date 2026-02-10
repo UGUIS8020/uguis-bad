@@ -765,8 +765,11 @@ class DynamoDB:
         def classify_local(rec: dict) -> str:
             status = (rec.get("status") or "registered").lower()
             action = rec.get("action")
+            source = rec.get("source")
             if status == "cancelled":
                 return "cancelled"
+            if action in EXCLUDE_ACTIONS or source == "admin_manual":  # ← 追加
+                return "other"
             if action in EXCLUDE_ACTIONS:
                 return "other"
             if action == TARA_ACTION:
