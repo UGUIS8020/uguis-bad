@@ -1450,10 +1450,10 @@ def generate_match_id():
     return match_id
 
 
-@bp_game.route('/rest', methods=['GET', 'POST'])
+@bp_game.route('/rest', methods=['POST'])
 @login_required
 def rest():
-    """休憩モードに切り替え"""
+    """休憩モードに切り替え（POSTのみ）"""
     try:
         current_entry = get_user_current_entry(current_user.get_id())
         if current_entry:
@@ -1465,13 +1465,11 @@ def rest():
                     ':time': datetime.now().isoformat()
                 }
             )
-            flash('休憩モードになりました', 'info')
-        
     except Exception as e:
         current_app.logger.error(f'休憩エラー: {e}')
-        flash('休憩モードの設定に失敗しました', 'danger')
-    
+
     return redirect(url_for('game.court'))
+
 
 @bp_game.route('/api/toggle_player_status', methods=['POST'])
 @login_required
@@ -1554,6 +1552,7 @@ def toggle_player_status():
     except Exception as e:
         current_app.logger.error(f'状態変更エラー: {e}', exc_info=True)
         return jsonify({'success': False, 'message': f'エラーが発生しました: {str(e)}'}), 500
+    
 
 @bp_game.route('/resume', methods=['POST'])
 @login_required
@@ -1567,19 +1566,16 @@ def resume():
                 UpdateExpression='SET entry_status = :status, match_id = :match_id, resumed_at = :time',
                 ExpressionAttributeValues={
                     ':status': 'pending',
-                    ':match_id': 'pending',  # ← ここが重要！
-                    ':time': datetime.now().isoformat()
+                    ':match_id': 'pending',
+                    ':time': datetime.now(JST).isoformat()  # ← JST追加
                 }
             )
-            flash('復帰しました！試合をお待ちください', 'success')
-        else:
-            flash('現在のエントリが見つかりませんでした', 'warning')
 
     except Exception as e:
         current_app.logger.error(f'復帰エラー: {e}')
-        flash('復帰に失敗しました', 'danger')
     
     return redirect(url_for('game.court'))
+
 
 @bp_game.route('/leave_court', methods=['POST'])
 @login_required

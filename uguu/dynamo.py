@@ -1930,7 +1930,7 @@ class DynamoDB:
       
     
         # プロフィール表示用：うぐポイント等の集計（履歴テーブルのみで計算）
-    def get_user_stats(self, user_id: str, raw_history=None, spends=None):
+    def get_user_stats(self, user_id: str, raw_history=None, spends=None, all_schedules=None):
         rules = PointRules(reset_days=60, first_participation_points=200)
 
         manual_points = self.get_manual_points(user_id)
@@ -2007,8 +2007,10 @@ class DynamoDB:
         # 連続ポイント
         from datetime import datetime
         today = datetime.now(JST).date()
-        all_schedules = self.get_all_past_schedules(today)
-        all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
+
+        if all_schedules is None:
+            all_schedules = self.get_all_past_schedules(today)
+            all_schedules.sort(key=lambda s: datetime.strptime(s["date"], "%Y-%m-%d").date())
 
         if last_reset_index > 0 and records_for_points:
             reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
