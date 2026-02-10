@@ -591,10 +591,10 @@
                             console.log('エントリー者が0人になりました');
                         } else {
                             const emptyDuration = Date.now() - emptyStartTime;
-                            const tenMinutes = 10 * 60 * 1000;
+                            const fiveMinutes = 5 * 60 * 1000;
                             
-                            if (emptyDuration >= tenMinutes) {
-                                console.log('10分間エントリー者がいないため、自動的にトップページへ移動');
+                            if (emptyDuration >= fiveMinutes) {
+                                console.log('5分間エントリー者がいないため、自動的にトップページへ移動');
                                 window.location.href = '/';
                                 return;
                             }
