@@ -1803,7 +1803,7 @@ def login():
                 session.permanent = True  # セッションを永続化
                 login_user(user, remember=True)  # 常にremember=Trueに設定
                 
-                flash('ログインに成功しました。', 'success')
+                flash('ログインしました。', 'success')
                 
                 next_page = request.args.get('next')
                 if not next_page or not is_safe_url(next_page):
