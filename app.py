@@ -1344,13 +1344,12 @@ def join_schedule(schedule_id):
 
         user_id = current_user.id
 
-        # 現在の参加者 / たら参加者
         participants = schedule.get('participants', []) or []
         tara_participants = schedule.get('tara_participants', []) or []
 
         history_table = app.dynamodb.Table("bad-users-history")
+        users_table = app.dynamodb.Table("bad-users")  # ★追加：最終参加日更新用
 
-        # timezone-aware UTC（DynamoDB保存はこれで統一推奨）
         now_utc_iso = datetime.now(timezone.utc).isoformat()
 
         # 参加キャンセル
@@ -1359,7 +1358,7 @@ def join_schedule(schedule_id):
             message = "参加をキャンセルしました"
             is_joining = False
 
-            # 1) 既存の履歴を「cancelled」に更新（あなたの既存関数を利用）
+            # 1) 既存の履歴を「cancelled」に更新（既存関数）
             try:
                 db.cancel_participation(user_id, date, schedule_id)
                 app.logger.info(
@@ -1368,8 +1367,7 @@ def join_schedule(schedule_id):
             except Exception as e:
                 app.logger.error(f"[cancel_participation エラー]: {e}")
 
-            # 2) 保険として「キャンセル」履歴も1件追加（後の集計が安定）
-            #    ※この1件が最新になり、同日の状態が cancelled として扱われます。
+            # 2) 保険として「キャンセル」履歴も1件追加
             try:
                 history_table.put_item(
                     Item={
@@ -1385,6 +1383,9 @@ def join_schedule(schedule_id):
             except Exception as e:
                 app.logger.error(f"[キャンセル履歴保存エラー] bad-users-history: {e}")
 
+            # ※キャンセル時は last_participation_date を更新しない（巻き戻しが必要になるため）
+            #   必要になったら後で仕様を決めて実装
+
         # 参加登録（正式参加）
         else:
             participants.append(user_id)
@@ -1394,16 +1395,18 @@ def join_schedule(schedule_id):
             # 正式参加したら「たら」から自動削除
             if user_id in tara_participants:
                 tara_participants.remove(user_id)
-                app.logger.info(f"✓ ユーザー {user_id} の「たら」を自動削除しました (schedule_id={schedule_id}, date={date})")
+                app.logger.info(
+                    f"✓ ユーザー {user_id} の「たら」を自動削除しました (schedule_id={schedule_id}, date={date})"
+                )
 
-            # 参加回数カウントは初回だけ（従来仕様を維持）
+            # 参加回数カウントは初回だけ（従来仕様）
             if not previously_joined(schedule_id, user_id):
                 try:
                     increment_practice_count(user_id)
                 except Exception as e:
                     app.logger.error(f"[practice_count 更新エラー]: {e}")
 
-            # 履歴は「毎回」追加してOK（同日の最新レコードが正式参加として残る）
+            # 履歴は「毎回」追加
             try:
                 history_table.put_item(
                     Item={
@@ -1419,15 +1422,27 @@ def join_schedule(schedule_id):
             except Exception as e:
                 app.logger.error(f"[履歴保存エラー] bad-users-history: {e}")
 
+            # ★追加：最終参加日を bad-users に反映（registered のときだけ）
+            try:
+                update_last_participation(users_table, user_id=user_id, event_date=date)
+                app.logger.info(f"✓ last_participation_date updated: user_id={user_id}, date={date}")
+            except Exception as e:
+                app.logger.error(f"[last_participation 更新エラー] bad-users: {e}")
+
         # スケジュール更新（participants / count / tara も一緒に更新）
         schedule_table.update_item(
             Key={'schedule_id': schedule_id, 'date': date},
-            UpdateExpression="SET participants = :participants, participants_count = :count, tara_participants = :tara, updated_at = :ua",
+            UpdateExpression=(
+                "SET participants = :participants, "
+                "participants_count = :count, "
+                "tara_participants = :tara, "
+                "updated_at = :ua"
+            ),
             ExpressionAttributeValues={
                 ':participants': participants,
                 ':count': len(participants),
                 ':tara': tara_participants,
-                ':ua': now_utc_iso,  # ここもUTCで統一
+                ':ua': now_utc_iso,
             }
         )
 
@@ -1449,6 +1464,32 @@ def join_schedule(schedule_id):
     except Exception as e:
         app.logger.error(f"Unexpected error in join_schedule: {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': '予期しないエラーが発生しました。'}), 500
+    
+
+def update_last_participation(users_table, user_id: str, event_date: str):
+    """
+    bad-users の最終参加日を更新（registered のときに呼ぶ）
+    user_id: "uuid..."
+    event_date: "YYYY-MM-DD"
+    """
+    now_utc_iso = datetime.now(timezone.utc).isoformat()
+
+    users_table.update_item(
+        Key={"user#user_id": f"user#{user_id}"},  # ★ここが重要（画像で確定）
+        UpdateExpression=(
+            "SET last_participation_date = :d, "
+            "recent_pk = :pk, "
+            "recent_sk = :sk, "
+            "last_participation_updated_at = :u"
+        ),
+        ExpressionAttributeValues={
+            ":d": event_date,
+            ":pk": "recent",            
+            ":sk": f"1#{event_date}#{user_id}",
+            ":u": now_utc_iso,
+        },
+    )
+    
     
 @app.route('/tara_join', methods=['POST'])
 @login_required
@@ -1835,65 +1876,132 @@ def logout():
     return redirect("/")
 
 
-@app.route("/user_maintenance", methods=["GET", "POST"])
+# @app.route("/user_maintenance", methods=["GET", "POST"])
+# @login_required
+# def user_maintenance():
+#     try:
+#         # ソートパラメータを取得
+#         sort_by = request.args.get('sort_by', 'created_at')  # デフォルトは作成日
+#         order = request.args.get('order', 'desc')  # デフォルトは降順
+        
+#         # テーブルからすべてのユーザーを取得
+#         response = app.table.scan()
+        
+#         # ユーザーデータを処理
+#         users = response.get('Items', [])        
+#         for user in users:
+#             if 'user#user_id' in user:
+#                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
+            
+#             # ポイント情報を取得
+#             try:
+#                 user_stats = uguu_db.get_user_stats(user['user_id'])
+#                 user['points'] = user_stats.get('uguu_points', 0)
+#                 user['total_participation'] = user_stats.get('total_participation', 0)
+                
+#                 # デバッグ出力（最初のユーザーのみ）
+#                 if users.index(user) == 0:
+#                     print(f"[DEBUG] First user - user_id: {user['user_id']}")
+#                     print(f"[DEBUG] uguu_points: {user['points']}")
+#                     print(f"[DEBUG] total_participation: {user['total_participation']}")
+#             except Exception as e:
+#                 print(f"[ERROR] Failed to get stats for user {user.get('user_id', 'unknown')}: {e}")
+#                 user['points'] = 0
+#                 user['total_participation'] = 0
+        
+#         # ソート処理
+#         reverse = (order == 'desc')
+        
+#         if sort_by == 'points':
+#             sorted_users = sorted(users, key=lambda x: x.get('points', 0), reverse=reverse)
+#         elif sort_by == 'total_participation':
+#             sorted_users = sorted(users, key=lambda x: x.get('total_participation', 0), reverse=reverse)
+#         elif sort_by == 'user_name':
+#             sorted_users = sorted(users, key=lambda x: x.get('user_name', ''), reverse=reverse)
+#         elif sort_by == 'created_at':
+#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=reverse)
+#         else:
+#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=True)
+        
+#         return render_template("user_maintenance.html", 
+#                              users=sorted_users, 
+#                              page=1, 
+#                              has_next=False,
+#                              sort_by=sort_by,
+#                              order=order)
+#     except Exception as e:
+#         print(f"[ERROR] Error in user_maintenance: {str(e)}")
+#         import traceback
+#         traceback.print_exc()
+#         flash('ユーザー一覧の読み込み中にエラーが発生しました。', 'error')
+#         return redirect(url_for('index'))
+    
+
+# ポイントと参加回数を無効化したバージョン：
+def _encode_lek(lek: dict) -> str:
+    raw = json.dumps(lek, ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("utf-8")
+
+def _decode_lek(token: str) -> dict:
+    raw = base64.urlsafe_b64decode(token.encode("utf-8"))
+    return json.loads(raw.decode("utf-8"))
+
+@app.route("/user_maintenance", methods=["GET"])
 @login_required
 def user_maintenance():
     try:
-        # ソートパラメータを取得
-        sort_by = request.args.get('sort_by', 'created_at')  # デフォルトは作成日
-        order = request.args.get('order', 'desc')  # デフォルトは降順
-        
-        # テーブルからすべてのユーザーを取得
-        response = app.table.scan()
-        
-        # ユーザーデータを処理
-        users = response.get('Items', [])        
-        for user in users:
-            if 'user#user_id' in user:
-                user['user_id'] = user.pop('user#user_id').replace('user#', '')
-            
-            # ポイント情報を取得
+        # 1ページ件数
+        limit = int(request.args.get("limit", 30))
+        limit = max(1, min(limit, 100))
+
+        # 次ページ用トークン（LastEvaluatedKey）
+        next_token_in = request.args.get("next")
+
+        query_kwargs = {
+            "IndexName": "gsi_recent_users",
+            "KeyConditionExpression": Key("recent_pk").eq("recent"),
+            "ScanIndexForward": False,  # ★新しい順（降順）
+            "Limit": limit,
+        }
+
+        if next_token_in:
             try:
-                user_stats = uguu_db.get_user_stats(user['user_id'])
-                user['points'] = user_stats.get('uguu_points', 0)
-                user['total_participation'] = user_stats.get('total_participation', 0)
-                
-                # デバッグ出力（最初のユーザーのみ）
-                if users.index(user) == 0:
-                    print(f"[DEBUG] First user - user_id: {user['user_id']}")
-                    print(f"[DEBUG] uguu_points: {user['points']}")
-                    print(f"[DEBUG] total_participation: {user['total_participation']}")
-            except Exception as e:
-                print(f"[ERROR] Failed to get stats for user {user.get('user_id', 'unknown')}: {e}")
-                user['points'] = 0
-                user['total_participation'] = 0
-        
-        # ソート処理
-        reverse = (order == 'desc')
-        
-        if sort_by == 'points':
-            sorted_users = sorted(users, key=lambda x: x.get('points', 0), reverse=reverse)
-        elif sort_by == 'total_participation':
-            sorted_users = sorted(users, key=lambda x: x.get('total_participation', 0), reverse=reverse)
-        elif sort_by == 'user_name':
-            sorted_users = sorted(users, key=lambda x: x.get('user_name', ''), reverse=reverse)
-        elif sort_by == 'created_at':
-            sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=reverse)
-        else:
-            sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=True)
-        
-        return render_template("user_maintenance.html", 
-                             users=sorted_users, 
-                             page=1, 
-                             has_next=False,
-                             sort_by=sort_by,
-                             order=order)
+                query_kwargs["ExclusiveStartKey"] = _decode_lek(next_token_in)
+            except Exception:
+                query_kwargs.pop("ExclusiveStartKey", None)
+
+        # ★ scan ではなく query にする
+        response = app.table.query(**query_kwargs)
+        users = response.get("Items", [])
+
+        # user_id 正規化 & statsは無効
+        for user in users:
+            # bad-users のPKは user#user_id
+            if "user#user_id" in user:
+                user["user_id"] = user["user#user_id"].replace("user#", "")
+            user["points"] = None
+            user["total_participation"] = None
+
+        # 次ページがあるか判定
+        lek = response.get("LastEvaluatedKey")
+        next_token_out = _encode_lek(lek) if lek else None
+
+        return render_template(
+            "user_maintenance.html",
+            users=users,
+            sort_by="last_participation",
+            order="desc",
+            limit=limit,
+            next_token=next_token_out,
+            stats_disabled=True,
+        )
+
     except Exception as e:
         print(f"[ERROR] Error in user_maintenance: {str(e)}")
         import traceback
         traceback.print_exc()
-        flash('ユーザー一覧の読み込み中にエラーが発生しました。', 'error')
-        return redirect(url_for('index'))
+        flash("ユーザー一覧の読み込み中にエラーが発生しました。", "error")
+        return redirect(url_for("index"))
 
 @app.route("/table_info")
 def get_table_info():
