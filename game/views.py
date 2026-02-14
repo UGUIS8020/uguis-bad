@@ -2311,24 +2311,7 @@ def submit_score(match_id, court_number):
             current_app.logger.info(f"DynamoDB応答: {response}")
         except Exception as e:
             current_app.logger.error(f"❌ 結果保存エラー: {str(e)}")
-            return "スコアの保存に失敗しました", 500
-
-        # スキルスコア更新と同期
-        # try:
-        #     # スキルスコアを更新して返り値を取得
-        #     updated_skills = update_trueskill_for_players_and_return_updates(result_item)
-            
-        #     # エントリーテーブルも同期して更新
-        #     sync_count = sync_match_entries_with_updated_skills(entry_mapping, updated_skills)
-        #     current_app.logger.info(f"エントリーテーブル同期完了: {sync_count}件のエントリーを更新")
-        # except Exception as e:
-        #     current_app.logger.error(f"[TrueSkill 更新/同期エラー] {str(e)}")
-        #     import traceback
-        #     current_app.logger.error(traceback.format_exc())
-        #     # エラーがあってもスコア自体は保存されているので、200を返す
-        #     return "スコアは保存されましたが、スキルスコアの更新に失敗しました", 200
-
-        # # JavaScriptが制御するので明示的にリダイレクトせずOKだけ返す
+            return "スコアの保存に失敗しました", 500        
         return "", 200
 
     except Exception as e:
