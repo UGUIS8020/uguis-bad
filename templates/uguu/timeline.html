@@ -713,7 +713,7 @@ io = new IntersectionObserver((entries) => {
   if (entries[0].isIntersecting) loadMore();
 }, { root: null, rootMargin: "0px 0px 400px 0px", threshold: 0.01 });
 
-// ✅ cursor があるときだけ監視
+// cursor があるときだけ監視
 if (getCursor()) {
   sentinel.style.display = "flex";
   io.observe(sentinel);

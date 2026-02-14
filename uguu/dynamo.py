@@ -259,7 +259,7 @@ class DynamoDB:
             names["#content"] = "content"
             values[":content"] = content
 
-            # ✅ content編集したらフィード順も更新（上に上げる）
+            # content編集したらフィード順も更新（上に上げる）
             updates.append("#updated_at = :now")
             updates.append("#feed_ts = :now")
             names["#updated_at"] = "updated_at"
@@ -322,7 +322,7 @@ class DynamoDB:
             with self.replies_table.batch_writer() as batch:
                 while True:
                     kwargs = {
-                        # ✅ replies は post_id / sk がキー
+                        # replies は post_id / sk がキー
                         "KeyConditionExpression": Key("post_id").eq(str(post_id)) & Key("sk").begins_with("REPLY#"),
                         "ProjectionExpression": "post_id, sk",
                     }

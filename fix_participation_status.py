@@ -172,7 +172,7 @@ def find_invalid_status_records(db, date_participants_map):
                 print(f"   ... 他 {len(records) - 5}件")
             print()
     else:
-        print("✅ 修正が必要なレコードは見つかりませんでした")
+        print("修正が必要なレコードは見つかりませんでした")
     
     return invalid_records, stats
 

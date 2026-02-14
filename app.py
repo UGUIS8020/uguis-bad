@@ -140,7 +140,7 @@ def create_app():
         login_manager.init_app(app)
         login_manager.session_protection = "strong"
         # ブループリント使用時は 'auth.login' など正しい endpoint 名に直す
-        login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "auth.login")
+        login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "login")
         login_manager.login_message = 'このページにアクセスするにはログインが必要です。'
 
         return app
@@ -666,7 +666,7 @@ class User(UserMixin):
 #                         else:
 #                             skill_score = None
 
-#                         # ✅ 参加回数（practice_count）を取得
+#                         # 参加回数（practice_count）を取得
 #                         raw_practice = user.get('practice_count')
 #                         join_count = int(raw_practice) if isinstance(raw_practice, (Decimal, int, float)) else None
 
@@ -1687,6 +1687,8 @@ def signup():
         "followers_count": 0,
         "following_count": 0,
         "posts_count": 0,
+        "skill_score": Decimal("50.0"),  # 現在のプレイヤー平均に合わせる
+         "skill_sigma": Decimal("8.333"),  # TrueSkillのデフォルト
     }
 
     try:
@@ -1762,7 +1764,8 @@ def temp_register():
                 "organization": "仮登録",
                 "created_at": current_time,
                 "administrator": False,
-                "skill_score": skill_score,
+                "skill_score": skill_score,                
+                "skill_sigma": Decimal("8.333"),
                 "date_of_birth": form.date_of_birth.data.isoformat()
             }
 

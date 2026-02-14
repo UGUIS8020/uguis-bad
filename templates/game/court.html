@@ -191,33 +191,34 @@
             </h1>
         
             <!-- 自分のステータス表示（中央） -->
-            <div class="d-flex justify-content-center mt-3">
-                {% if is_registered %}
-                    <!-- 参加済み（クリック不可） -->
-                    <button class="btn btn-success btn-lg px-5 py-3" disabled>
-                        <i class="fas fa-check-circle me-2"></i>
-                        <span class="fw-bold">試合開始までお待ちください</span>
+                <div class="d-flex justify-content-center mt-3">
+                {% if is_playing %}
+                    <button class="btn btn-primary btn-lg px-5 py-3" disabled>
+                    <i class="fas fa-play me-2"></i>
+                    <span class="fw-bold">試合中</span>
                     </button>
+
                 {% elif is_resting %}
                     <button class="btn btn-warning btn-lg px-5 py-3" disabled>
-                        <i class="fas fa-coffee me-2"></i>
-                        <span class="fw-bold">休憩中</span>
+                    <i class="fas fa-coffee me-2"></i>
+                    <span class="fw-bold">休憩中</span>
                     </button>
-                {% elif is_playing %}
-                    <button class="btn btn-primary btn-lg px-5 py-3" disabled>
-                        <i class="fas fa-play me-2"></i>
-                        <span class="fw-bold">試合中</span>
+
+                {% elif is_registered %}
+                    <button class="btn btn-success btn-lg px-5 py-3" disabled>
+                    <i class="fas fa-check-circle me-2"></i>
+                    <span class="fw-bold">試合開始までお待ちください</span>
                     </button>
+
                 {% else %}
-                    <!-- 未参加（クリック可能） -->
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
-                        <button type="submit" class="btn btn-primary btn-lg px-5 py-3">
-                            <i class="fas fa-sign-in-alt me-2"></i>
-                            <span class="fw-bold">参加</span>
-                        </button>
+                    <button type="submit" class="btn btn-primary btn-lg px-5 py-3">
+                        <i class="fas fa-sign-in-alt me-2"></i>
+                        <span class="fw-bold">参加</span>
+                    </button>
                     </form>
                 {% endif %}
-            </div>
+                </div>
 
 <!-- あなたの状態カード -->
 <div class="card status-card mt-4 mb-4">

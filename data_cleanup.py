@@ -138,7 +138,7 @@ def find_duplicates(db):
             
             print()
     else:
-        print("✅ 重複レコードは見つかりませんでした")
+        print("重複レコードは見つかりませんでした")
     
     return duplicates, total_extra_records
 
@@ -270,7 +270,7 @@ def export_to_csv(duplicates, filename='duplicates_report.csv'):
                 cancelled_times
             ])
     
-    print(f"\n✅ レポートを {filename} に出力しました")
+    print(f"\nレポートを {filename} に出力しました")
 
 
 def main():
@@ -306,9 +306,9 @@ def main():
     # DynamoDB接続
     try:
         db = DynamoDB()
-        print("\n✅ DynamoDBに接続しました\n")
+        print("\nDynamoDBに接続しました\n")
     except Exception as e:
-        print(f"❌ DynamoDB接続エラー: {e}")
+        print(f"DynamoDB接続エラー: {e}")
         return
     
     # 重複検出
