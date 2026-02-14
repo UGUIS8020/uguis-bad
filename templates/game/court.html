@@ -14,15 +14,13 @@
         }
         
         .status-card {
+            width: 80%;
+            margin: 0 auto;
             border-radius: 15px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
             transition: transform 0.2s ease;
-        }
-        
-        .status-card:hover {
-            transform: translateY(-2px);
-        }
+        }             
         
         .player-count {
             font-size: 2.5rem;
@@ -222,7 +220,7 @@
 
 <!-- あなたの状態カード -->
 <div class="card status-card mt-4 mb-4">
-    <div class="card-header bg-info text-white">
+    <div class="card-header bg-dark text-white">
         <h4 class="mb-0 d-flex align-items-center justify-content-center text-center" style="font-size: 1.8rem;">
             <i class="fas fa-user-circle me-2 fa-lg"></i> 
             <strong>{{ current_user.display_name }}</strong>
