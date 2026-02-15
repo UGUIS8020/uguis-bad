@@ -1531,9 +1531,28 @@ def perform_pairing(entries, match_id, max_courts=6):
 @bp_game.route("/finish_current_match", methods=["POST"])
 @login_required
 def finish_current_match():
+    """
+    ✅ 安全版 finish_current_match
+
+    目的:
+    - meta#current が playing のときだけ終了処理
+    - 「全コート分のスコア送信が揃っていない場合」は 409 で拒否（重要）
+    - 送信が揃ってから TrueSkill 更新 → エントリー同期 → meta解除&playing→pending を確定
+
+    前提:
+    - meta#current に court_count を保存している（推奨）
+    - bad-game-results に match_id + court_number の結果が保存される
+    """
+
+    import re
+    from datetime import datetime
+    import boto3
+    from botocore.exceptions import ClientError
+    from boto3.dynamodb.conditions import Attr
+
     try:
         # =========================================================
-        # 0) meta#current から進行中 match_id を取得
+        # 0) meta#current から進行中 match_id / court_count を取得
         # =========================================================
         meta_pk = "meta#current"
         meta_table = current_app.dynamodb.Table("bad-game-matches")
@@ -1544,35 +1563,88 @@ def finish_current_match():
         status = meta_item.get("status")
         match_id = meta_item.get("current_match_id")
 
+        # court_count は "3" のように str の可能性があるので int へ
+        court_count_raw = meta_item.get("court_count")
+        try:
+            court_count = int(court_count_raw) if court_count_raw is not None else None
+        except Exception:
+            court_count = None
+
         if status != "playing" or not match_id:
             current_app.logger.warning(
                 "⚠️ アクティブな試合が見つかりません(meta). status=%s, current_match_id=%s",
                 status, match_id
             )
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "error": "アクティブな試合が見つかりません"}), 400
             return "アクティブな試合が見つかりません", 400
 
-        current_app.logger.info("🏁 試合終了処理開始(meta): match_id=%s", match_id)
+        current_app.logger.info("🏁 試合終了処理開始(meta): match_id=%s court_count=%s", match_id, court_count)
 
         # (任意) ID形式チェック
         if not re.compile(r"^\d{8}_\d{6}$").match(match_id):
             current_app.logger.warning("⚠️ 非標準形式の試合ID: %s", match_id)
 
         now_jst = datetime.now(JST).isoformat()
-        
-        # 直接 boto3 client を作成
-        import boto3
-        dynamodb_client = boto3.client('dynamodb', region_name='ap-northeast-1')
+
+        # 直接 boto3 client を作成（Transaction 用）
+        dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
 
         # =========================================================
-        # 1) playing プレイヤー一覧（後で transaction に使う）
+        # 1) 「全コート送信済み」チェック（ここが最重要）
+        #    → 未送信があれば finish させない（409）
+        # =========================================================
+        results_table = current_app.dynamodb.Table("bad-game-results")
+
+        def scan_all_results_for_match(mid: str):
+            items = []
+            kwargs = {"FilterExpression": Attr("match_id").eq(mid)}
+            while True:
+                resp = results_table.scan(**kwargs)
+                items.extend(resp.get("Items", []))
+                lek = resp.get("LastEvaluatedKey")
+                if not lek:
+                    break
+                kwargs["ExclusiveStartKey"] = lek
+            return items
+
+        match_results = scan_all_results_for_match(match_id)
+        submitted_results_count = len(match_results)
+
+        # court_count が取れるなら厳密にチェック（推奨）
+        if court_count is not None:
+            if submitted_results_count < court_count:
+                current_app.logger.warning(
+                    "⚠️ 未送信コートあり: submitted=%d required=%d match_id=%s",
+                    submitted_results_count, court_count, match_id
+                )
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return jsonify({
+                        "success": False,
+                        "error": f"未送信のコートがあります（{submitted_results_count}/{court_count}）"
+                    }), 409
+                return f"未送信のコートがあります（{submitted_results_count}/{court_count}）", 409
+        else:
+            # court_count が無い場合は「結果が0なら拒否」程度の緩い安全策
+            # ※本当は meta に court_count を必ず入れる運用にしてください
+            if submitted_results_count == 0:
+                current_app.logger.warning("⚠️ 結果が0件のため終了できません: match_id=%s", match_id)
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return jsonify({"success": False, "error": "スコアが未送信のため終了できません"}), 409
+                return "スコアが未送信のため終了できません", 409
+
+        current_app.logger.info("🎮 試合結果数(送信済み): %d", submitted_results_count)
+
+        # =========================================================
+        # 2) playing プレイヤー一覧（後で transaction に使う）
         # =========================================================
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
 
-        def scan_all_playing():
+        def scan_all_playing(mid: str):
             items = []
             kwargs = {
                 "FilterExpression": (
-                    Attr("match_id").eq(match_id) &
+                    Attr("match_id").eq(mid) &
                     Attr("entry_status").eq("playing") &
                     ~Attr("entry_id").contains("meta")
                 ),
@@ -1586,10 +1658,12 @@ def finish_current_match():
                 kwargs["ExclusiveStartKey"] = lek
             return items
 
-        playing_players = scan_all_playing()
+        playing_players = scan_all_playing(match_id)
 
         if len(playing_players) > 24:
             current_app.logger.error("playing_players too many: %d", len(playing_players))
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "error": "playingプレイヤー数が多すぎます"}), 500
             return "playingプレイヤー数が多すぎます", 500
 
         player_mapping = {
@@ -1599,25 +1673,9 @@ def finish_current_match():
         }
 
         # =========================================================
-        # 2) TrueSkill 更新（これは transaction に入れない）
+        # 3) TrueSkill 更新（ここはトランザクションに入れない）
+        #    ※全コート揃っていることを確認後に実施
         # =========================================================
-        results_table = current_app.dynamodb.Table("bad-game-results")
-        
-        def scan_all_results():
-            items = []
-            kwargs = {"FilterExpression": Attr("match_id").eq(match_id)}
-            while True:
-                resp = results_table.scan(**kwargs)
-                items.extend(resp.get("Items", []))
-                lek = resp.get("LastEvaluatedKey")
-                if not lek:
-                    break
-                kwargs["ExclusiveStartKey"] = lek
-            return items
-
-        match_results = scan_all_results()
-        current_app.logger.info("🎮 試合結果数: %d", len(match_results))
-
         updated_skills = {}
         skill_update_count = 0
 
@@ -1653,19 +1711,19 @@ def finish_current_match():
         current_app.logger.info("✅ スキル更新完了: %d/%dコート", skill_update_count, len(match_results))
 
         # =========================================================
-        # 3) エントリーテーブル同期（スキル値の反映）
+        # 4) エントリーテーブル同期（スキル値の反映）
         # =========================================================
         sync_count = sync_match_entries_with_updated_skills(player_mapping, updated_skills)
         current_app.logger.info("✅ エントリーテーブル同期完了: %d件", sync_count)
 
         # =========================================================
-        # 4) ✅ meta解除 + playing→pending を 1トランザクションで確定
+        # 5) ✅ meta解除 + playing→pending を 1トランザクションで確定
         #    meta(1) + 最大24人 = 25件（上限内）
-        # =========================================================       
-
+        # =========================================================
         tx_items = []
 
         # (a) meta を idle に戻す（status=playing かつ current_match_id 一致）
+        # ここで court_count も削除する運用なら REMOVE #cc はOK
         tx_items.append({
             "Update": {
                 "TableName": "bad-game-matches",
@@ -1693,6 +1751,8 @@ def finish_current_match():
         })
 
         # (b) 全 playing を pending に戻す
+        # ★注意: REMOVE court_number/team をすると「遅延してきたスコア送信」が復旧不能になる
+        # 全送信チェックを入れているので基本は大丈夫ですが、心配なら REMOVE を外すのがより安全です。
         for p in playing_players:
             entry_id = p.get("entry_id")
             if not entry_id:
@@ -1725,9 +1785,13 @@ def finish_current_match():
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code")
             if code == "TransactionCanceledException":
-                current_app.logger.error("⚠️ Transaction canceled for match_id=%s: %s", 
-                                       match_id, e.response.get("Error", {}).get("Message"))
-                return jsonify({"success": False, "error": "finish transaction canceled"}), 409
+                current_app.logger.error(
+                    "⚠️ Transaction canceled for match_id=%s: %s",
+                    match_id, e.response.get("Error", {}).get("Message")
+                )
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return jsonify({"success": False, "error": "finish transaction canceled"}), 409
+                return "finish transaction canceled", 409
             raise
 
         # =========================================================
@@ -1737,6 +1801,9 @@ def finish_current_match():
             return jsonify({
                 "success": True,
                 "message": "試合が正常に終了しました",
+                "match_id": match_id,
+                "results_count": submitted_results_count,
+                "court_count": court_count,
                 "updated_players": len(playing_players),
                 "skill_updates": skill_update_count,
                 "synced_entries": sync_count

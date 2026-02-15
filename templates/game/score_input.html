@@ -242,147 +242,231 @@
 </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        const forms = document.querySelectorAll(".score-form");
-        const formStatus = {};
-        let submittedCount = 0;
-        const totalForms = forms.length;
-        
-        // データがない場合のメッセージ表示
-        if (totalForms === 0) {
-            document.getElementById("no-data-message").style.display = "block";
-        }
-    
-        // 試合終了ボタンを初期状態で無効に
-        const endButton = document.getElementById("endMatchButton");
-        if (endButton) endButton.disabled = true;
-    
-        // 各スコアフォームの送信処理
-        forms.forEach((form, index) => {
-            const formId = form.getAttribute("id");
-            formStatus[formId] = { submitted: false };
-    
-            form.addEventListener("submit", function (e) {
-                e.preventDefault();
-    
-                const formData = new FormData(form);
-                const actionUrl = form.getAttribute("action");
-                
-                // 同点チェック
-                const team1Score = parseInt(formData.get("team1_score"));
-                const team2Score = parseInt(formData.get("team2_score"));
-                
-                if (team1Score === team2Score) {
-                    alert("スコアが同点です。勝者を決めてください。");
-                    return;
-                }
-    
-                fetch(actionUrl, {
-                    method: "POST",
-                    body: formData,
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            throw new Error(text || "送信エラー");
-                        });
-                    }
-                    return response;
-                })
-                .then(() => {
-                    const submitBtn = form.querySelector("button[type='submit']");
-                    if (submitBtn) {
-                        submitBtn.disabled = true;
-                        submitBtn.innerHTML = '<i class="fas fa-check me-2"></i>送信済み';
-                        submitBtn.classList.remove("btn-orange");
-                        submitBtn.classList.add("submitted-btn");
-                    }
-    
-                    formStatus[formId].submitted = true;
-                    submittedCount++;
-    
-                    if (submittedCount === totalForms && endButton) {
-                        console.log("✅ 全スコア送信完了 → 試合終了ボタン有効化");
-                        endButton.disabled = false;
-                    }
-                })
-                .catch(error => {
-                    alert(error.message || "スコア送信に失敗しました");
-                    console.error(error);
-                });
-            });
-        });
-    
-        // ✅ 試合終了ボタンのクリック処理を追加
-        if (endButton) {
-            endButton.addEventListener("click", function (e) {
-                e.preventDefault();
-                
-                // ボタンを即座に無効化（重複クリック防止）
-                endButton.disabled = true;
-                endButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+document.addEventListener("DOMContentLoaded", function () {
+  const forms = document.querySelectorAll(".score-form");
+  const totalForms = forms.length;
 
-                fetch("/game/finish_current_match", {
-                    method: "POST",
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'  // Ajax判定用ヘッダー
-                    }
-                })
-                .then(res => res.json())  // JSONレスポンスを期待
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = "/game/court";
-                    } else {
-                        throw new Error(data.error || "処理に失敗しました");
-                    }
-                })
-                .catch(error => {
-                    // エラー時はボタンを再度有効化
-                    endButton.disabled = false;
-                    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
-                    alert(error.message || "通信エラーが発生しました");
-                    console.error(error);
-                });
-            });
-        }
+  // データがない場合のメッセージ表示
+  if (totalForms === 0) {
+    const msg = document.getElementById("no-data-message");
+    if (msg) msg.style.display = "block";
+  }
 
-        // デバッグボタンの設定
-        const debugButton = document.getElementById("debugButton");
-        if (debugButton) {
-            debugButton.addEventListener("click", function() {
-                // サーバーからデータを取得
-                fetch("/game/debug_data")
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById("debug-data").textContent = JSON.stringify(data, null, 2);
-                    document.getElementById("debug-info").style.display = "block";
-                })
-                .catch(error => {
-                    console.error("デバッグデータの取得に失敗:", error);
-                    document.getElementById("debug-data").textContent = "データ取得エラー: " + error.message;
-                    document.getElementById("debug-info").style.display = "block";
-                });
-            });
-        }
+  // 試合終了ボタン
+  const endButton = document.getElementById("endMatchButton");
+  if (endButton) endButton.disabled = true;
 
-        // スコア入力フィールドにフォーカス時のアニメーション効果
-        document.querySelectorAll('.score-input').forEach(input => {
-            input.addEventListener('focus', function() {
-                this.style.transform = 'scale(1.05)';
-                this.style.transition = 'transform 0.2s ease';
+  // 送信済み管理（フォームID単位）
+  const formStatus = {};
+  let submittedCount = 0;
+
+  // 自動finish（二重実行防止）
+  let finishTriggered = false;
+
+  function setEndButtonProcessing() {
+    if (!endButton) return;
+    endButton.disabled = true;
+    endButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+  }
+
+  function restoreEndButton() {
+    if (!endButton) return;
+    endButton.disabled = false;
+    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+  }
+
+  function disableEndButton() {
+    if (!endButton) return;
+    endButton.disabled = true;
+    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+  }
+
+  function finishMatchAjax({ auto = false } = {}) {
+    // auto=true の場合は二重実行を強く防ぐ
+    if (auto) {
+      if (finishTriggered) return;
+      finishTriggered = true;
+    }
+
+    setEndButtonProcessing();
+
+    fetch("/game/finish_current_match", {
+      method: "POST",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    })
+      .then(async (res) => {
+        // 409/400 なども JSON で返す想定（サーバ側が text の場合もあるので保険）
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          if (!res.ok) throw new Error(text || "試合終了に失敗しました");
+          return { success: true };
+        }
+      })
+      .then((data) => {
+        if (data && data.success) {
+          window.location.href = "/game/court";
+          return;
+        }
+        // 失敗
+        if (auto) finishTriggered = false;
+        restoreEndButton();
+        alert((data && data.error) || "試合終了に失敗しました");
+      })
+      .catch((err) => {
+        if (auto) finishTriggered = false;
+        restoreEndButton();
+        alert(err.message || "通信エラーが発生しました");
+        console.error(err);
+      });
+  }
+
+  function onAllSubmitted() {
+    console.log("✅ 全スコア送信完了 → 自動で試合終了");
+    // 自動で試合終了（※手動ボタンを残したい場合はここを endButton.enabled にしてもOK）
+    finishMatchAjax({ auto: true });
+  }
+
+  // 各スコアフォームの送信処理
+  forms.forEach((form) => {
+    const formId = form.getAttribute("id");
+    formStatus[formId] = { submitted: false };
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      // 二重送信ガード（連打・遅延対策）
+      if (formStatus[formId].submitted) return;
+
+      const formData = new FormData(form);
+      const actionUrl = form.getAttribute("action");
+
+      // 同点チェック
+      const team1Score = Number(formData.get("team1_score"));
+      const team2Score = Number(formData.get("team2_score"));
+
+      if (Number.isNaN(team1Score) || Number.isNaN(team2Score)) {
+        alert("スコアを入力してください。");
+        return;
+      }
+      if (team1Score === team2Score) {
+        alert("スコアが同点です。勝者を決めてください。");
+        return;
+      }
+
+      // 送信ボタンを一旦無効化（通信中の二重送信防止）
+      const submitBtn = form.querySelector("button[type='submit']");
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>送信中...';
+      }
+
+      fetch(actionUrl, {
+        method: "POST",
+        body: formData,
+      })
+        .then((response) => {
+          if (!response.ok) {
+            return response.text().then((text) => {
+              throw new Error(text || "送信エラー");
             });
-            
-            input.addEventListener('blur', function() {
-                this.style.transform = 'scale(1)';
-            });
+          }
+          return response;
+        })
+        .then(() => {
+          // 送信済みUI
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-check me-2"></i>送信済み';
+            submitBtn.classList.remove("btn-orange");
+            submitBtn.classList.add("submitted-btn");
+          }
+
+          // 入力欄も無効化
+          form.querySelectorAll("input").forEach((inp) => (inp.disabled = true));
+
+          // フォーム全体も触れないように（UI事故防止）
+          form.style.pointerEvents = "none";
+          form.style.opacity = "0.9";
+
+          formStatus[formId].submitted = true;
+          submittedCount++;
+
+          // 手動finishボタンを残す場合はここで有効化（auto finish でも一応更新）
+          if (submittedCount === totalForms) {
+            // auto finish
+            onAllSubmitted();
+          } else {
+            // まだ途中なら finish は押せない
+            disableEndButton();
+          }
+        })
+        .catch((error) => {
+          // エラー時：送信ボタンを戻す（再送できるように）
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-trophy me-2"></i>スコア送信';
+          }
+          alert(error.message || "スコア送信に失敗しました");
+          console.error(error);
         });
     });
+  });
 
-    // デバッグ情報の表示/非表示を切り替える関数
-    function toggleDebug() {
-        const debugInfo = document.getElementById("debug-info");
-        debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
-    }
+  // もし「自動finish」でも手動ボタンを残したい場合のクリック処理
+  // （自動が失敗したときの保険として有効）
+  if (endButton) {
+    endButton.addEventListener("click", function (e) {
+      e.preventDefault();
+
+      if (submittedCount !== totalForms) {
+        alert("未送信のコートがあります。すべて送信してください。");
+        return;
+      }
+
+      // auto が走っている最中は無視
+      if (finishTriggered) return;
+
+      finishMatchAjax({ auto: false });
+    });
+  }
+
+  // デバッグボタン
+  const debugButton = document.getElementById("debugButton");
+  if (debugButton) {
+    debugButton.addEventListener("click", function () {
+      fetch("/game/debug_data")
+        .then((response) => response.json())
+        .then((data) => {
+          document.getElementById("debug-data").textContent = JSON.stringify(data, null, 2);
+          document.getElementById("debug-info").style.display = "block";
+        })
+        .catch((error) => {
+          console.error("デバッグデータの取得に失敗:", error);
+          document.getElementById("debug-data").textContent = "データ取得エラー: " + error.message;
+          document.getElementById("debug-info").style.display = "block";
+        });
+    });
+  }
+
+  // フォーカス時のアニメーション
+  document.querySelectorAll(".score-input").forEach((input) => {
+    input.addEventListener("focus", function () {
+      this.style.transform = "scale(1.05)";
+      this.style.transition = "transform 0.2s ease";
+    });
+    input.addEventListener("blur", function () {
+      this.style.transform = "scale(1)";
+    });
+  });
+});
+
+// デバッグ表示切替
+function toggleDebug() {
+  const debugInfo = document.getElementById("debug-info");
+  debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
+}
 </script>
 
 </body>
