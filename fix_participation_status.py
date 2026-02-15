@@ -284,7 +284,7 @@ def export_to_csv(invalid_records, filename='invalid_status_report.csv'):
                 'Set to cancelled'
             ])
     
-    print(f"\n✅ レポートを {filename} に出力しました")
+    print(f"\nレポートを {filename} に出力しました")
 
 
 def main():
@@ -320,7 +320,7 @@ def main():
     # DynamoDB接続
     try:
         db = DynamoDB()
-        print("\n✅ DynamoDBに接続しました\n")
+        print("\nDynamoDBに接続しました\n")
     except Exception as e:
         print(f"❌ DynamoDB接続エラー: {e}")
         return

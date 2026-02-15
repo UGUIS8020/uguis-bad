@@ -58,7 +58,7 @@
 </script>
 {% endblock %}
 
-{# ✅ extra_css は content の外に置く #}
+{# extra_css は content の外に置く #}
 {% block extra_css %}
 <style>
 body{
@@ -503,7 +503,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </figure>
     ` : "";
 
-     // ✅ 編集・削除（本人のみ）
+    
     const canEdit = !!p.can_edit;
 
     const editUrl = (editUrlTpl && postId)
@@ -656,7 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!cursor || loading) return;
 
   loading = true;
-  io.unobserve(sentinel);              // ✅ 連続発火防止
+  io.unobserve(sentinel);              
   sentinel.style.display = "flex";
 
   try {
@@ -692,7 +692,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // ✅ 次があるなら監視再開（1フレーム遅らせる）
+    // 次があるなら監視再開（1フレーム遅らせる）
     requestAnimationFrame(() => io.observe(sentinel));
 
   } catch (e) {
@@ -700,7 +700,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const textNode = sentinel.querySelector('.ig-loader-text');
     if (textNode) textNode.textContent = "読み込みに失敗しました";
 
-    // ✅ 失敗時も再開（1フレーム遅らせる）
+    // 失敗時も再開（1フレーム遅らせる）
     requestAnimationFrame(() => io.observe(sentinel));
 
   } finally {

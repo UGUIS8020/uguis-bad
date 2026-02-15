@@ -330,7 +330,7 @@
                 const text = await response.text();
                 
                 statusDiv.className = 'status success';
-                statusDiv.textContent = `✅ ${text}`;
+                statusDiv.textContent = `${text}`;
                 
                 // 5秒後にページをリロード
                 setTimeout(() => location.reload(), 5000);

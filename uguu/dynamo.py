@@ -104,11 +104,11 @@ def _decode_cursor(cursor: Optional[str]) -> Optional[Dict[str, Any]]:
 class DynamoDB:
     ALLOWED_EARN_TYPES = {"manual"}
 
-    # ✅ init は空でOK（import時に重い処理をしない）
+    # init は空でOK（import時に重い処理をしない）
     def __init__(self):
         pass
 
-    # ✅ app.py の create_app() で作った current_app.dynamodb を使う
+    # app.py の create_app() で作った current_app.dynamodb を使う
     @property
     def dynamodb(self):
         return current_app.dynamodb

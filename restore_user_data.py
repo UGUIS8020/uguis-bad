@@ -52,7 +52,7 @@ def restore_specific_user():
     if confirm == 'yes':
         try:
             users_table.put_item(Item=restored_data)
-            print("\n✅ ユーザーデータの復元が完了しました！")
+            print("\nユーザーデータの復元が完了しました！")
             print("\nログイン情報:")
             print(f"  メールアドレス: {restored_data['email']}")
             print(f"  パスワード: 00000000")

@@ -100,177 +100,91 @@ def finish_match_meta(match_id: str):
         raise
 
 def update_trueskill_for_players_and_return_updates(result_item):
-    """
-    TrueSkill を使って各プレイヤーのスキルスコアを更新し、更新結果を返す
-    """
     from decimal import Decimal
-    from datetime import datetime
     from trueskill import Rating, rate
     
-    updated_skills = {}  # 更新されたスキルスコアを格納する辞書
+    updated_skills = {}
     user_table = current_app.dynamodb.Table("bad-users")
 
+    def safe_get_score(item, keys):
+        for k in keys:
+            val = item.get(k)
+            if val is not None:
+                try: return int(float(val))
+                except: continue
+        return 0
+
+    t1 = safe_get_score(result_item, ["team1_score", "team_a_score", "score1"])
+    t2 = safe_get_score(result_item, ["team2_score", "team_b_score", "score2"])
+    winner = str(result_item.get("winner", "A")).upper()
+    score_diff = (t1 - t2) if winner == "A" else (t2 - t1)
+
+    # 【削除】RawItemのログを削除（中身が巨大なため）
+
     def get_team_ratings(team):
-        """チームのTrueSkill Ratingを取得する"""
         ratings = []
         for player in team:
-            user_id = player.get("user_id")
-            if not user_id:
-                current_app.logger.warning(f"ユーザーIDが空です: {player}")
-                continue
-                
-            # DynamoDBから直接ユーザーデータを取得する
+            uid = player.get("user_id")
+            if not uid: continue
             try:
-                current_app.logger.info(f"ユーザー {user_id} の取得を試みます（キー: user#user_id）")
-                response = user_table.get_item(Key={"user#user_id": user_id})
-                user_data = response.get("Item")
-                
-                if user_data:
-                    current_app.logger.info(f"ユーザー {user_id} のデータ取得成功")
-                    # muとsigmaの両方を取得（デフォルト値も設定）
-                    current_mu = float(user_data.get("skill_score", 25.0))
-                    current_sigma = float(user_data.get("skill_sigma", 8.333))
-                    
-                    rating = Rating(mu=current_mu, sigma=current_sigma)
-                    display_name = player.get("display_name", user_data.get("display_name", "不明"))
-                    ratings.append((user_id, rating, display_name))
-                    current_app.logger.info(
-                        f"ユーザー {user_id} ({display_name}) μ={current_mu:.2f}, σ={current_sigma:.4f}"
-                    )
-                else:
-                    current_app.logger.warning(f"ユーザーが見つかりません: {user_id}")
-            except Exception as e:
-                current_app.logger.error(f"ユーザーデータ取得エラー: {str(e)}")
-        
+                # 【整理】個別取得の開始ログを削除し、失敗時のみログを出す
+                res = user_table.get_item(Key={"user#user_id": uid})
+                data = res.get("Item", {})
+                mu = float(data.get("skill_score", 25.0))
+                sig = float(data.get("skill_sigma", 8.333))
+                ratings.append((uid, Rating(mu=mu, sigma=sig)))
+            except:
+                ratings.append((uid, Rating(mu=25.0, sigma=8.333)))
         return ratings
 
-    ratings_a = get_team_ratings(result_item["team_a"])
-    ratings_b = get_team_ratings(result_item["team_b"])
-    winner = result_item.get("winner", "A")
+    ratings_a = get_team_ratings(result_item.get("team_a", []))
+    ratings_b = get_team_ratings(result_item.get("team_b", []))
 
-    if not ratings_a or not ratings_b:
-        current_app.logger.warning("⚠️ チームが空です。TrueSkill評価をスキップ")
-        return updated_skills
+    if not ratings_a or not ratings_b: return {}
 
     try:
-        # スキル差の計算
-        team_a_skill = sum(r.mu for _, r, _ in ratings_a) / len(ratings_a)
-        team_b_skill = sum(r.mu for _, r, _ in ratings_b) / len(ratings_b)
-        skill_diff = team_a_skill - team_b_skill
-        
-        # 期待される勝者を判定
-        expected_winner = "A" if skill_diff > 0 else "B"
-        actual_winner = winner.upper()
-        
-        # 標準のTrueSkill計算
-        if winner.upper() == "A":
-            original_new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
+        if winner == "A":
+            new_r = rate([[r for _, r in ratings_a], [r for _, r in ratings_b]])
+            new_a_list, new_b_list = new_r[0], new_r[1]
         else:
-            original_new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
-            original_new_ratings = original_new_ratings[::-1]
-        
-        # スキル差と勝敗の整合性を正しく計算
-        if expected_winner == actual_winner:
-            # 予想通りの結果: 正の値（調整を小さく）
-            skill_result_consistency = abs(skill_diff)
-        else:
-            # 番狂わせ: 負の値（調整を大きく）
-            skill_result_consistency = -abs(skill_diff)
+            new_r = rate([[r for _, r in ratings_b], [r for _, r in ratings_a]])
+            new_a_list, new_b_list = new_r[1], new_r[0]
 
-        # スコア差の計算
-        team1_score = int(result_item.get("team1_score", 0))
-        team2_score = int(result_item.get("team2_score", 0))
-        if winner.upper() == "A":
-            score_diff = team1_score - team2_score
-        else:
-            score_diff = team2_score - team1_score
+        team_a_mu = sum(r.mu for _, r in ratings_a) / len(ratings_a)
+        team_b_mu = sum(r.mu for _, r in ratings_b) / len(ratings_b)
+        skill_diff = team_a_mu - team_b_mu
         
-        # 基本調整係数（スコア差だけに基づく）
-        min_factor = 0.8
-        max_factor = 1.5
-        max_diff = 20.0
+        expected = "A" if skill_diff > 0 else "B"
+        consistency = abs(skill_diff) if expected == winner else -abs(skill_diff)
         
-        score_adjustment = min_factor + (max_factor - min_factor) * min(abs(score_diff) / max_diff, 1.0)
-        
-        # スキル差と結果の整合性に基づく追加調整
-        # skill_result_consistency が負の値（予想外の結果）なら調整係数を大きく
-        # skill_result_consistency が正の値（予想通りの結果）なら調整係数を小さく
-        max_skill_diff = 15.0  # 想定される最大スキル差
-        consistency_factor = 1.0 - min(max(skill_result_consistency / max_skill_diff, -1.0), 1.0) * 0.3
-        
-        # 最終的な調整係数
-        final_adjustment = score_adjustment * consistency_factor
-        
-        current_app.logger.info(f"スコア差: {score_diff}, チームスキル差: {skill_diff:.2f}, " +
-                            f"結果整合性: {skill_result_consistency:.2f}, " +
-                            f"スコア調整: {score_adjustment:.2f}, " +
-                            f"整合性調整: {consistency_factor:.2f}, " +
-                            f"最終調整係数: {final_adjustment:.2f}")
-        
-        # 調整係数を適用した新しいレーティングを作成
-        new_ratings_a = []
-        new_ratings_b = []
-        
-        for i, rating in enumerate(original_new_ratings[0]):
-            old_mu = ratings_a[i][1].mu
-            delta = rating.mu - old_mu
-            adjusted_delta = delta * final_adjustment
-            new_ratings_a.append(Rating(mu=old_mu + adjusted_delta, sigma=rating.sigma))
-        
-        for i, rating in enumerate(original_new_ratings[1]):
-            old_mu = ratings_b[i][1].mu
-            delta = rating.mu - old_mu
-            adjusted_delta = delta * final_adjustment
-            new_ratings_b.append(Rating(mu=old_mu + adjusted_delta, sigma=rating.sigma))
+        score_adj = 0.8 + (1.5 - 0.8) * min(abs(score_diff) / 20.0, 1.0)
+        const_adj = 1.0 - (min(max(consistency / 15.0, -1.0), 1.0) * 0.3)
+        final_adj = score_adj * const_adj
+
+        # --- 更新サマリーを1行に凝縮 ---
+        # どのコートか特定するために match_id も含める
+        m_id = result_item.get("match_id", "???")
+        current_app.logger.info(
+            f"SkillCalc: match={m_id} | 勝者:{winner} ({t1}-{t2}) | "
+            f"チームスキル差:{skill_diff:.2f} | 最終調整係数:{final_adj:.2f}"
+        )
+
+        for i, (uid, old_r) in enumerate(ratings_a):
+            delta = new_a_list[i].mu - old_r.mu
+            updated_skills[uid] = {
+                "skill_score": old_r.mu + (delta * final_adj),
+                "skill_sigma": new_a_list[i].sigma
+            }
+        for i, (uid, old_r) in enumerate(ratings_b):
+            delta = new_b_list[i].mu - old_r.mu
+            updated_skills[uid] = {
+                "skill_score": old_r.mu + (delta * final_adj),
+                "skill_sigma": new_b_list[i].sigma
+            }
 
     except Exception as e:
-        current_app.logger.error(f"TrueSkill計算エラー: {str(e)}")
-        import traceback
-        current_app.logger.error(traceback.format_exc())
-        return updated_skills
-
-    def save(team_ratings, new_ratings, team_players, label):
-        for i, ((user_id, old_rating, display_name), new_rating) in enumerate(zip(team_ratings, new_ratings)):
-            new_mu = round(new_rating.mu, 2)
-            new_sigma = round(new_rating.sigma, 4)
-            delta_mu = round(new_rating.mu - old_rating.mu, 2)
-            delta_sigma = round(new_rating.sigma - old_rating.sigma, 4)
-            
-            try:
-                # muとsigmaの両方を保存
-                user_table.update_item(
-                    Key={"user#user_id": user_id},
-                    UpdateExpression="SET skill_score = :mu, skill_sigma = :sigma, updated_at = :t",
-                    ExpressionAttributeValues={
-                        ":mu": Decimal(str(new_mu)),
-                        ":sigma": Decimal(str(new_sigma)),
-                        ":t": datetime.now().isoformat()
-                    }
-                )
-                current_app.logger.info(
-                    f"[{label}] {display_name}: μ {old_rating.mu:.2f}→{new_mu:.2f} (Δ{delta_mu:+.2f}), "
-                    f"σ {old_rating.sigma:.4f}→{new_sigma:.4f} (Δ{delta_sigma:+.4f})"
-                )
-                
-                # 更新されたスキルスコアを記録
-                # チームプレイヤーからentry_idを検索
-                for player in team_players:
-                    if player.get("user_id") == user_id:
-                        entry_id = player.get("entry_id")
-                        updated_skills[user_id] = {
-                            "skill_score": new_mu,
-                            "skill_sigma": new_sigma,
-                            "display_name": display_name,
-                            "entry_id": entry_id
-                        }
-                        break
-                
-            except Exception as e:
-                current_app.logger.error(f"スコア更新エラー: {user_id} {str(e)}")
-
-    save(ratings_a, new_ratings_a, result_item["team_a"], "Team A")
-    save(ratings_b, new_ratings_b, result_item["team_b"], "Team B")
-    
+        current_app.logger.error(f"TrueSkillエラー: {str(e)}")
+        
     return updated_skills
 
 
@@ -282,19 +196,21 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     
     match_table = current_app.dynamodb.Table("bad-game-match_entries")
     sync_count = 0
+    total_count = len(updated_skills)
     
     try:
-        current_app.logger.info(f"エントリーテーブル同期開始: {len(updated_skills)}件のスキルスコア更新")
+        # 同期開始のサマリー
+        current_app.logger.info(f"エントリー同期開始: 対象 {total_count} 件")
         
         for user_id, data in updated_skills.items():
             entry_id = data.get("entry_id") or entry_mapping.get(user_id)
             
             if not entry_id:
-                current_app.logger.warning(f"ユーザー {user_id} のエントリーIDが見つかりません")
+                # 警告ログは重要なので残すが、簡潔に
+                current_app.logger.warning(f"エントリーID未発見: user_id={user_id}")
                 continue
                 
             try:
-                # 👇 skill_sigmaも追加
                 match_table.update_item(
                     Key={"entry_id": entry_id},
                     UpdateExpression="SET skill_score = :mu, skill_sigma = :sigma",
@@ -304,15 +220,18 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
                     }
                 )
                 sync_count += 1
-                current_app.logger.debug(
-                    f"エントリー更新: {entry_id}, ユーザー: {data.get('display_name')}, "
-                    f"μ={data['skill_score']:.2f}, σ={data['skill_sigma']:.4f}"
-                )
+                
+                # 【削除】1件ずとの詳細な DEBUG ログは削除しました
+                
             except Exception as e:
-                current_app.logger.error(f"エントリー更新エラー: {entry_id} - {str(e)}")
+                # 失敗時は原因を特定したいので詳細を出す
+                current_app.logger.error(f"更新失敗 entry_id={entry_id}: {str(e)}")
+        
+        # 完了報告を 1 行で出力
+        current_app.logger.info(f"同期完了: {sync_count}/{total_count} 件のスキルを反映しました")
     
     except Exception as e:
-        current_app.logger.error(f"エントリー同期エラー: {str(e)}")
+        current_app.logger.error(f"同期プロセス異常終了: {str(e)}")
     
     return sync_count
 

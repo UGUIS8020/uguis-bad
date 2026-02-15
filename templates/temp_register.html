@@ -242,7 +242,7 @@
                                         scoreText.textContent = `${totalScore}点`;
                         
                                         if (totalScore >= 30) {
-                                            eligibilityText.innerHTML = '<span class="text-success">✅ ゲーム参加OK！</span>';
+                                            eligibilityText.innerHTML = '<span class="text-success">ゲーム参加OK！</span>';
                                             scoreDisplay.className = 'alert alert-success';
                                         } else {
                                             eligibilityText.innerHTML = '<span class="text-warning">⚠️ 基本練習からスタートになります</span>';
@@ -258,7 +258,7 @@
                                 });
                                 calculateAssessmentScore();
                             
-                                // ✅ form送信前にログ取得（今は空処理）
+                                // form送信前にログ取得（今は空処理）
                                 const form = document.querySelector('form');
                                 if (form) {
                                     form.addEventListener('submit', function(e) {
