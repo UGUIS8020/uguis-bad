@@ -104,21 +104,34 @@ def _decode_cursor(cursor: Optional[str]) -> Optional[Dict[str, Any]]:
 class DynamoDB:
     ALLOWED_EARN_TYPES = {"manual"}
 
+    # ✅ init は空でOK（import時に重い処理をしない）
     def __init__(self):
-        self.dynamodb = boto3.resource(
-            'dynamodb',
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION")
-        )
-        self.posts_table    = self.dynamodb.Table('uguu_post')
-        self.users_table    = self.dynamodb.Table('bad-users')
-        self.schedule_table = self.dynamodb.Table('bad_schedules')
-        self.part_history   = self.dynamodb.Table("bad-users-history")
-        
-        self.replies_table  = self.dynamodb.Table("post-replies")
+        pass
 
-        print("DynamoDB tables initialized")
+    # ✅ app.py の create_app() で作った current_app.dynamodb を使う
+    @property
+    def dynamodb(self):
+        return current_app.dynamodb
+
+    @property
+    def posts_table(self):
+        return self.dynamodb.Table("uguu_post")
+
+    @property
+    def users_table(self):
+        return self.dynamodb.Table("bad-users")
+
+    @property
+    def schedule_table(self):
+        return self.dynamodb.Table("bad_schedules")
+
+    @property
+    def part_history(self):
+        return self.dynamodb.Table("bad-users-history")
+
+    @property
+    def replies_table(self):
+        return self.dynamodb.Table("post-replies")
 
     def get_posts_page(
         self,
@@ -1368,162 +1381,8 @@ class DynamoDB:
         except Exception as e:
             print(f"[ERROR] 支払い記録エラー: {e}")
             import traceback; traceback.print_exc()
-            return False
-        
-    # def get_point_transactions(self, user_id: str, limit: int = 50, transaction_type: str = None):
-    #     try:
-    #         prefix = 'points#spend#' if (transaction_type in (None, 'payment', 'spend')) else 'points#'
-    #         resp = self.part_history.query(
-    #             KeyConditionExpression=Key('user_id').eq(user_id) & Key('joined_at').begins_with(prefix),
-    #             ScanIndexForward=False,
-    #             Limit=limit,
-    #             ConsistentRead=True,  # 直前の書き込みを確実に拾う
-    #         )
-
-    #         txs = []
-    #         for it in resp.get('Items', []):
-    #             if not it.get('joined_at','').startswith('points#spend#'):
-    #                 continue
-    #             used = int(it.get('points_used') or -int(it.get('delta_points', 0)) or 0)
-    #             txs.append({
-    #                 'date': it.get('created_at'),        # 支払日時
-    #                 'type': 'payment',
-    #                 'points_used': used,                  # ← 集計はこのキーに寄せる
-    #                 'points': used,                       # 互換のため残す（UIで使用可）
-    #                 'delta_points': int(it.get('delta_points', 0)),  # -800 など
-    #                 'description': it.get('reason', ''),
-    #                 'event_date': it.get('event_date'),
-    #                 'payment_type': it.get('payment_type'),
-    #                 'tx_id': it.get('tx_id'),
-    #             })
-
-    #         print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type=payment")
-    #         return txs
-
-    #     except Exception as e:
-    #         print(f"[ERROR] 取引履歴取得エラー: {e}")
-    #         import traceback; traceback.print_exc()
-    #         return []
-        
-    
-    # def get_point_transactions(
-    #     self,
-    #     user_id: str,
-    #     limit: int = 50,
-    #     transaction_type: Optional[str] = None,
-    # ) -> List[Dict[str, Any]]:
-    #     """
-    #     bad-users-history からポイント取引履歴を取得して整形して返す。
-
-    #     transaction_type:
-    #     - None / "all"      : earn, spend, adjust を全部返す
-    #     - "spend" / "payment": spend だけ返す
-    #     - "earn"            : earn だけ返す
-    #     - "adjust"          : adjust だけ返す
-    #     """
-    #     try:
-    #         # ---- type 正規化 ----
-    #         t = (transaction_type or "spend").strip().lower()
-    #         if t in ("payment", "spend"):
-    #             kind_filter = {"spend"}
-    #             prefix = "points#spend#"
-    #         elif t == "earn":
-    #             kind_filter = {"earn"}
-    #             prefix = "points#earn#"
-    #         elif t == "adjust":
-    #             kind_filter = {"adjust"}
-    #             prefix = "points#adjust#"
-    #         elif t in ("all", "*"):
-    #             kind_filter = {"earn", "spend", "adjust"}
-    #             prefix = "points#"  # まとめて取得して kind で絞る
-    #         else:
-    #             # 想定外は安全に spend 扱い
-    #             kind_filter = {"spend"}
-    #             prefix = "points#spend#"
-
-    #         # ---- DynamoDB Query（ページネーション込み）----
-    #         txs: List[Dict[str, Any]] = []
-    #         last_evaluated_key = None
-
-    #         while len(txs) < limit:
-    #             q_kwargs = dict(
-    #                 KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with(prefix),
-    #                 ScanIndexForward=False,   # 新しい順
-    #                 ConsistentRead=True,
-    #                 Limit=min(100, limit - len(txs)),  # 余裕を持って取得
-    #             )
-    #             if last_evaluated_key:
-    #                 q_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-    #             resp = self.part_history.query(**q_kwargs)
-    #             items = resp.get("Items", [])
-    #             last_evaluated_key = resp.get("LastEvaluatedKey")
-
-    #             for it in items:
-    #                 joined_at = str(it.get("joined_at") or "")
-    #                 kind = str(it.get("kind") or "")
-
-    #                 # prefix="points#" のとき等に備えて joined_at/ kind 両方で絞る
-    #                 if not joined_at.startswith("points#"):
-    #                     continue
-    #                 if kind not in kind_filter:
-    #                     continue
-
-    #                 # ---- 数値の取り扱いを安全に（Decimal -> int 等）----
-    #                 def to_int(v, default=0) -> int:
-    #                     try:
-    #                         if v is None:
-    #                             return default
-    #                         if isinstance(v, Decimal):
-    #                             return int(v)
-    #                         return int(v)
-    #                     except Exception:
-    #                         return default
-
-    #                 delta_points = to_int(it.get("delta_points"), 0)
-
-    #                 # points_used は 0 を正しく扱う（or にしない）
-    #                 pu_raw = it.get("points_used")
-    #                 if pu_raw is not None:
-    #                     points_used = to_int(pu_raw, 0)
-    #                 else:
-    #                     # spend の場合は delta_points が負なので反転して正に
-    #                     points_used = -delta_points if kind == "spend" else 0
-
-    #                 # 表示用 type
-    #                 ui_type = "payment" if kind == "spend" else kind
-
-    #                 txs.append({
-    #                     "date": it.get("created_at") or it.get("transaction_date") or it.get("paid_at"),
-    #                     "type": ui_type,
-    #                     "kind": kind,  # 内部的に区別したい場合に便利
-    #                     "points_used": points_used,        # 支払い(消費)は常に正
-    #                     "points": points_used,             # 互換
-    #                     "delta_points": delta_points,      # +/-
-    #                     "description": it.get("reason", "") or "",
-    #                     "event_date": it.get("event_date"),
-    #                     "payment_type": it.get("payment_type"),
-    #                     "tx_id": it.get("tx_id"),
-    #                     "source": it.get("source"),
-    #                     "schedule_id": it.get("schedule_id"),
-    #                     "created_by": it.get("created_by"),
-    #                 })
-
-    #                 if len(txs) >= limit:
-    #                     break
-
-    #             if not last_evaluated_key:
-    #                 break
-
-    #         print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type={t}")
-    #         return txs
-
-    #     except Exception as e:
-    #         print(f"[ERROR] 取引履歴取得エラー: {e}")
-    #         import traceback; traceback.print_exc()
-    #         return []
-
-    
+            return False        
+ 
         
     def get_point_transactions(
         self,
@@ -1774,40 +1633,8 @@ class DynamoDB:
                 pass
 
         print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
-        return total
-    
-    # def list_point_spends(self, user_id: str, limit: int = 20):
-    #     """
-    #     bad-users-history から支払(消費)の直近履歴を返す。
-    #     必ず list を返す（例外・0件時は []）。
-    #     返す要素: {event_date, amount, reason, created_at, tx_id, joined_at}
-    #     """
-    #     try:
-    #         resp = self.part_history.query(
-    #             KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with("points#spend#"),
-    #             ScanIndexForward=False,  # 新しい順
-    #             Limit=limit
-    #         )
-    #         items = resp.get("Items", [])
-    #         out = []
-    #         for it in items:
-    #             # amount は points_used 優先、なければ delta_points (負数) を反転して正数に
-    #             amt = it.get("points_used")
-    #             if amt is None:
-    #                 dp = int(it.get("delta_points", 0))
-    #                 amt = -dp if dp < 0 else 0
-    #             out.append({
-    #                 "event_date": it.get("event_date"),
-    #                 "amount": int(amt or 0),
-    #                 "reason": it.get("reason", "参加費"),
-    #                 "created_at": it.get("created_at"),
-    #                 "tx_id": it.get("tx_id"),
-    #                 "joined_at": it.get("joined_at"),
-    #             })
-    #         return out
-    #     except Exception as e:
-    #         print(f"[WARN] list_point_spends failed: {e}")
-    #         return []
+        return total    
+  
         
     def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """

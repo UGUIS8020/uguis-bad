@@ -258,8 +258,7 @@ def edit_schedule(schedule_id):
 
 @bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
 @login_required
-def delete_schedule(schedule_id):
-    # from app import cache の代わりに
+def delete_schedule(schedule_id):    
     from flask import current_app
     
     if not current_user.administrator:

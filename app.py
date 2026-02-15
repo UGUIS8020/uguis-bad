@@ -56,100 +56,101 @@ from utils.db import (
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
 from uguu.dynamo import DynamoDB
+from flask_wtf.csrf import CSRFProtect
 
-# DynamoDBインスタンスを作成（グローバルに1つ）
-uguu_db = DynamoDB()
-
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.WARNING)
-logging.basicConfig(level=logging.INFO) 
-logger = logging.getLogger(__name__)
-
-# Flask-Login用
 login_manager = LoginManager()
-
 cache = Cache()
+csrf = CSRFProtect()   # ★グローバルで1回作る
 
 def create_app():
-    """アプリケーションの初期化と設定"""
-    try:
-        load_dotenv()
-        app = Flask(__name__)
+    """アプリケーションの初期化と設定（唯一の create_app）"""
+    load_dotenv()
+    app = Flask(__name__)
 
-        # --- 環境判定 ---
-        APP_ENV = os.getenv("APP_ENV", "development").lower()
-        IS_PROD = APP_ENV in ("production", "prod")
-        IS_LOCAL_HTTP = not IS_PROD  # ローカルはHTTP前提に
+    # --- 環境判定 ---
+    APP_ENV = os.getenv("APP_ENV", "development").lower()
+    IS_PROD = APP_ENV in ("production", "prod")
+    IS_LOCAL_HTTP = not IS_PROD
 
-        # --- Secret Key（本番は必須。未設定なら起動失敗にする） ---
-        secret_key = os.getenv("SECRET_KEY")
-        if IS_PROD and not secret_key:
-            raise RuntimeError("SECRET_KEY is required in production")
-        app.config["SECRET_KEY"] = secret_key or "dev-only-insecure-key"  # 開発用の固定キー
+    # --- Secret Key ---
+    secret_key = os.getenv("SECRET_KEY")
+    if IS_PROD and not secret_key:
+        raise RuntimeError("SECRET_KEY is required in production")
+    app.config["SECRET_KEY"] = secret_key or "dev-only-insecure-key"
 
-        # --- セッション設定（環境で切り替え） ---
-        app.config.update(
-            PERMANENT_SESSION_LIFETIME=timedelta(days=30),
-            SESSION_PERMANENT=True,
-            # Flask-Session を使わないなら SESSION_TYPE は不要。使うなら 'filesystem' と Session(app) を有効化。
-            # SESSION_TYPE='filesystem',
-            SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,   # ← ローカルHTTPでは False、本番HTTPSで True
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE="Lax",             # サブドメイン跨ぎや外部POSTが必要なら 'None' + Secure=True
-            # 必要に応じてサブドメイン運用時:
-            # SESSION_COOKIE_DOMAIN=".shibuya8020.com" if IS_PROD else None,
-        )
+    # --- セッション設定 ---
+    app.config.update(
+        PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+        SESSION_PERMANENT=True,
+        SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+    )
 
-        # --- Flask-Session を使う場合（任意） ---
-        # from flask_session import Session
-        # Session(app)
+    # --- Cache ---
+    app.config["CACHE_TYPE"] = "SimpleCache"
+    app.config["CACHE_DEFAULT_TIMEOUT"] = 600
+    app.config["CACHE_THRESHOLD"] = 900
+    app.config["CACHE_KEY_PREFIX"] = "uguis_"
+    cache.init_app(app)
 
-        # --- Cache 設定 ---
-        app.config['CACHE_TYPE'] = 'SimpleCache'
-        app.config['CACHE_DEFAULT_TIMEOUT'] = 600
-        app.config['CACHE_THRESHOLD'] = 900
-        app.config['CACHE_KEY_PREFIX'] = 'uguis_'
-        cache.init_app(app)
+    # --- CSRF（★ここが今回の核心） ---
+    csrf.init_app(app)
 
-        # --- AWS 認証 ---
-        aws_credentials = {
-            'aws_access_key_id': os.getenv("AWS_ACCESS_KEY_ID"),
-            'aws_secret_access_key': os.getenv("AWS_SECRET_ACCESS_KEY"),
-            'region_name': os.getenv("AWS_REGION", "ap-northeast-1"),
-        }
-        required_env_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET", "TABLE_NAME_USER", "TABLE_NAME_SCHEDULE"]
-        missing = [v for v in required_env_vars if not os.getenv(v)]
-        if IS_PROD and missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    app.config["TABLE_NAME_USER"] = os.getenv("TABLE_NAME_USER")
+    app.config["TABLE_NAME_SCHEDULE"] = os.getenv("TABLE_NAME_SCHEDULE")
 
-        app.config["S3_BUCKET"] = os.getenv("S3_BUCKET", "default-bucket-name")
-        app.config["AWS_REGION"] = os.getenv("AWS_REGION", "ap-northeast-1")
-        app.config['S3_LOCATION'] = f"https://{app.config['S3_BUCKET']}.s3.{app.config['AWS_REGION']}.amazonaws.com/"
+    # --- AWS ---
+    aws_credentials = {
+        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+        "region_name": os.getenv("AWS_REGION", "ap-northeast-1"),
+    }
+    required_env_vars = [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "S3_BUCKET",
+        "TABLE_NAME_USER",
+        "TABLE_NAME_SCHEDULE",
+    ]
+    missing = [v for v in required_env_vars if not os.getenv(v)]
+    if IS_PROD and missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-        app.s3 = boto3.client('s3', **aws_credentials)
-        app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-        app.table_name = os.getenv("TABLE_NAME_USER")
-        app.table_name_users = os.getenv("TABLE_NAME_USER")
-        app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
-        app.table = app.dynamodb.Table(app.table_name)
-        app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
-        app.bad_table_name = os.getenv("BAD_TABLE_NAME", "bad_items")
-        app.bad_table = app.dynamodb.Table(app.bad_table_name)
+    app.config["S3_BUCKET"] = os.getenv("S3_BUCKET", "default-bucket-name")
+    app.config["AWS_REGION"] = os.getenv("AWS_REGION", "ap-northeast-1")
+    app.config["S3_LOCATION"] = f"https://{app.config['S3_BUCKET']}.s3.{app.config['AWS_REGION']}.amazonaws.com/"
 
-        # --- Flask-Login ---
-        login_manager.init_app(app)
-        login_manager.session_protection = "strong"
-        # ブループリント使用時は 'auth.login' など正しい endpoint 名に直す
-        login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "login")
-        login_manager.login_message = 'このページにアクセスするにはログインが必要です。'
+    app.s3 = boto3.client("s3", **aws_credentials)
+    app.dynamodb = boto3.resource("dynamodb", **aws_credentials)
 
-        return app
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {str(e)}")
-        raise
+    app.table_name_users = os.getenv("TABLE_NAME_USER")
+    app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
 
-# アプリケーションの初期化
+    app.table = app.dynamodb.Table(app.table_name_users)
+    app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
+
+    app.bad_table_name = os.getenv("BAD_TABLE_NAME", "bad_items")
+    app.bad_table = app.dynamodb.Table(app.bad_table_name)
+
+    # --- Flask-Login ---
+    login_manager.init_app(app)
+    login_manager.session_protection = "strong"
+    login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "login")
+    login_manager.login_message = "このページにアクセスするにはログインが必要です。"
+
+    app.uguu_db = DynamoDB()
+
+    return app
+
 app = create_app()
+
+from flask_wtf.csrf import CSRFError
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    current_app.logger.error(f"[CSRFError] {e.description}")
+    return e.description, 400
 
 def tokyo_time():
     return datetime.now(JST)
@@ -157,39 +158,29 @@ def tokyo_time():
 
 @login_manager.user_loader
 def load_user(user_id):
-    # デバッグログを削除
-    # app.logger.debug(f"Loading user with ID: {user_id}")
-
     if not user_id:
-        # 警告ログは残す（重要な警告なので）
-        app.logger.warning("No user_id provided to load_user")
+        current_app.logger.warning("No user_id provided to load_user")
         return None
 
     try:
-        # DynamoDBリソースでテーブルを取得
-        table = app.dynamodb.Table(app.table_name)  # テーブル名を取得
-        response = table.get_item(
-            Key={
-                "user#user_id": user_id,   # パーティションキーをそのまま指定
-            }
-        )        
-
-        if 'Item' in response:
-            user_data = response['Item']
-            user = User.from_dynamodb_item(user_data)
-            # ユーザーデータのログ出力を削除（機密情報を含むため）
-            # app.logger.info(f"DynamoDB user data: {user_data}")
-            return user
-        else:
-            # このログも削除可能ですが、デバッグに役立つので残すか検討
-            app.logger.info(f"No user found for ID: {user_id}")
+        table_name = current_app.config.get("TABLE_NAME_USER")
+        if not table_name:
+            current_app.logger.error("TABLE_NAME_USER is not configured")
             return None
 
-    except Exception as e:
-        # エラーログは残す（問題診断に重要）
-        app.logger.error(f"Error loading user with ID: {user_id}: {str(e)}", exc_info=True)
-        return None
+        table = current_app.dynamodb.Table(table_name)
 
+        resp = table.get_item(Key={"user#user_id": user_id})
+        item = resp.get("Item")
+        if not item:
+            current_app.logger.info("No user found for ID: %s", user_id)
+            return None
+
+        return User.from_dynamodb_item(item)
+
+    except Exception as e:
+        current_app.logger.error("Error loading user %s: %s", user_id, e, exc_info=True)
+        return None
 
 
 class RegistrationForm(FlaskForm):
@@ -985,180 +976,199 @@ def get_schedules():
 #         )
 
 
-@app.route("/", methods=['GET'])
-@app.route("/index", methods=['GET'])
+@app.route("/", methods=["GET"])
+@app.route("/index", methods=["GET"])
 def index():
     try:
         start_time = time.time()
-        
+
         schedules = get_schedules_with_formatting()
-        user_table = current_app.dynamodb.Table(app.table_name)
-        
-        # ★ 全スケジュールから参加者IDを集める
+
+        table_name = current_app.config.get("TABLE_NAME_USER") or getattr(current_app, "table_name", None)
+        if not table_name:
+            raise RuntimeError("TABLE_NAME_USER is not configured")
+
+        # =========================================================
+        # 1) 全スケジュールから user_id を集める
+        # =========================================================
         all_user_ids = set()
+
+        def _extract_uid(item):
+            if isinstance(item, dict) and "S" in item:
+                return item["S"]
+            if isinstance(item, dict) and "user_id" in item:
+                return item["user_id"]
+            if isinstance(item, str):
+                return item
+            return None
+
         for schedule in schedules:
-            # 参加者
             for item in schedule.get("participants", []):
-                if isinstance(item, dict) and "S" in item:
-                    all_user_ids.add(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    all_user_ids.add(item["user_id"])
-                elif isinstance(item, str):
-                    all_user_ids.add(item)
-            
-            # たら参加者
+                uid = _extract_uid(item)
+                if uid:
+                    all_user_ids.add(uid)
+
             for item in schedule.get("tara_participants", []):
-                if isinstance(item, dict) and "S" in item:
-                    all_user_ids.add(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    all_user_ids.add(item["user_id"])
-                elif isinstance(item, str):
-                    all_user_ids.add(item)
-        
-        logger.info(f"[index] 取得するユーザー数: {len(all_user_ids)}")
-        
-        # ★ バッチで一括取得（最大100件ずつ）
+                uid = _extract_uid(item)
+                if uid:
+                    all_user_ids.add(uid)
+
+        current_app.logger.info("[index] 取得するユーザー数: %d", len(all_user_ids))
+
+        # =========================================================
+        # 2) DynamoDB BatchGet（100件ずつ）
+        #    ★ user#user_id の値が「uuid」 or 「user#uuid」混在に備えて両方取る
+        # =========================================================
         user_cache = {}
         user_ids_list = list(all_user_ids)
         batch_count = 0
-        
+
         batch_start = time.time()
+
         for i in range(0, len(user_ids_list), 100):
-            batch_ids = user_ids_list[i:i+100]
-            keys = [{"user#user_id": uid} for uid in batch_ids]
-            
+            batch_ids = user_ids_list[i:i + 100]
+
+            # 候補キーを両方作る（uuid / user#uuid）
+            keys = []
+            for uid in batch_ids:
+                keys.append({"user#user_id": uid})
+                if not str(uid).startswith("user#"):
+                    keys.append({"user#user_id": f"user#{uid}"})
+
             try:
                 response = current_app.dynamodb.batch_get_item(
-                    RequestItems={
-                        app.table_name: {
-                            'Keys': keys
-                        }
-                    }
+                    RequestItems={table_name: {"Keys": keys}}
                 )
                 batch_count += 1
-                
-                for user in response.get('Responses', {}).get(app.table_name, []):
-                    user_id = user.get("user#user_id")
-                    if user_id:
-                        user_cache[user_id] = user
-                        
+
+                for user in response.get("Responses", {}).get(table_name, []):
+                    pk = user.get("user#user_id")
+                    if pk:
+                        user_cache[pk] = user
+
             except Exception as e:
-                logger.error(f"バッチ取得エラー: {e}")
-        
+                current_app.logger.error("[index] バッチ取得エラー: %s", e, exc_info=True)
+
         batch_time = time.time() - batch_start
-        logger.info(f"[index] DynamoDBバッチ取得: {batch_count}回, {batch_time:.3f}秒, キャッシュ件数: {len(user_cache)}")
-        
-        # ★ キャッシュから参加者情報を構築
+        current_app.logger.info(
+            "[index] DynamoDBバッチ取得: %d回, %.3f秒, キャッシュ件数: %d",
+            batch_count, batch_time, len(user_cache)
+        )
+
+        # =========================================================
+        # 3) キャッシュから participants_info を構築
+        # =========================================================
         process_start = time.time()
+
+        def _pick_profile_url(user: dict):
+            url = (
+                user.get("profile_image_url")
+                or user.get("profileImageUrl")
+                or user.get("large_image_url")
+                or ""
+            )
+            url = url.strip() if isinstance(url, str) else ""
+            return url if url and url.lower() != "none" else None
+
+        def _to_int(v, default=0):
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        def _get_user(uid: str):
+            # cache key が uuid / user#uuid のどちらでも当たるように
+            if uid in user_cache:
+                return user_cache[uid]
+            if not str(uid).startswith("user#"):
+                return user_cache.get(f"user#{uid}")
+            return user_cache.get(uid.replace("user#", "", 1))
+
         for schedule in schedules:
             # --- 参加者 ---
-            participants_info = []
-            raw_participants = schedule.get("participants", [])
             user_ids = []
-            
-            for item in raw_participants:
-                if isinstance(item, dict) and "S" in item:
-                    user_ids.append(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    user_ids.append(item["user_id"])
-                elif isinstance(item, str):
-                    user_ids.append(item)
-            
+            for item in schedule.get("participants", []):
+                uid = _extract_uid(item)
+                if uid:
+                    user_ids.append(uid)
+
+            participants_info = []
             for uid in user_ids:
-                user = user_cache.get(uid)
+                user = _get_user(uid)
                 if not user:
                     continue
-                
-                url = (user.get("profile_image_url")
-                       or user.get("profileImageUrl")
-                       or user.get("large_image_url")
-                       or "")
-                url = url.strip() if isinstance(url, str) else None
-                
-                raw_practice = user.get("practice_count")
-                try:
-                    join_count = int(raw_practice) if raw_practice is not None else 0
-                except (ValueError, TypeError):
-                    join_count = 0
-                
+
                 participants_info.append({
-                    "user_id": user["user#user_id"],
+                    "user_id": user.get("user#user_id"),
                     "display_name": user.get("display_name", "不明"),
-                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
-                    "join_count": join_count,
+                    "join_count": _to_int(user.get("practice_count"), 0),
                 })
-            
+
             participants_info.sort(
-                key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
+                key=lambda x: (
+                    not x.get("is_admin", False),
+                    (x.get("join_count") or 0),
+                    x.get("display_name", "")
+                )
             )
             schedule["participants_info"] = participants_info
-            
+
             # --- たら参加者 ---
-            tara_participants_info = []
-            raw_tara = schedule.get("tara_participants", [])
             tara_ids = []
-            
-            for item in raw_tara:
-                if isinstance(item, dict) and "S" in item:
-                    tara_ids.append(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    tara_ids.append(item["user_id"])
-                elif isinstance(item, str):
-                    tara_ids.append(item)
-            
+            for item in schedule.get("tara_participants", []):
+                uid = _extract_uid(item)
+                if uid:
+                    tara_ids.append(uid)
+
+            tara_participants_info = []
             for uid in tara_ids:
-                user = user_cache.get(uid)
+                user = _get_user(uid)
                 if not user:
                     continue
-                
-                url = (user.get("profile_image_url")
-                       or user.get("profileImageUrl")
-                       or user.get("large_image_url")
-                       or "")
-                url = url.strip() if isinstance(url, str) else None
-                
+
                 tara_participants_info.append({
-                    "user_id": user["user#user_id"],
+                    "user_id": user.get("user#user_id"),
                     "display_name": user.get("display_name", "不明"),
-                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
                 })
-            
+
             tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
             schedule["tara_participants_info"] = tara_participants_info
             schedule["tara_participants"] = tara_ids
             schedule["tara_count"] = len(tara_ids)
-        
+
         process_time = time.time() - process_start
         total_time = time.time() - start_time
-        
-        logger.info(f"[index] 参加者情報処理: {process_time:.3f}秒")
-        logger.info(f"[index] 合計処理時間: {total_time:.3f}秒")
-        
+
+        current_app.logger.info("[index] 参加者情報処理: %.3f秒", process_time)
+        current_app.logger.info("[index] 合計処理時間: %.3f秒", total_time)
+
         image_files = [
-            'images/top001.jpg',
-            'images/top002.jpg',
-            'images/top003.jpg',
-            'images/top004.jpg',
-            'images/top005.jpg'
+            "images/top001.jpg",
+            "images/top002.jpg",
+            "images/top003.jpg",
+            "images/top004.jpg",
+            "images/top005.jpg",
         ]
         selected_image = random.choice(image_files)
-        
+
         return render_template(
             "index.html",
             schedules=schedules,
             selected_image=selected_image,
-            canonical=url_for('index', _external=True)
+            canonical=url_for("index", _external=True),
         )
-        
+
     except Exception as e:
-        logger.error(f"[index] スケジュール取得エラー: {e}")
-        flash('スケジュールの取得中にエラーが発生しました', 'error')
+        current_app.logger.error("[index] スケジュール取得エラー: %s", e, exc_info=True)
+        flash("スケジュールの取得中にエラーが発生しました", "error")
         return render_template(
             "index.html",
             schedules=[],
-            selected_image='images/default.jpg'
+            selected_image="images/default.jpg",
         )
     
     
@@ -1877,67 +1887,6 @@ def is_safe_url(target):
 def logout():
     logout_user()
     return redirect("/")
-
-
-# @app.route("/user_maintenance", methods=["GET", "POST"])
-# @login_required
-# def user_maintenance():
-#     try:
-#         # ソートパラメータを取得
-#         sort_by = request.args.get('sort_by', 'created_at')  # デフォルトは作成日
-#         order = request.args.get('order', 'desc')  # デフォルトは降順
-        
-#         # テーブルからすべてのユーザーを取得
-#         response = app.table.scan()
-        
-#         # ユーザーデータを処理
-#         users = response.get('Items', [])        
-#         for user in users:
-#             if 'user#user_id' in user:
-#                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
-            
-#             # ポイント情報を取得
-#             try:
-#                 user_stats = uguu_db.get_user_stats(user['user_id'])
-#                 user['points'] = user_stats.get('uguu_points', 0)
-#                 user['total_participation'] = user_stats.get('total_participation', 0)
-                
-#                 # デバッグ出力（最初のユーザーのみ）
-#                 if users.index(user) == 0:
-#                     print(f"[DEBUG] First user - user_id: {user['user_id']}")
-#                     print(f"[DEBUG] uguu_points: {user['points']}")
-#                     print(f"[DEBUG] total_participation: {user['total_participation']}")
-#             except Exception as e:
-#                 print(f"[ERROR] Failed to get stats for user {user.get('user_id', 'unknown')}: {e}")
-#                 user['points'] = 0
-#                 user['total_participation'] = 0
-        
-#         # ソート処理
-#         reverse = (order == 'desc')
-        
-#         if sort_by == 'points':
-#             sorted_users = sorted(users, key=lambda x: x.get('points', 0), reverse=reverse)
-#         elif sort_by == 'total_participation':
-#             sorted_users = sorted(users, key=lambda x: x.get('total_participation', 0), reverse=reverse)
-#         elif sort_by == 'user_name':
-#             sorted_users = sorted(users, key=lambda x: x.get('user_name', ''), reverse=reverse)
-#         elif sort_by == 'created_at':
-#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=reverse)
-#         else:
-#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=True)
-        
-#         return render_template("user_maintenance.html", 
-#                              users=sorted_users, 
-#                              page=1, 
-#                              has_next=False,
-#                              sort_by=sort_by,
-#                              order=order)
-#     except Exception as e:
-#         print(f"[ERROR] Error in user_maintenance: {str(e)}")
-#         import traceback
-#         traceback.print_exc()
-#         flash('ユーザー一覧の読み込み中にエラーが発生しました。', 'error')
-#         return redirect(url_for('index'))
     
 
 # ポイントと参加回数を無効化したバージョン：

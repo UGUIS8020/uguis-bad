@@ -148,7 +148,7 @@
         }
     </style>
   
-
+<meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 <body class="bg-light">
 
@@ -167,6 +167,7 @@
             <!-- 練習おわりボタン -->
             <form method="POST" action="{{ url_for('game.reset_participants') }}" 
                   onsubmit="return confirm('本当に全員をリセットしますか？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-danger fw-bold px-4 py-2">
                     練習おわり
                 </button>
@@ -174,6 +175,7 @@
             
             <!-- 困ったときのボタン -->
             <form method="POST" action="{{ url_for('game.start_next_match') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-warning fw-bold px-4 py-2"
                         onclick="return confirm('現在の参加者のみで強制的に次の試合を開始します。参加待ちプレイヤーは除外されます。本当に実行しますか？')">
                     困ったときのボタン
@@ -210,6 +212,7 @@
 
                 {% else %}
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-primary btn-lg px-5 py-3">
                         <i class="fas fa-sign-in-alt me-2"></i>
                         <span class="fw-bold">参加</span>
@@ -221,11 +224,14 @@
 <!-- あなたの状態カード -->
 <div class="card status-card mt-4 mb-4">
     <div class="card-header bg-dark text-white">
-        <h4 class="mb-0 d-flex align-items-center justify-content-center text-center" style="font-size: 1.8rem;">
-            <i class="fas fa-user-circle me-2 fa-lg"></i> 
-            <strong>{{ current_user.display_name }}</strong>
+        <h4 class="mb-0 d-flex flex-column align-items-center justify-content-center text-center" style="font-size: 1.8rem;">
+            <span>
+                <i class="fas fa-user-circle me-2 fa-lg"></i> 
+                <strong>{{ current_user.display_name }}</strong>
+            </span>
+
             {% if current_user_skill_score %}
-                <span id="skillScoreBadge" class="badge bg-light text-dark ms-4" style="font-size: 1.2rem;">
+                <span id="skillScoreBadge" class="badge bg-light text-dark mt-2" style="font-size: 1.2rem;">
                     戦闘力: {{ current_user_skill_score or '???' }}
                 </span>
             {% endif %}
@@ -236,25 +242,28 @@
         <!-- アクションボタン -->
         {% if is_resting %}
             <form method="POST" action="{{ url_for('game.resume') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-success btn-lg">
                     <i class="fas fa-play"></i> 再開する
                 </button>
             </form>
-        {% elif is_registered %}
+            {% elif is_registered %}
             <div class="d-flex gap-2">
                 <form method="POST" action="{{ url_for('game.rest') }}">
-                    <button type="submit" class="btn btn-warning btn-lg">
-                        <i class="fas fa-pause"></i> 休憩
-                    </button>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-warning btn-lg">
+                    <i class="fas fa-pause"></i> 休憩
+                </button>
                 </form>
-                
+
                 <form method="POST" action="{{ url_for('game.leave_court') }}">
-                    <button type="submit" class="btn btn-danger btn-lg">
-                        <i class="fa-solid fa-right-from-bracket"></i> コートから出る
-                    </button>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-lg">
+                    <i class="fa-solid fa-right-from-bracket"></i> コートから出る
+                </button>
                 </form>
             </div>
-        {% endif %}
+            {% endif %}
     </div>
 </div>
                 </div>
@@ -380,6 +389,7 @@
                 <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
 
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
                     {% for i in range(1, 7) %}
                         <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
@@ -400,7 +410,9 @@
 
                 {% if has_ongoing_matches and current_user.administrator %}
                 <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
+                
                         onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-warning">
                     <i class="fa-solid fa-refresh"></i> 強制リセット
                     </button>
@@ -428,6 +440,7 @@
                     本日の試合（{{ match_courts|length }}面）
                 </h3>
                 <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="input-group">
                         <label class="input-group-text" for="score_format">試合点数</label>
                         <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
@@ -441,6 +454,7 @@
 
         {% if current_user.is_authenticated and current_user.administrator %}
             <form method="POST" action="{{ url_for('game.score_input') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="text-center my-2">
                     <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
                 </div>
