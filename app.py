@@ -64,6 +64,7 @@ login_manager = LoginManager()
 cache = Cache()
 csrf = CSRFProtect()   # ★グローバルで1回作る
 
+
 def create_app():
     """アプリケーションの初期化と設定（唯一の create_app）"""
     load_dotenv()
@@ -128,6 +129,8 @@ def create_app():
 
     app.table_name_users = os.getenv("TABLE_NAME_USER")
     app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
+
+    app.table_name = app.table_name_users
 
     app.table = app.dynamodb.Table(app.table_name_users)
     app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
@@ -225,25 +228,22 @@ class RegistrationForm(FlaskForm):
 
     def validate_email(self, field):
         try:
-            # Flaskアプリケーションコンテキスト内のDynamoDBテーブル取得
-            table = current_app.dynamodb.Table(current_app.table_name)
-            current_app.logger.debug(f"Querying email-index for email: {field.data}")
+            table = current_app.table
+            email = (field.data or "").strip().lower()
 
             response = table.query(
-                IndexName='email-index',
-                KeyConditionExpression=Key('email').eq(field.data)
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            current_app.logger.debug(f"Query response: {response}")
 
-            if response.get('Items'):
-                raise ValidationError('入力されたメールアドレスは既に登録されています。')
+            if response.get("Items"):
+                raise ValidationError("入力されたメールアドレスは既に登録されています。")
 
         except ValidationError:
-            raise  # 明示的に通す
-
+            raise
         except Exception as e:
             current_app.logger.error(f"Error validating email: {str(e)}", exc_info=True)
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
                     
         
 class UpdateUserForm(FlaskForm):
@@ -304,33 +304,27 @@ class UpdateUserForm(FlaskForm):
             
 
     def validate_email(self, field):
-        # メールアドレスが変更されていない場合はバリデーションをスキップ
         if self.email_readonly or not field.data:
             return
 
         try:
-            # DynamoDBにクエリを投げて重複チェックを実行
+            email = (field.data or "").strip().lower()
+
             response = self.table.query(
-                IndexName='email-index',
-                KeyConditionExpression='email = :email',
-                ExpressionAttributeValues={
-                    ':email': field.data
-                }
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
 
-            app.logger.debug(f"Query response: {response}")
+            for item in response.get("Items", []):
+                user_id = item.get("user#user_id") or item.get("user_id")
+                if user_id and user_id != self.id:
+                    raise ValidationError("このメールアドレスは既に使用されています。")
 
-            if response.get('Items'):
-                for item in response['Items']:
-                    user_id = item.get('user#user_id') or item.get('user_id')
-                    if user_id and user_id != self.id:
-                        raise ValidationError('このメールアドレスは既に使用されています。他のメールアドレスをお試しください。')
-        except ClientError as e:
-            app.logger.error(f"Error querying DynamoDB: {e}")
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。管理者にお問い合わせください。')
+        except ValidationError:
+            raise
         except Exception as e:
-            app.logger.error(f"Unexpected error querying DynamoDB: {e}")
-            raise ValidationError('予期しないエラーが発生しました。管理者にお問い合わせください。')
+            current_app.logger.error(f"Unexpected error querying DynamoDB: {e}", exc_info=True)
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
 
 
 class TempRegistrationForm(FlaskForm):
@@ -438,66 +432,65 @@ class TempRegistrationForm(FlaskForm):
 
     def validate_email(self, field):
         try:
-            # DynamoDB テーブル取得
-            table = app.dynamodb.Table(app.table_name)
-            current_app.logger.debug(f"Querying email-index for email: {field.data}")
+            table = current_app.table  # create_app() で app.table を作っている前提
+            email = (field.data or "").strip().lower()
 
-            # email-indexを使用してクエリ
+            current_app.logger.debug(f"Querying email-index for email: {email}")
+
             response = table.query(
-                IndexName='email-index',
-                KeyConditionExpression=Key('email').eq(field.data)  # 修正済み
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            current_app.logger.debug(f"Query response: {response}")
 
-            # 登録済みのメールアドレスが見つかった場合
-            if response.get('Items'):
-                raise ValidationError('このメールアドレスは既に使用されています。他のメールアドレスをお試しください。')
+            if response.get("Items"):
+                raise ValidationError("このメールアドレスは既に使用されています。他のメールアドレスをお試しください。")
 
-        except ValidationError as ve:
-            # ValidationErrorはそのままスロー
-            raise ve
-
+        except ValidationError:
+            raise
         except Exception as e:
-            # その他の例外をキャッチしてログに出力
-            current_app.logger.error(f"Error validating email: {str(e)}")
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
+            current_app.logger.error(f"Error validating email: {e}", exc_info=True)
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
 
 
 class LoginForm(FlaskForm):
-    email = StringField('メールアドレス', validators=[DataRequired(message='メールアドレスを入力してください'), Email(message='正しいメールアドレスの形式で入力してください')])
+    email = StringField(
+        'メールアドレス',
+        validators=[
+            DataRequired(message='メールアドレスを入力してください'),
+            Email(message='正しいメールアドレスの形式で入力してください')
+        ]
+    )
     password = PasswordField('パスワード', validators=[DataRequired(message='パスワードを入力してください')])
-    remember = BooleanField('ログイン状態を保持する')    
+    remember = BooleanField('ログイン状態を保持する')
     submit = SubmitField('ログイン')
 
     def __init__(self, *args, **kwargs):
         super(LoginForm, self).__init__(*args, **kwargs)
-        self.user = None  # self.userを初期化
+        self.user = None
 
     def validate_email(self, field):
         """メールアドレスの存在確認"""
         try:
-            # メールアドレスでユーザーを検索
-            response = app.table.query(
-                IndexName='email-index',
-                KeyConditionExpression='email = :email',
-                ExpressionAttributeValues={
-                    ':email': field.data
-                }
+            table = current_app.table  # create_appで app.table を作ってる前提
+            email = (field.data or "").strip().lower()
+
+            response = table.query(
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            
-            items = response.get('Items', [])
+
+            items = response.get("Items", [])
             if not items:
-                raise ValidationError('このメールアドレスは登録されていません')            
-            
-            # ユーザー情報を保存（パスワード検証で使用）
+                raise ValidationError("このメールアドレスは登録されていません")
+
             self.user = items[0]
-            # ユーザーをロード
-            app.logger.debug(f"User found for email: {field.data}")       
-           
-        
+            current_app.logger.debug(f"User found for email: {email}")
+
+        except ValidationError:
+            raise
         except Exception as e:
-            app.logger.error(f"Login error: {e}")
-            raise ValidationError('ログイン処理中にエラーが発生しました')
+            current_app.logger.error(f"Login error: {e}", exc_info=True)
+            raise ValidationError("ログイン処理中にエラーが発生しました")
 
     def validate_password(self, field):
         """パスワードの検証"""
@@ -1756,16 +1749,17 @@ def signup():
 
 @app.route('/temp_register', methods=['GET', 'POST'])
 def temp_register():
-    form = TempRegistrationForm()    
+    form = TempRegistrationForm()
 
     if form.validate_on_submit():
-        skill_score = int(request.form.get('skill_score', 0))
+        skill_score = int(request.form.get('skill_score') or 0)
+
         try:
             current_time = datetime.now(timezone.utc).isoformat()
             hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
             user_id = str(uuid.uuid4())
 
-            table = app.dynamodb.Table(app.table_name)
+            table = current_app.table   # ✅ これ（または app.table）
 
             temp_data = {
                 "user#user_id": user_id,
@@ -1773,29 +1767,30 @@ def temp_register():
                 "user_name": form.user_name.data,
                 "gender": form.gender.data,
                 "badminton_experience": form.badminton_experience.data,
-                "email": form.email.data.lower(),
+                "email": form.email.data.lower().strip(),
                 "password": hashed_password,
                 "phone": form.phone.data,
                 "organization": "仮登録",
                 "created_at": current_time,
                 "administrator": False,
-                "skill_score": skill_score,                
+
+                # ✅ DynamoDBのNumberはDecimalが安全
+                "skill_score": Decimal(str(skill_score)),
                 "skill_sigma": Decimal("8.333"),
+
                 "date_of_birth": form.date_of_birth.data.isoformat()
             }
 
-            # DynamoDBに保存
             table.put_item(Item=temp_data)
 
-            # 仮登録成功後、ログインページにリダイレクト
             flash("仮登録が完了しました。ログインしてください。", "success")
             return redirect(url_for('login'))
 
         except Exception as e:
-            logger.error(f"DynamoDBへの登録中にエラーが発生しました: {e}", exc_info=True)
+            current_app.logger.error(f"DynamoDBへの登録中にエラーが発生しました: {e}", exc_info=True)
             flash(f"登録中にエラーが発生しました: {str(e)}", 'danger')
 
-    return render_template('temp_register.html', form=form)       
+    return render_template('temp_register.html', form=form) 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():

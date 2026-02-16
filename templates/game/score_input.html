@@ -163,62 +163,71 @@
                         <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
                     </div>
                     <div class="card-body p-4">
-                        <form class="score-form" 
-                            data-court-number="{{ court_num }}"
-                            id="score-form-{{ court_num }}"
-                            action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">         
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">                   
-                            
-                            <!-- チームA -->
-                            <div class="score-row">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center">
-                                        <span class="badge bg-danger me-3 team-badge">A</span>
-                                        <span class="team-name">
-                                            {% for player in court.team_a %}
-                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                            {% endfor %}
-                                        </span>
-                                    </div>
-                                    <div style="width: 200px;">                                
-                                        <input type="number" name="team1_score" class="form-control score-input"
-                                            required min="0" placeholder="0"
-                                            inputmode="numeric" pattern="\d*">
-                                    </div>
-                                </div>
-                            </div>
+                    <form class="score-form"
+                          method="POST"
+                          data-court-number="{{ court_num }}"
+                          id="score-form-{{ court_num }}"
+                          action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                            <!-- VS表示 -->
-                            <div class="text-center my-4">
-                                <span class="vs-display">VS</span>
-                            </div>
+                      <!-- チームA -->
+                      <div class="score-row">
+                        <div class="d-flex justify-content-between align-items-center">
+                          <div class="d-flex align-items-center">
+                            <span class="badge bg-danger me-3 team-badge">A</span>
+                            <span class="team-name">
+                              {% for player in court.team_a %}
+                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                              {% endfor %}
+                            </span>
+                          </div>
+                          <div style="width: 200px;">
+                            <input type="number"
+                                  name="team1_score"
+                                  class="form-control score-input text-center"
+                                  required
+                                  min="0" max="99" step="1"
+                                  inputmode="numeric"
+                                  placeholder="">
+                          </div>
+                        </div>
+                      </div>
 
-                            <!-- チームB -->
-                            <div class="score-row">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center">
-                                        <span class="badge bg-primary me-3 team-badge">B</span>
-                                        <span class="team-name">
-                                            {% for player in court.team_b %}
-                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                            {% endfor %}
-                                        </span>
-                                    </div>
-                                    <div style="width: 200px;">                                
-                                        <input type="number" name="team2_score" class="form-control score-input"
-                                            required min="0" placeholder="0"
-                                            inputmode="numeric" pattern="\d*">
-                                    </div>                         
-                                </div>
-                            </div>
-                                
-                            <div class="text-center mt-5">
-                                <button type="submit" class="btn btn-orange submit-btn">
-                                    <i class="fas fa-trophy me-2"></i>スコア送信
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+                      <!-- VS表示 -->
+                      <div class="text-center my-4">
+                        <span class="vs-display">VS</span>
+                      </div>
+
+                      <!-- チームB -->
+                      <div class="score-row">
+                        <div class="d-flex justify-content-between align-items-center">
+                          <div class="d-flex align-items-center">
+                            <span class="badge bg-primary me-3 team-badge">B</span>
+                            <span class="team-name">
+                              {% for player in court.team_b %}
+                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                              {% endfor %}
+                            </span>
+                          </div>
+                          <div style="width: 200px;">
+                            <input type="number"
+                                  name="team2_score"
+                                  class="form-control score-input text-center"
+                                  required
+                                  min="0" max="99" step="1"
+                                  inputmode="numeric"
+                                  placeholder="">
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="text-center mt-5">
+                        <button type="submit" class="btn btn-orange submit-btn">
+                          <i class="fas fa-trophy me-2"></i>スコア送信
+                        </button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
             </div>
             {% endfor %}

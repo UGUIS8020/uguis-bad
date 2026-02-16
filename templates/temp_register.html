@@ -81,33 +81,67 @@
                             <!-- バドミントン歴 -->
 
                             <!-- 電話番号 -->
+                            <!-- 電話番号 -->
                             <div class="mb-3">
-                                <label class="form-label">電話番号<span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.phone, placeholder="電話番号(ハイフン無しで)", class="form-control form-control-lg", required=true) }}
-                                {% if form.phone.errors %}
-                                    <p class="text-danger">{{ form.phone.errors[0] }}</p>
-                                {% endif %}
+                            <label class="form-label">電話番号<span class="badge bg-warning text-dark">必須</span></label>
+                            {{ render_field(
+                                form.phone,
+                                placeholder="電話番号(ハイフン無しで)",
+                                class="form-control form-control-lg",
+                                type="tel",
+                                inputmode="numeric",
+                                autocomplete="tel",
+                                autocorrect="off",
+                                autocapitalize="none",
+                                spellcheck="false",
+                                pattern="[0-9]*",
+                                required=true
+                            ) }}
+                            {% if form.phone.errors %}
+                                <p class="text-danger">{{ form.phone.errors[0] }}</p>
+                            {% endif %}
                             </div>
                          
 
                             <!-- メールアドレス -->
                             <div class="mb-3">
-                                <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg", required=true) }}
-                                {% if form.email.errors %}
-                                    <p class="text-danger">{{ form.email.errors[0] }}</p>
-                                {% endif %}
+                            <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
+                            {{ render_field(
+                                form.email,
+                                placeholder="メールアドレス",
+                                class="form-control form-control-lg",
+                                type="email",
+                                inputmode="email",
+                                autocomplete="email",
+                                autocapitalize="none",
+                                autocorrect="off",
+                                spellcheck="false",
+                                required=true
+                            ) }}
+                            {% if form.email.errors %}
+                                <p class="text-danger">{{ form.email.errors[0] }}</p>
+                            {% endif %}
                             </div>
 
                             <!-- メールアドレス確認 -->
                             <div class="mb-3">
-                                <label class="form-label">メールアドレス（確認） <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.confirm_email, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
-                                {% if form.confirm_email.errors %}
-                                    <p class="text-danger">{{ form.confirm_email.errors[0] }}</p>
-                                {% endif %}
+                            <label class="form-label">メールアドレス（確認） <span class="badge bg-warning text-dark">必須</span></label>
+                            {{ render_field(
+                                form.confirm_email,
+                                placeholder="確認のため再入力",
+                                class="form-control form-control-lg",
+                                type="email",
+                                inputmode="email",
+                                autocomplete="email",
+                                autocapitalize="none",
+                                autocorrect="off",
+                                spellcheck="false",
+                                required=true
+                            ) }}
+                            {% if form.confirm_email.errors %}
+                                <p class="text-danger">{{ form.confirm_email.errors[0] }}</p>
+                            {% endif %}
                             </div>
-
                             <!-- パスワード -->
                             <div class="mb-3">
                                 <label class="form-label">パスワード <span class="badge bg-warning text-dark">必須</span></label>
