@@ -353,18 +353,50 @@ body {
     });
     </script>
     <script>
-    document.addEventListener('click', function(e){
-    const btn = e.target.closest('[data-bs-dismiss="alert"]');
-    if (!btn) return;
-    const alert = btn.closest('.alert');
-    if (alert) {
-        alert.classList.remove('show'); // フェード用クラスを外す（任意）
-        alert.addEventListener('transitionend', () => alert.remove(), {once:true});
-        // フェードが無い場合は即 remove でも可
-        if (getComputedStyle(alert).transitionDuration === '0s') alert.remove();
-    }
-    });
-    </script>
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest('[data-bs-dismiss="alert"]');
+  if (!btn) return;
+
+  const alertEl = btn.closest('.alert');
+  if (!alertEl) return;
+
+  // 二重実行防止
+  if (alertEl.dataset.dismissing === '1') return;
+  alertEl.dataset.dismissing = '1';
+
+  // クリックの伝播で別のクリック処理に巻き込まれないように（必要なら）
+  e.preventDefault();
+  e.stopPropagation();
+
+  // Bootstrapのフェードが効いているなら show を外してフェードアウト
+  alertEl.classList.remove('show');
+
+  // transitionend が来ない場合もあるので保険で消す
+  const style = window.getComputedStyle(alertEl);
+  const dur = parseFloat(style.transitionDuration) || 0;
+  const delay = parseFloat(style.transitionDelay) || 0;
+  const ms = (dur + delay) * 1000;
+
+  const removeNow = () => {
+    if (alertEl && alertEl.parentNode) alertEl.parentNode.removeChild(alertEl);
+  };
+
+  if (ms > 0) {
+    // どこかのプロパティでも transitionend が来たら消す
+    const onEnd = (ev) => {
+      if (ev.target !== alertEl) return;
+      alertEl.removeEventListener('transitionend', onEnd);
+      removeNow();
+    };
+    alertEl.addEventListener('transitionend', onEnd, { once: true });
+
+    // transitionend が来ない環境の保険
+    setTimeout(removeNow, ms + 50);
+  } else {
+    removeNow();
+  }
+});
+</script>
 
 </body>
 </html>

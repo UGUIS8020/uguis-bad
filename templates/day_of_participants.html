@@ -309,26 +309,24 @@ function cancelEdit(participantId) {
 }
 
 function showMessage(text, type) {
-    // 既存のメッセージがあれば削除
-    const existingAlert = document.querySelector('.floating-alert');
-    if (existingAlert) {
-        existingAlert.remove();
-    }
-    
-    const alert = document.createElement('div');
-    alert.className = `alert alert-${type} alert-dismissible fade show floating-alert`;
-    alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
-    alert.innerHTML = `
-        ${text}
-        <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-    `;
-    document.body.appendChild(alert);
-    
-    setTimeout(() => {
-        if (alert.parentElement) {
-            alert.remove();
-        }
-    }, 3000);
+  const existingAlert = document.querySelector('.floating-alert');
+  if (existingAlert) existingAlert.remove();
+
+  const alert = document.createElement('div');
+  alert.className = `alert alert-${type} alert-dismissible fade show floating-alert`;
+  alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
+
+  alert.innerHTML = `
+    <span class="alert-msg"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  `;
+  alert.querySelector('.alert-msg').textContent = text; // 安全に文字表示
+
+  document.body.appendChild(alert);
+
+  setTimeout(() => {
+    if (alert.parentElement) alert.remove();
+  }, 3000);
 }
 </script>
 
