@@ -67,7 +67,7 @@
                             </div>
 
                             <div class="mb-3">
-                                {{ form.date_of_birth.label(class="form-label") }}
+                                <label class="form-label">生年月日 <span class="badge bg-warning text-dark">必須</span></label>
                                 {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date", required=True) }}
                                 {% if form.date_of_birth.errors %}
                                     <div class="text-danger">

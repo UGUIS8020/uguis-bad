@@ -9,6 +9,7 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 import re
 from utils.timezone import JST
+from flask import current_app
 
 from uguu.point import (
     PointRules,

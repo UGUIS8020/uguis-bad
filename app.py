@@ -58,6 +58,8 @@ from badminton_logs_functions import get_badminton_chat_logs
 from uguu.dynamo import DynamoDB
 from flask_wtf.csrf import CSRFProtect
 
+logger = logging.getLogger(__name__)
+
 login_manager = LoginManager()
 cache = Cache()
 csrf = CSRFProtect()   # ★グローバルで1回作る
@@ -681,7 +683,7 @@ class User(UserMixin):
 def get_participants_info(schedule):
     participants_info = []
     try:
-        table_name = current_app.table_name
+        table_name = current_app.config.get("TABLE_NAME_USER")
         dynamodb = current_app.dynamodb
 
         raw = schedule.get("participants") or []
@@ -1481,11 +1483,14 @@ def update_last_participation(users_table, user_id: str, event_date: str):
     bad-users の最終参加日を更新（registered のときに呼ぶ）
     user_id: "uuid..."
     event_date: "YYYY-MM-DD"
+    
+    ★変更点: recent_sk を固定化（日付を含めない）
+    → 1ユーザー1GSIエントリになり、重複が発生しない
     """
     now_utc_iso = datetime.now(timezone.utc).isoformat()
 
     users_table.update_item(
-        Key={"user#user_id": f"user#{user_id}"},  # ★ここが重要（画像で確定）
+        Key={"user#user_id": user_id},  # user#プレフィックスなし
         UpdateExpression=(
             "SET last_participation_date = :d, "
             "recent_pk = :pk, "
@@ -1495,7 +1500,7 @@ def update_last_participation(users_table, user_id: str, event_date: str):
         ExpressionAttributeValues={
             ":d": event_date,
             ":pk": "recent",            
-            ":sk": f"1#{event_date}#{user_id}",
+            ":sk": f"user#{user_id}",  # ★ここが変更：日付を含めない
             ":u": now_utc_iso,
         },
     )
@@ -1898,62 +1903,244 @@ def _decode_lek(token: str) -> dict:
     raw = base64.urlsafe_b64decode(token.encode("utf-8"))
     return json.loads(raw.decode("utf-8"))
 
+
 @app.route("/user_maintenance", methods=["GET"])
 @login_required
 def user_maintenance():
     try:
-        # 1ページ件数
-        limit = int(request.args.get("limit", 30))
-        limit = max(1, min(limit, 100))
-
-        # 次ページ用トークン（LastEvaluatedKey）
-        next_token_in = request.args.get("next")
-
-        query_kwargs = {
-            "IndexName": "gsi_recent_users",
-            "KeyConditionExpression": Key("recent_pk").eq("recent"),
-            "ScanIndexForward": False,  # ★新しい順（降順）
-            "Limit": limit,
-        }
-
-        if next_token_in:
-            try:
-                query_kwargs["ExclusiveStartKey"] = _decode_lek(next_token_in)
-            except Exception:
-                query_kwargs.pop("ExclusiveStartKey", None)
-
-        # ★ scan ではなく query にする
-        response = app.table.query(**query_kwargs)
-        users = response.get("Items", [])
-
-        # user_id 正規化 & statsは無効
-        for user in users:
-            # bad-users のPKは user#user_id
-            if "user#user_id" in user:
-                user["user_id"] = user["user#user_id"].replace("user#", "")
+        sort_by = request.args.get("sort_by", "last_participation")
+        order = request.args.get("order", "desc")
+        
+        from utils.timezone import JST
+        today = datetime.now(JST).date().isoformat()
+        
+        current_app.logger.info(f"[user_maintenance] 今日の日付: {today}")
+        
+        # 過去のスケジュールを全件取得
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        schedules = []
+        last_evaluated_key = None
+        
+        while True:
+            if last_evaluated_key:
+                schedule_response = schedule_table.scan(
+                    FilterExpression=Attr("date").lt(today),
+                    ExclusiveStartKey=last_evaluated_key
+                )
+            else:
+                schedule_response = schedule_table.scan(
+                    FilterExpression=Attr("date").lt(today)
+                )
+            
+            schedules.extend(schedule_response.get("Items", []))
+            last_evaluated_key = schedule_response.get("LastEvaluatedKey")
+            
+            if not last_evaluated_key:
+                break
+        
+        current_app.logger.info(f"[user_maintenance] 過去のスケジュール: {len(schedules)}件")
+        
+        # ★デバッグ：最初のスケジュールの参加者を確認
+        if schedules:
+            sample = schedules[0]
+            current_app.logger.info(f"[user_maintenance] サンプルスケジュール: date={sample.get('date')}")
+            current_app.logger.info(f"[user_maintenance] participants形式: {type(sample.get('participants'))}")
+            current_app.logger.info(f"[user_maintenance] participants最初の3件: {sample.get('participants', [])[:3]}")
+        
+        # ユーザーごとの最終参加日を集計
+        user_last_dates = {}
+        for schedule in schedules:
+            event_date = schedule.get("date")
+            participants = schedule.get("participants", [])
+            
+            # ★デバッグ：各スケジュールの参加者数
+            if participants:
+                current_app.logger.debug(f"[user_maintenance] {event_date}: {len(participants)}人")
+            
+            for participant in participants:
+                # ★participant の形式を確認
+                if isinstance(participant, dict):
+                    # 辞書形式の場合
+                    user_id = participant.get("user_id") or participant.get("user#user_id") or participant.get("S")
+                elif isinstance(participant, str):
+                    # 文字列形式の場合
+                    user_id = participant
+                else:
+                    current_app.logger.warning(f"[user_maintenance] 不明な形式: {type(participant)} - {participant}")
+                    continue
+                
+                # user#プレフィックスを削除
+                if user_id and isinstance(user_id, str):
+                    user_id = user_id.replace("user#", "")
+                    
+                    if user_id not in user_last_dates or event_date > user_last_dates[user_id]:
+                        user_last_dates[user_id] = event_date
+        
+        current_app.logger.info(f"[user_maintenance] 参加ユーザー数: {len(user_last_dates)}人")
+        
+        # ユーザー情報を取得
+        user_ids = list(user_last_dates.keys())
+        
+        users_data = {}
+        if user_ids:
+            users_table = app.dynamodb.Table(app.table_name_users)
+            
+            # バッチ取得（100件ずつ）+ 未処理キーの再取得
+            for i in range(0, len(user_ids), 100):
+                batch_ids = user_ids[i:i + 100]
+                keys = [{"user#user_id": uid} for uid in batch_ids]
+                
+                request_items = {app.table_name_users: {"Keys": keys}}
+                
+                try:
+                    # ★未処理キーがなくなるまで繰り返し
+                    while request_items:
+                        batch_response = app.dynamodb.batch_get_item(RequestItems=request_items)
+                        
+                        for user in batch_response.get("Responses", {}).get(app.table_name_users, []):
+                            uid = user.get("user#user_id", "").replace("user#", "")
+                            users_data[uid] = user
+                        
+                        # 未処理キーを確認
+                        unprocessed = batch_response.get("UnprocessedKeys", {})
+                        if unprocessed:
+                            current_app.logger.warning(f"[user_maintenance] 未処理キー: {len(unprocessed.get(app.table_name_users, {}).get('Keys', []))}件")
+                            request_items = unprocessed
+                        else:
+                            request_items = None
+                        
+                except Exception as e:
+                    current_app.logger.error(f"[user_maintenance] バッチ取得エラー: {e}")
+        
+        current_app.logger.info(f"[user_maintenance] ユーザー情報取得: {len(users_data)}人")
+        
+        # 結果を整形
+        unique_users = []
+        for user_id, last_date in user_last_dates.items():
+            user = users_data.get(user_id, {})
+            user["user_id"] = user_id
+            user["last_participation_date"] = last_date
             user["points"] = None
             user["total_participation"] = None
-
-        # 次ページがあるか判定
-        lek = response.get("LastEvaluatedKey")
-        next_token_out = _encode_lek(lek) if lek else None
-
+            user["phone"] = user.get("phone") or ""
+            user["emergency_phone"] = user.get("emergency_phone") or ""
+            user["user_name"] = user.get("user_name") or ""
+            user["email"] = user.get("email") or ""
+            user["display_name"] = user.get("display_name") or ""
+            unique_users.append(user)
+        
+        # ソート
+        if sort_by == "last_participation":
+            unique_users.sort(
+                key=lambda u: u.get("last_participation_date", ""),
+                reverse=(order == "desc")
+            )
+        elif sort_by == "user_name":
+            unique_users.sort(
+                key=lambda u: (u.get("user_name") or "").lower(),
+                reverse=(order == "desc")
+            )
+        
+        current_app.logger.info(f"[user_maintenance] 最終件数: {len(unique_users)}件（過去の実参加）")
+        
         return render_template(
             "user_maintenance.html",
-            users=users,
-            sort_by="last_participation",
-            order="desc",
-            limit=limit,
-            next_token=next_token_out,
+            users=unique_users,
+            sort_by=sort_by,
+            order=order,
+            limit=len(unique_users),
+            next_token=None,
             stats_disabled=True,
         )
 
     except Exception as e:
-        print(f"[ERROR] Error in user_maintenance: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        current_app.logger.error(f"[user_maintenance] エラー: {e}", exc_info=True)
         flash("ユーザー一覧の読み込み中にエラーが発生しました。", "error")
         return redirect(url_for("index"))
+    
+    
+# USERチェックアクセス方法: http://127.0.0.1:5000/check_user_data/4c7f822d-ff39-4797-9b7b-8ebc205490f5
+@app.route("/check_user_data/<user_id>", methods=["GET"])
+@login_required
+def check_user_data(user_id):
+    """特定ユーザーのデータを直接確認"""
+    try:
+        # ★user#プレフィックスを付けずにそのまま使う
+        response = app.table.get_item(
+            Key={"user#user_id": user_id}  # ← 修正
+        )
+        
+        user = response.get("Item")
+        if user:
+            return jsonify({
+                "status": "ok",
+                "user_id": user_id,
+                "display_name": user.get("display_name"),
+                "user_name": user.get("user_name"),
+                "email": user.get("email"),
+                "phone": user.get("phone"),
+                "created_at": str(user.get("created_at")),
+                "last_participation_date": user.get("last_participation_date"),
+                "exists_in_main_table": True,
+                "full_data": {k: str(v) for k, v in user.items() if k != "password"}
+            })
+        else:
+            return jsonify({
+                "status": "not_found", 
+                "user_id": user_id,
+                "message": "メインテーブルにデータが見つかりません"
+            })
+            
+    except Exception as e:
+        current_app.logger.error(f"[check_user_data] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
+
+@app.route("/check_table_structure", methods=["GET"])
+@login_required
+def check_table_structure():
+    """テーブル構造を確認"""
+    try:
+        # テーブルのメタデータを取得
+        table_description = app.table.meta.client.describe_table(
+            TableName=app.table_name_users
+        )
+        
+        table_info = table_description["Table"]
+        
+        return jsonify({
+            "status": "ok",
+            "table_name": table_info["TableName"],
+            "key_schema": table_info["KeySchema"],
+            "attribute_definitions": table_info["AttributeDefinitions"],
+            "global_secondary_indexes": table_info.get("GlobalSecondaryIndexes", []),
+            "item_count": table_info.get("ItemCount"),
+        })
+            
+    except Exception as e:
+        current_app.logger.error(f"[check_table_structure] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
+
+@app.route("/sample_records", methods=["GET"])
+@login_required  
+def sample_records():
+    """テーブルの最初の10件を取得"""
+    try:
+        response = app.table.scan(Limit=10)
+        
+        items = response.get("Items", [])
+        
+        return jsonify({
+            "status": "ok",
+            "count": len(items),
+            "records": [{k: str(v)[:100] if k != "password" else "***" for k, v in item.items()} for item in items]
+        })
+            
+    except Exception as e:
+        current_app.logger.error(f"[sample_records] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
 
 @app.route("/table_info")
 def get_table_info():
