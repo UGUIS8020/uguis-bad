@@ -458,9 +458,23 @@ class LoginForm(FlaskForm):
         validators=[
             DataRequired(message='メールアドレスを入力してください'),
             Email(message='正しいメールアドレスの形式で入力してください')
-        ]
+        ],
+        # ↓↓↓ 入力モードと自動補完の設定を追加 ↓↓↓
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email"
+        }
     )
-    password = PasswordField('パスワード', validators=[DataRequired(message='パスワードを入力してください')])
+    password = PasswordField(
+        'パスワード', 
+        validators=[DataRequired(message='パスワードを入力してください')],
+        # ↓↓↓ 半角英数字入力を促し、マネージャーとの連携を強化 ↓↓↓
+        render_kw={
+            "inputmode": "verbatim",
+            "autocomplete": "current-password"
+        }
+    )
     remember = BooleanField('ログイン状態を保持する')
     submit = SubmitField('ログイン')
 
