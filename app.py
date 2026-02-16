@@ -390,13 +390,22 @@ class TempRegistrationForm(FlaskForm):
         ]
     )
     
-     # メールアドレス
+    # メールアドレス
     email = StringField(
         'メールアドレス', 
         validators=[
             DataRequired(message='メールアドレスを入力してください'),
             Email(message='正しいメールアドレスを入力してください')
-        ]
+        ],
+        # HTML属性をPython側で一括管理
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email",
+            "autocapitalize": "none",
+            "autocorrect": "off",
+            "spellcheck": "false"
+        }
     )
 
     # メールアドレス確認
@@ -406,7 +415,16 @@ class TempRegistrationForm(FlaskForm):
             DataRequired(message='確認用メールアドレスを入力してください'),
             Email(message='正しいメールアドレスを入力してください'),
             EqualTo('email', message='メールアドレスが一致しません')
-        ]
+        ],
+        # emailと同じ設定を適用（コピペの手間を減らすなら共通変数にしてもOK）
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email",
+            "autocapitalize": "none",
+            "autocorrect": "off",
+            "spellcheck": "false"
+        }
     )
     
     # パスワード
