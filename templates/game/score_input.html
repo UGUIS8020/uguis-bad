@@ -155,87 +155,85 @@
 
     <!-- コートデータのループ -->
     <div class="row row-cols-1 g-4">
-        {% if match_courts and match_courts|length > 0 %}
-            {% for court_num, court in match_courts.items() %}
-            <div class="col">
-                <div class="card h-100 shadow-lg court-card">
-                    <div class="card-header bg-success text-white text-center">
-                        <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
-                    </div>
-                    <div class="card-body p-4">
+    {% if match_courts and match_courts|length > 0 %}
+        {% for court_num, court in match_courts.items() %}
+        <div class="col">
+            <div class="card h-100 shadow-lg court-card">
+                <div class="card-header bg-success text-white text-center">
+                    <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
+                </div>
+                <div class="card-body p-4">
                     <form class="score-form"
                           method="POST"
                           data-court-number="{{ court_num }}"
                           id="score-form-{{ court_num }}"
                           action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                      <!-- チームA -->
-                      <div class="score-row">
-                        <div class="d-flex justify-content-between align-items-center">
-                          <div class="d-flex align-items-center">
-                            <span class="badge bg-danger me-3 team-badge">A</span>
-                            <span class="team-name">
-                              {% for player in court.team_a %}
-                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                              {% endfor %}
-                            </span>
-                          </div>
-                          <input type="text" 
-                          name="team1_score" 
-                          class="form-control score-input text-center" 
-                          required 
-                          inputmode="decimal"
-                          pattern="[0-9]*"
-                          style="font-size: 2rem; height: 4rem;" 
-                          placeholder="0">
-                      </div>
+                        <div class="score-row mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="d-flex align-items-center flex-grow-1">
+                                    <span class="badge bg-danger me-3 team-badge">A</span>
+                                    <span class="team-name">
+                                        {% for player in court.team_a %}
+                                            {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div>
+                                <div style="width: 120px;">
+                                    <input type="text" 
+                                           name="team1_score" 
+                                           class="form-control score-input text-center" 
+                                           required 
+                                           inputmode="decimal"
+                                           pattern="[0-9]*"
+                                           style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;" 
+                                           placeholder="0">
+                                </div>
+                            </div>
+                        </div>
+                        
 
-                      <!-- VS表示 -->
-                      <div class="text-center my-4">
-                        <span class="vs-display">VS</span>
-                      </div>
+                        <div class="score-row mb-4">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="d-flex align-items-center flex-grow-1">
+                                    <span class="badge bg-primary me-3 team-badge">B</span>
+                                    <span class="team-name">
+                                        {% for player in court.team_b %}
+                                            {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div> <div style="width: 120px;">
+                                    <input type="text" 
+                                           name="team2_score" 
+                                           class="form-control score-input text-center" 
+                                           required 
+                                           inputmode="decimal"
+                                           pattern="[0-9]*"
+                                           style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;" 
+                                           placeholder="0">
+                                </div>
+                            </div>
+                        </div>
 
-                      <!-- チームB -->
-                      <div class="score-row">
-                        <div class="d-flex justify-content-between align-items-center">
-                          <div class="d-flex align-items-center">
-                            <span class="badge bg-primary me-3 team-badge">B</span>
-                            <span class="team-name">
-                              {% for player in court.team_b %}
-                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                              {% endfor %}
-                            </span>
-                          </div>
-                          <div style="width: 200px;">
-                            <input type="text" 
-                              name="team2_score" 
-                              class="form-control score-input text-center" 
-                              required 
-                              inputmode="decimal"
-                              pattern="[0-9]*"
-                              style="font-size: 2rem; height: 4rem;" 
-                              placeholder="0">
-                      </div>
-
-                      <div class="text-center mt-5">
-                        <button type="submit" class="btn btn-orange submit-btn">
-                          <i class="fas fa-trophy me-2"></i>スコア送信
-                        </button>
-                      </div>
+                        <div class="text-center mt-5">
+                            <button type="submit" class="btn btn-orange submit-btn w-100 py-3" style="font-size: 1.25rem; font-weight: bold; border-radius: 10px;">
+                                <i class="fas fa-trophy me-2"></i>スコア送信
+                            </button>
+                        </div>
                     </form>
-                  </div>
                 </div>
             </div>
-            {% endfor %}
-        {% else %}
-            <div class="col-12">
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle"></i> コートデータが設定されていません。管理者に連絡してください。
-                </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12">
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i> コートデータが設定されていません。管理者に連絡してください。
             </div>
-        {% endif %}
-    </div>
+        </div>
+    {% endif %}
+</div>
 
     <!-- 試合終了ボタン -->
     <form method="POST" action="{{ url_for('game.finish_current_match') }}">
