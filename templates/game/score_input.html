@@ -181,15 +181,15 @@
                               {% endfor %}
                             </span>
                           </div>
-                          <div style="width: 200px;">
-                            <input type="number"
-                                  name="team1_score"
-                                  class="form-control score-input text-center"
-                                  required
-                                  min="0" max="99" step="1"
-                                  inputmode="numeric"
-                                  placeholder="">
-                          </div>
+                          <input type="tel"
+                            name="team1_score"
+                            class="form-control score-input text-center"
+                            required
+                            min="0" max="99"
+                            inputmode="numeric"
+                            pattern="\d*"
+                            style="font-size: 2rem; height: 4rem;"
+                            placeholder="0">
                         </div>
                       </div>
 
@@ -210,14 +210,15 @@
                             </span>
                           </div>
                           <div style="width: 200px;">
-                            <input type="number"
-                                  name="team2_score"
-                                  class="form-control score-input text-center"
-                                  required
-                                  min="0" max="99" step="1"
-                                  inputmode="numeric"
-                                  placeholder="">
-                          </div>
+                            <input type="tel"
+                                name="team2_score"
+                                class="form-control score-input text-center"
+                                required
+                                min="0" max="99"
+                                inputmode="numeric"
+                                pattern="\d*"
+                                style="font-size: 2rem; height: 4rem;"
+                                placeholder="0">
                         </div>
                       </div>
 
