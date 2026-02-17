@@ -770,6 +770,7 @@
                         <!-- hidden で schedule_id / event_date を埋め込む -->
                         <input type="hidden" id="event-schedule-id" value="{{ s.schedule_id }}">
                         <input type="hidden" id="event-date" value="{{ s.date }}">
+                        <input type="hidden" id="csrf-token" value="{{ csrf_token() }}">
                     {% else %}
                         <div class="alert alert-secondary mb-0">
                         予約できる練習日は現在ありません。
@@ -786,7 +787,7 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
                 <button type="button" class="btn btn-success" id="confirmPointParticipation"
                         {% if not upcoming_schedules %}disabled{% endif %}>
-                <span id="confirm-button-text">600P</span>で参加する
+                <span id="confirm-button-text"></span>ポイントで参加する
                 </button>
             </div>
         </div>
@@ -848,9 +849,12 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>処理中...';
 
   try {
+    const csrfToken = document.getElementById('csrf-token').value;
     const response = await fetch('/uguu/point-participation', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json',
+                 'X-CSRFToken': csrfToken   
+       },
       body: JSON.stringify({
         user_id: '{{ user["user#user_id"] }}',
         schedule_id: scheduleId,
@@ -879,18 +883,6 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
   }
 });
 
-</script>
-
-<script>
-fetch("{{ url_for('users.point_participation') }}", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    user_id: "{{ current_user.id }}",
-    event_date: selectedDate, // "2025-11-03"
-    points_cost: 600
-  })
-});
 </script>
 
 {% endblock %}

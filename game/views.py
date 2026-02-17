@@ -260,7 +260,7 @@ def get_latest_match_id(hours_window=12):
 
             if status == "playing":
                 if current_match_id:
-                    logger.info("[get_latest_match_id] ongoing match_id=%s (meta)", current_match_id)
+                    logger.debug("[get_latest_match_id] ongoing match_id=%s (meta)", current_match_id)
                     return current_match_id
                 else:
                     # playing なのに current_match_id が空は不整合なので警告してフォールバック
@@ -324,7 +324,7 @@ def get_latest_match_id(hours_window=12):
             logger.warning("[get_latest_match_id] found playing entry but match_id is empty")
             return None
 
-        logger.info("[get_latest_match_id] ongoing match_id=%s (scan)", match_id)
+        logger.debug("[get_latest_match_id] ongoing match_id=%s (meta)", current_match_id)
         return match_id
 
     except Exception as e:
@@ -491,7 +491,7 @@ def get_players_status(status, user_id=None, debug_dump_all=False, debug_sample=
             it["join_count"] = it.get("join_count", 0)
 
         # --- INFO：件数のみ（常時） ---
-        logger.info(
+        logger.debug(
             "[get_players_status] status=%s user_id=%s count=%d",
             status,
             user_id or "-",
@@ -518,6 +518,7 @@ def get_players_status(status, user_id=None, debug_dump_all=False, debug_sample=
             user_id or "-",
         )
         return []
+    
     
     #get_current_user_status
     #現在のログインユーザーの状態だけ取得(1人（ログインユーザー)
@@ -1119,9 +1120,8 @@ def create_pairings():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
-        # 2) 優先順位（休憩多い→試合少ない→ランダム）
+        # 2) 優先順位（試合少ない→ランダム）
         sorted_entries = sorted(entries, key=lambda e: (
-            -e.get("rest_count", 0),
             e.get("match_count", 0),
             random.random()
         ))
@@ -1285,6 +1285,33 @@ def create_pairings():
                 flash("進行中の試合があるためペアリングできませんでした。", "warning")
                 return redirect(url_for("game.court"))
             raise
+
+        # ▼ 追加：待機者の rest_count をインクリメント
+        # for e in waiting_entries:
+        #     try:
+        #         entry_table.update_item(
+        #             Key={"entry_id": e["entry_id"]},
+        #             UpdateExpression="ADD rest_count :one",
+        #             ExpressionAttributeValues={":one": 1}
+        #         )
+        #         current_app.logger.info("rest_count+1: %s", e["display_name"])
+        #     except Exception as ex:
+        #         current_app.logger.error("rest_count更新エラー [%s]: %s", e["entry_id"], ex)
+
+        # ▼ 追加：generate_balanced_pairs_and_matches で余った待機者も更新
+        # for p in additional_waiting_players:
+        #     entry_id = name_to_id.get(p.name)
+        #     if not entry_id:
+        #         continue
+        #     try:
+        #         entry_table.update_item(
+        #             Key={"entry_id": entry_id},
+        #             UpdateExpression="ADD rest_count :one",
+        #             ExpressionAttributeValues={":one": 1}
+        #         )
+        #         current_app.logger.info("rest_count+1 (additional): %s", p.name)
+        #     except Exception as ex:
+        #         current_app.logger.error("rest_count更新エラー [%s]: %s", entry_id, ex)
 
         current_app.logger.info("ペアリング成功: %s試合, %s人待機", len(matches), len(waiting_players))
         return redirect(url_for("game.court"))
@@ -1766,7 +1793,7 @@ def finish_current_match():
                     "Key": {"entry_id": {"S": str(entry_id)}},
                     "UpdateExpression": (
                         "SET entry_status=:pending, updated_at=:now "
-                        "REMOVE court_number, team, team_side"
+                        "REMOVE court_number, team, team_side, match_id" 
                     ),
                     "ConditionExpression": "entry_status = :playing AND match_id = :mid",
                     "ExpressionAttributeValues": {
@@ -1827,7 +1854,7 @@ def finish_current_match():
 def start_next_match():
     try:
         latest_match_id = get_latest_match_id()
-        current_app.logger.info(f"最新の試合ID: {latest_match_id}")
+        current_app.logger.debug(f"最新の試合ID: {latest_match_id}")
         
         # 現在試合中のプレイヤーを取得
         current_players_by_court = get_match_players_by_court(latest_match_id)
@@ -2150,7 +2177,7 @@ def waiting_status():
     resting_players = get_players_status("resting")
 
     latest_match_id = get_latest_match_id()
-    current_app.logger.info(f"最新の試合ID: {latest_match_id}")
+    current_app.logger.debug(f"最新の試合ID: {latest_match_id}")
 
     in_progress = False
 

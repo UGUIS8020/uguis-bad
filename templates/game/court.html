@@ -368,23 +368,7 @@
         {% if current_user.administrator %}
         <div class="card status-card mb-4">
             <div class="card-body">
-                <!-- 進行中の試合がある場合の表示 -->
-                {% if has_ongoing_matches %}
-                <div class="alert alert-warning mb-3">
-                    <div class="d-flex align-items-center">
-                        <i class="fa-solid fa-clock me-2"></i>
-                        <div>
-                            <strong>進行中の試合があります</strong>
-                            <div class="small">{{ completed_matches }}/{{ total_matches }}試合完了</div>
-                        </div>
-                    </div>
-                    <div class="progress mt-2" style="height: 8px;">
-                        <div class="progress-bar bg-warning" 
-                             style="width: {{ (completed_matches / total_matches * 100) if total_matches > 0 else 0 }}%">
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
+                <!-- 進行中の試合がある場合の表示 -->                
                 
                 <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
 
@@ -648,10 +632,39 @@
             updateTimestamp();
             updateSkillScore();
 
-            setInterval(() => {
-                checkForUpdates();
-                updateSkillScore();
-            }, 20000);
+            // ポーリング管理
+            let intervalId = null;
+
+            function startPolling() {
+                if (intervalId) return;
+                intervalId = setInterval(() => {
+                    checkForUpdates();
+                    updateSkillScore();
+                }, 25000);  // 25秒
+            }
+
+            function stopPolling() {
+                if (intervalId) {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }
+            }
+
+            // タブの表示/非表示を検知
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    stopPolling();
+                    console.log('⏸ タブ非表示 → ポーリング停止');
+                } else {
+                    console.log('▶ タブ復帰 → 即時更新');
+                    checkForUpdates();
+                    updateSkillScore();
+                    startPolling();
+                }
+            });
+
+            // 初期起動
+            startPolling();
 
             const refreshButton = document.getElementById('manualRefreshBtn');
             if (refreshButton) {
@@ -661,8 +674,6 @@
                     updateSkillScore();
                 });
             }
-
-
         });
     </script>
 </body>

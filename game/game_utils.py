@@ -183,8 +183,24 @@ def update_trueskill_for_players_and_return_updates(result_item):
             }
 
     except Exception as e:
-        current_app.logger.error(f"TrueSkillエラー: {str(e)}")
-        
+        current_app.logger.error(f"TrueSkillエラー: {str(e)}")        
+    
+    for uid, vals in updated_skills.items():
+        if str(uid).startswith("test_"):
+            continue
+        try:
+            user_table.update_item(
+                Key={"user#user_id": uid},
+                UpdateExpression="SET skill_score = :s, skill_sigma = :g",
+                ExpressionAttributeValues={
+                    ":s": Decimal(str(round(vals["skill_score"], 2))),
+                    ":g": Decimal(str(round(vals["skill_sigma"], 4)))
+                }
+            )
+            current_app.logger.info(f"スキル永続化: {uid} → {vals['skill_score']:.2f}")
+        except Exception as e:
+            current_app.logger.error(f"スキル永続化エラー [{uid}]: {e}")   
+
     return updated_skills
 
 
