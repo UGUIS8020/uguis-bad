@@ -112,7 +112,21 @@
                 font-size: 2rem !important;
                 padding: 0.6rem 1rem !important;
             }
+        }        
+        .score-stepper{
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
+        .score-step-btn{
+          width: 5rem;
+          height: 4.5rem;
+          font-size: 2.5rem;
+          font-weight: bold;
+          padding: 0;
+          line-height: 0;
+        }
+      
     </style>
 
 <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -180,15 +194,27 @@
                                         {% endfor %}
                                     </span>
                                 </div>
-                                <div style="width: 120px;">
-                                    <input type="text" 
-                                           name="team1_score" 
-                                           class="form-control score-input text-center" 
-                                           required 
-                                           inputmode="decimal"
-                                           pattern="[0-9]*"
-                                           style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;" 
-                                           placeholder="0">
+                                <div class="score-stepper" style="width: 220px;">
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, -1)">－</button>
+
+                                  <input type="text"
+                                        name="team1_score"
+                                        class="form-control score-input text-center"
+                                        value="21"
+                                        required
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;"
+                                        placeholder="0"
+                                        data-min="0"
+                                        data-max="99"
+                                        data-step="1">
+
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, 1)">＋</button>
                                 </div>
                             </div>
                         </div>
@@ -203,15 +229,28 @@
                                             {{ player.display_name }}{% if not loop.last %} & {% endif %}
                                         {% endfor %}
                                     </span>
-                                </div> <div style="width: 120px;">
-                                    <input type="text" 
-                                           name="team2_score" 
-                                           class="form-control score-input text-center" 
-                                           required 
-                                           inputmode="decimal"
-                                           pattern="[0-9]*"
-                                           style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;" 
-                                           placeholder="0">
+                                </div> 
+                                <div class="score-stepper" style="width: 220px;">
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, -1)">－</button>
+
+                                  <input type="text"
+                                        name="team2_score"
+                                        class="form-control score-input text-center"
+                                        value="21"
+                                        required
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;"
+                                        placeholder="0"
+                                        data-min="0"
+                                        data-max="99"
+                                        data-step="1">
+
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, 1)">＋</button>
                                 </div>
                             </div>
                         </div>
@@ -492,6 +531,41 @@ function toggleDebug() {
   const debugInfo = document.getElementById("debug-info");
   debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
 }
+</script>
+
+<script>
+  function stepScore(btn, deltaSign) {
+    // btn の親(.score-stepper)から input を探す
+    const wrapper = btn.closest('.score-stepper');
+    const input = wrapper.querySelector('input.score-input');
+
+    const step = parseInt(input.dataset.step || '1', 10);
+    const min  = parseInt(input.dataset.min  || '0', 10);
+    const max  = parseInt(input.dataset.max  || '999', 10);
+
+    // 現在値（空や不正なら 0）
+    let v = parseInt((input.value || '0').replace(/[^\d]/g, ''), 10);
+    if (Number.isNaN(v)) v = 0;
+
+    // 増減
+    v = v + (deltaSign * step);
+
+    // clamp
+    if (v < min) v = min;
+    if (v > max) v = max;
+
+    input.value = String(v);
+
+    // もし「入力変更イベント」で他処理してるなら発火
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // 手入力でも数字以外を除去（任意）
+  document.addEventListener('input', (e) => {
+    if (!e.target.classList.contains('score-input')) return;
+    e.target.value = e.target.value.replace(/[^\d]/g, '');
+  });
 </script>
 
 </body>
