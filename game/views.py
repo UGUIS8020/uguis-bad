@@ -20,6 +20,8 @@ import json
 
 JST = ZoneInfo("Asia/Tokyo")
 
+logger = logging.getLogger(__name__)
+
 bp_game = Blueprint('game', __name__)
 
 
@@ -1090,7 +1092,7 @@ def weighted_sample_no_replace(items, weights, k):
 @bp_game.route('/create_pairings', methods=["POST"])
 @login_required
 def create_pairings():
-    # ここでの has_ongoing_matches() は「画面メッセージ用」程度
+
     if has_ongoing_matches():
         flash('進行中の試合があるため、新しいペアリングを実行できません。全ての試合のスコア入力を完了してください。', 'warning')
         return redirect(url_for('game.court'))
@@ -1148,7 +1150,7 @@ def create_pairings():
             active_entries = [e for e in sorted_entries if e["entry_id"] not in waiting_ids]
             waiting_entries = [e for e in sorted_entries if e["entry_id"] in waiting_ids]
 
-            current_app.logger.debug("[wait-bias] waiting_count=%s, low_bias=%s", waiting_count, LOW_BIAS)
+            current_app.logger.info("[wait-bias] waiting_count=%s, low_bias=%s", waiting_count, LOW_BIAS)
         else:
             active_entries = sorted_entries
             waiting_entries = []
@@ -1285,33 +1287,6 @@ def create_pairings():
                 flash("進行中の試合があるためペアリングできませんでした。", "warning")
                 return redirect(url_for("game.court"))
             raise
-
-        # ▼ 追加：待機者の rest_count をインクリメント
-        # for e in waiting_entries:
-        #     try:
-        #         entry_table.update_item(
-        #             Key={"entry_id": e["entry_id"]},
-        #             UpdateExpression="ADD rest_count :one",
-        #             ExpressionAttributeValues={":one": 1}
-        #         )
-        #         current_app.logger.info("rest_count+1: %s", e["display_name"])
-        #     except Exception as ex:
-        #         current_app.logger.error("rest_count更新エラー [%s]: %s", e["entry_id"], ex)
-
-        # ▼ 追加：generate_balanced_pairs_and_matches で余った待機者も更新
-        # for p in additional_waiting_players:
-        #     entry_id = name_to_id.get(p.name)
-        #     if not entry_id:
-        #         continue
-        #     try:
-        #         entry_table.update_item(
-        #             Key={"entry_id": entry_id},
-        #             UpdateExpression="ADD rest_count :one",
-        #             ExpressionAttributeValues={":one": 1}
-        #         )
-        #         current_app.logger.info("rest_count+1 (additional): %s", p.name)
-        #     except Exception as ex:
-        #         current_app.logger.error("rest_count更新エラー [%s]: %s", entry_id, ex)
 
         current_app.logger.info("ペアリング成功: %s試合, %s人待機", len(matches), len(waiting_players))
         return redirect(url_for("game.court"))
@@ -1929,11 +1904,53 @@ def start_next_match():
         flash(f"エラーが発生しました: {str(e)}", "danger")
         return redirect(url_for("game.court"))
 
+# @bp_game.route("/pairings", methods=["GET"])
+# @login_required
+# def show_pairings():
+#     try:
+#         match_id = get_latest_match_id()  # 最新のmatch_id取得（例: '20250701_027'）
+
+#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
+#         response = match_table.scan(
+#             FilterExpression=Attr("match_id").eq(match_id) & Attr("type").ne("meta")
+#         )
+#         items = response.get("Items", [])
+
+#         # コートごとにまとめる
+#         court_dict = {}
+#         for item in items:
+#             court_no = item.get("court_number")
+#             team = item.get("team")  # 'A' or 'B'
+#             name = item.get("display_name")
+
+#             if court_no not in court_dict:
+#                 court_dict[court_no] = {"team_a": [], "team_b": []}
+#             if team == "A":
+#                 court_dict[court_no]["team_a"].append(name)
+#             elif team == "B":
+#                 court_dict[court_no]["team_b"].append(name)
+
+#         # court_dict を match_data のリスト形式に変換
+#         match_data = []
+#         for court_no in sorted(court_dict):
+#             match_data.append({
+#                 "court_number": court_no,
+#                 "team_a": court_dict[court_no]["team_a"],
+#                 "team_b": court_dict[court_no]["team_b"]
+#             })
+
+#         return render_template("game/court.html", match_data=match_data)
+
+#     except Exception as e:
+#         current_app.logger.error(f"[pairings] エラー: {str(e)}")
+#         return redirect(url_for("main.index"))
+    
+
 @bp_game.route("/pairings", methods=["GET"])
 @login_required
 def show_pairings():
     try:
-        match_id = get_latest_match_id()  # 最新のmatch_id取得（例: '20250701_027'）
+        match_id = get_latest_match_id()
 
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
         response = match_table.scan(
@@ -1941,27 +1958,35 @@ def show_pairings():
         )
         items = response.get("Items", [])
 
-        # コートごとにまとめる
         court_dict = {}
         for item in items:
             court_no = item.get("court_number")
             team = item.get("team")  # 'A' or 'B'
-            name = item.get("display_name")
+
+            # ★テンプレで使いたい情報をここでまとめる
+            player = {
+                "user_id": item.get("user_id"),
+                "display_name": item.get("display_name") or "名前なし",
+                "join_count": int(item.get("join_count", 0)),
+                "match_count": int(item.get("match_count", 0)),
+                "rest_count": int(item.get("rest_count", 0)),
+                "skill_score": item.get("skill_score"),  # DecimalのままでもOK
+            }
 
             if court_no not in court_dict:
                 court_dict[court_no] = {"team_a": [], "team_b": []}
-            if team == "A":
-                court_dict[court_no]["team_a"].append(name)
-            elif team == "B":
-                court_dict[court_no]["team_b"].append(name)
 
-        # court_dict を match_data のリスト形式に変換
+            if team == "A":
+                court_dict[court_no]["team_a"].append(player)
+            elif team == "B":
+                court_dict[court_no]["team_b"].append(player)
+
         match_data = []
         for court_no in sorted(court_dict):
             match_data.append({
                 "court_number": court_no,
                 "team_a": court_dict[court_no]["team_a"],
-                "team_b": court_dict[court_no]["team_b"]
+                "team_b": court_dict[court_no]["team_b"],
             })
 
         return render_template("game/court.html", match_data=match_data)
@@ -1969,6 +1994,7 @@ def show_pairings():
     except Exception as e:
         current_app.logger.error(f"[pairings] エラー: {str(e)}")
         return redirect(url_for("main.index"))
+
 
 def generate_match_id():
     """試合IDを生成（時分秒を使用してユニーク性を保証）"""
@@ -2587,7 +2613,7 @@ def get_organized_match_data(match_id):
         summary_list.append(f"C{c_num}:[{a_names} vs {b_names}]")
     
     current_app.logger.info(
-        f"📊 試合データ取得: match_id={match_id} | 構成: {' / '.join(summary_list)}"
+        f"試合データ取得: match_id={match_id} | 構成: {' / '.join(summary_list)}"
     )
 
     return match_courts
@@ -2604,7 +2630,6 @@ def api_skill_score():
 
     score = float(response["Item"].get("skill_score", 50))
     return jsonify({"skill_score": round(score, 2)})
-
 
 
 @bp_game.route('/create_test_data')

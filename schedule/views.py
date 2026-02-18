@@ -118,7 +118,7 @@ def admin_schedules():
         response = schedule_table.scan()
         all_schedules = response.get('Items', [])
 
-        logger.info(f"📊 スケジュール取得件数: {len(all_schedules)} 件")
+        logger.info(f"スケジュール取得件数: {len(all_schedules)} 件")
 
         schedules = sorted(
             all_schedules,

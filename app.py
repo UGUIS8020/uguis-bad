@@ -146,13 +146,15 @@ def create_app():
 
     app.uguu_db = DynamoDB()
 
-    # --- ログレベル設定 ---
-    if IS_PROD:
-        logging.basicConfig(level=logging.WARNING)
-        app.logger.setLevel(logging.WARNING)
-    else:
-        logging.basicConfig(level=logging.INFO)
-        app.logger.setLevel(logging.INFO)
+    log_level = logging.INFO 
+    
+    logging.basicConfig(
+        level=log_level,  # 変数を使って INFO (または logging.INFO) に固定
+        format='[%(levelname)s] %(name)s: %(message)s',
+        force=True
+    )
+    
+    app.logger.setLevel(log_level)   
 
     return app
 

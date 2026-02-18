@@ -302,8 +302,7 @@
                         data-current-status="pending"
                         {% endif %}>
                         <div class="fs-5 fw-semibold">
-                            {{ player.display_name }}
-                        </div>
+                            {{ player.display_name }}                        </div>
                         <div class="fs-5 fw-semibold">
                             {% if player.join_count is defined %}
                                 <span class="badge bg-info me-1">{{ player.join_count }}回</span>
@@ -340,8 +339,7 @@
                         data-player-name="{{ player.display_name }}"
                         data-current-status="resting"
                         {% endif %}>
-                        <div class="fw-bold fs-5 mb-1 text-warning">
-                            {{ player.display_name if player.display_name else '名前なし' }}
+                        <div class="fw-bold fs-5 mb-1 text-warning">                            
                         </div>
                         <div class="fs-5 fw-semibold">
                             {% if player.join_count is defined %}

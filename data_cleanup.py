@@ -204,7 +204,7 @@ def cleanup_duplicates(db, duplicates, batch_size=50):
         # バッチサイズごとに確認
         if i % batch_size == 0 and i < total_groups:
             print(f"\n\n{'='*80}")
-            print(f"📊 進捗レポート ({i}/{total_groups}件処理完了)")
+            print(f"進捗レポート ({i}/{total_groups}件処理完了)")
             print(f"{'='*80}")
             print(f"削除完了: {deleted_count}レコード")
             print(f"エラー: {error_count}件")

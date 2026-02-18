@@ -387,3 +387,69 @@ def generate_matches_by_pair_skill_balance(pairs: List[Tuple[Player, Player]], m
     unused_pairs = [scored_pairs[i][0] for i in range(len(scored_pairs)) if i not in used_indices]
 
     return matches, unused_pairs
+
+
+def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
+    """
+    シミュレーションを行い、全コートのスキルバランスが最も均等な組み合わせを返す。
+    """
+    # 試合に必要な人数（4の倍数）
+    num_active = len(active_players)
+    required_players_count = (num_active // 4) * 4
+    num_courts = min(max_courts, required_players_count // 4)
+
+    if num_courts == 0:
+        return [], active_players
+
+    best_matches = []
+    best_waiting = []
+    min_total_penalty = float('inf')
+
+    for i in range(iterations):
+        # 1) シャッフルして仮の組分けを作る
+        temp_players = active_players[:]
+        random.shuffle(temp_players)
+        
+        current_active = temp_players[:num_courts * 4]
+        current_waiting = temp_players[num_courts * 4:]
+        
+        current_matches = []
+        total_penalty = 0
+        
+        # 2) 4人ずつコートに割り振り、スキル差を計算
+        for c in range(num_courts):
+            # 4人抽出
+            p1, p2, p3, p4 = current_active[c*4 : (c+1)*4]
+            
+            # チーム分けの全3パターンを試して、そのコート内でのベストを探す
+            # (p1,p2 vs p3,p4), (p1,p3 vs p2,p4), (p1,p4 vs p2,p3)
+            possible_teams = [
+                ((p1, p2), (p3, p4)),
+                ((p1, p3), (p2, p4)),
+                ((p1, p4), (p2, p3))
+            ]
+            
+            best_court_diff = float('inf')
+            best_court_pair = None
+            
+            for t1, t2 in possible_teams:
+                # 平均スキルの差（conservativeスキルを使用）
+                avg1 = (t1[0].skill_score + t1[1].skill_score) / 2
+                avg2 = (t2[0].skill_score + t2[1].skill_score) / 2
+                diff = abs(avg1 - avg2)
+                
+                if diff < best_court_diff:
+                    best_court_diff = diff
+                    best_court_pair = (t1, t2)
+            
+            current_matches.append(best_court_pair)
+            # 二乗ペナルティ：大きな実力差があるコートをより厳しく評価
+            total_penalty += (best_court_diff ** 2)
+
+        # 3) 全体評価が過去最高なら更新
+        if total_penalty < min_total_penalty:
+            min_total_penalty = total_penalty
+            best_matches = current_matches
+            best_waiting = current_waiting
+
+    return best_matches, best_waiting
