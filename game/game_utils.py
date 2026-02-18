@@ -121,85 +121,90 @@ def update_trueskill_for_players_and_return_updates(result_item):
 
     # 【削除】RawItemのログを削除（中身が巨大なため）
 
-    def get_team_ratings(team):
+    def normalize_user_pk(uid: str) -> str:
+        uid = str(uid)
+        return uid if uid.startswith("user#") else f"user#{uid}"
+
+    def get_team_ratings(team, user_table):
         ratings = []
         for player in team:
             uid = player.get("user_id")
-            if not uid: continue
+            if not uid:
+                continue
+
+            mu = player.get("skill_score")
+            sig = player.get("skill_sigma")
+
+            if mu is None or sig is None:
+                try:
+                    res = user_table.get_item(Key={"user#user_id": normalize_user_pk(uid)})
+                    data = res.get("Item", {}) or {}
+                    mu = data.get("skill_score", 25.0)
+                    sig = data.get("skill_sigma", 8.333)
+                except Exception:
+                    mu, sig = 25.0, 8.333
+
             try:
-                # 【整理】個別取得の開始ログを削除し、失敗時のみログを出す
-                res = user_table.get_item(Key={"user#user_id": uid})
-                data = res.get("Item", {})
-                mu = float(data.get("skill_score", 25.0))
-                sig = float(data.get("skill_sigma", 8.333))
-                ratings.append((uid, Rating(mu=mu, sigma=sig)))
-            except:
-                ratings.append((uid, Rating(mu=25.0, sigma=8.333)))
+                mu = float(mu)
+            except Exception:
+                mu = 25.0
+            try:
+                sig = float(sig)
+            except Exception:
+                sig = 8.333
+
+            ratings.append((str(uid), Rating(mu=mu, sigma=sig)))
+
         return ratings
 
-    ratings_a = get_team_ratings(result_item.get("team_a", []))
-    ratings_b = get_team_ratings(result_item.get("team_b", []))
+    # --- ここで user_table を用意 ---
+    user_table = current_app.dynamodb.Table("bad-users")
 
-    if not ratings_a or not ratings_b: return {}
+    ratings_a = get_team_ratings(result_item.get("team_a", []), user_table)
+    ratings_b = get_team_ratings(result_item.get("team_b", []), user_table)
 
-    try:
-        if winner == "A":
-            new_r = rate([[r for _, r in ratings_a], [r for _, r in ratings_b]])
-            new_a_list, new_b_list = new_r[0], new_r[1]
-        else:
-            new_r = rate([[r for _, r in ratings_b], [r for _, r in ratings_a]])
-            new_a_list, new_b_list = new_r[1], new_r[0]
+    if not ratings_a or not ratings_b:
+        return {}
 
-        team_a_mu = sum(r.mu for _, r in ratings_a) / len(ratings_a)
-        team_b_mu = sum(r.mu for _, r in ratings_b) / len(ratings_b)
-        skill_diff = team_a_mu - team_b_mu
-        
-        expected = "A" if skill_diff > 0 else "B"
-        consistency = abs(skill_diff) if expected == winner else -abs(skill_diff)
-        
-        score_adj = 0.8 + (1.5 - 0.8) * min(abs(score_diff) / 20.0, 1.0)
-        const_adj = 1.0 - (min(max(consistency / 15.0, -1.0), 1.0) * 0.3)
-        final_adj = score_adj * const_adj
+    team_a_uids = [uid for uid, r in ratings_a]
+    team_b_uids = [uid for uid, r in ratings_b]
+    team_a_ratings = [r for uid, r in ratings_a]
+    team_b_ratings = [r for uid, r in ratings_b]
 
-        # --- 更新サマリーを1行に凝縮 ---
-        # どのコートか特定するために match_id も含める
-        m_id = result_item.get("match_id", "???")
-        current_app.logger.info(
-            f"SkillCalc: match={m_id} | 勝者:{winner} ({t1}-{t2}) | "
-            f"チームスキル差:{skill_diff:.2f} | 最終調整係数:{final_adj:.2f}"
-        )
+    # 勝敗 → ranks（小さいほど勝ち）
+    ranks = [0, 1] if winner == "A" else [1, 0]
 
-        for i, (uid, old_r) in enumerate(ratings_a):
-            delta = new_a_list[i].mu - old_r.mu
-            updated_skills[uid] = {
-                "skill_score": old_r.mu + (delta * final_adj),
-                "skill_sigma": new_a_list[i].sigma
-            }
-        for i, (uid, old_r) in enumerate(ratings_b):
-            delta = new_b_list[i].mu - old_r.mu
-            updated_skills[uid] = {
-                "skill_score": old_r.mu + (delta * final_adj),
-                "skill_sigma": new_b_list[i].sigma
-            }
+    new_team_a, new_team_b = rate([team_a_ratings, team_b_ratings], ranks=ranks)
 
-    except Exception as e:
-        current_app.logger.error(f"TrueSkillエラー: {str(e)}")        
-    
+    updated_skills = {}
+    for uid, new_r in zip(team_a_uids, new_team_a):
+        updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
+    for uid, new_r in zip(team_b_uids, new_team_b):
+        updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
+
+    current_app.logger.info(
+        "[ts-after-rate] match=%s court=%s | updated=%d sample=%s",
+        result_item.get("match_id"),
+        result_item.get("court_number"),
+        len(updated_skills),
+        next(iter(updated_skills.items()), None),
+    )
+
     for uid, vals in updated_skills.items():
         if str(uid).startswith("test_"):
             continue
         try:
             user_table.update_item(
-                Key={"user#user_id": uid},
+                Key={"user#user_id": normalize_user_pk(uid)},
                 UpdateExpression="SET skill_score = :s, skill_sigma = :g",
                 ExpressionAttributeValues={
                     ":s": Decimal(str(round(vals["skill_score"], 2))),
-                    ":g": Decimal(str(round(vals["skill_sigma"], 4)))
+                    ":g": Decimal(str(round(vals["skill_sigma"], 4))),
                 }
             )
             current_app.logger.info(f"スキル永続化: {uid} → {vals['skill_score']:.2f}")
         except Exception as e:
-            current_app.logger.error(f"スキル永続化エラー [{uid}]: {e}")   
+            current_app.logger.error(f"スキル永続化エラー [{uid}]: {e}")
 
     return updated_skills
 
@@ -252,20 +257,42 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     return sync_count
 
 
-def parse_players(team):
-    """文字列 or 辞書が混在しているチームデータを統一フォーマットに変換"""
-    parsed = []
-    for p in team:
-        if isinstance(p, str):
-            # 古い形式：user_id のみ
-            parsed.append({"user_id": p, "display_name": "", "skill_score": 50})
-        elif isinstance(p, dict):
-            parsed.append({
-                "user_id": p.get("user_id"),
-                "display_name": p.get("display_name", ""),
-                "skill_score": int(p.get("skill_score", 50))
-            })
-    return parsed
+def parse_players(val):
+    """
+    team_a/team_b を list[dict] に正規化して返す
+    - val が list ならそのまま
+    - val が JSON文字列なら loads
+    - それ以外は []
+    """
+    if val is None:
+        return []
+
+    # すでに list で来ている（DynamoDBからの復元でよくある）
+    if isinstance(val, list):
+        out = []
+        for x in val:
+            if isinstance(x, dict):
+                # user_id を str に寄せる（後段のキー一致のため）
+                if "user_id" in x:
+                    x["user_id"] = str(x["user_id"])
+                out.append(x)
+        return out
+
+    # 文字列（JSON）
+    if isinstance(val, str):
+        try:
+            obj = json.loads(val)
+            return parse_players(obj)  # 再帰でlist処理へ
+        except Exception:
+            return []
+
+    # その他（dict単体など）も一応吸う
+    if isinstance(val, dict):
+        if "user_id" in val:
+            val["user_id"] = str(val["user_id"])
+        return [val]
+
+    return []
 
 def get_user_data(user_id, user_table):
     try:
@@ -274,9 +301,6 @@ def get_user_data(user_id, user_table):
     except Exception as e:
         current_app.logger.warning(f"[get_user_data ERROR] user_id={user_id}: {e}")
         return None
-    
-
-
 
 
 @dataclass
@@ -360,33 +384,56 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
 
     return pairs, waiting_players
 
-def generate_matches_by_pair_skill_balance(pairs: List[Tuple[Player, Player]], max_courts: int) -> Tuple[List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]], List[Tuple[Player, Player]]]:
-    """
-    ペア同士のスキル合計が近いように、試合を組む（1試合=2ペア）。
-    余ったペアは試合に使わない（→待機として返す）。
-    """
-    # 各ペアのスキル合計を算出
-    scored_pairs = [(pair, pair[0].level + pair[1].level) for pair in pairs]
 
-    # スキル順に並べて、近いもの同士をペア化
-    scored_pairs.sort(key=lambda x: x[1])
+def generate_matches_by_pair_skill_balance(
+    pairs: List[Tuple[Player, Player]],
+    max_courts: int
+):
+    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+    scored.sort(key=lambda x: x[1])
 
-    max_matches = min(len(scored_pairs) // 2, max_courts)
-    matches = []
-    used_indices = set()
+    max_matches = min(len(scored) // 2, max_courts)
+    matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
+    used = [False] * len(scored)
 
-    i = 0
-    while len(matches) < max_matches and i + 1 < len(scored_pairs):
-        pair1 = scored_pairs[i][0]
-        pair2 = scored_pairs[i + 1][0]
-        matches.append((pair1, pair2))
-        used_indices.update([i, i + 1])
-        i += 2
+    for _ in range(max_matches):
+        # まだ使ってない最小のペアを探す
+        i = next((k for k, u in enumerate(used) if not u), None)
+        if i is None:
+            break
+        used[i] = True
 
-    # 使用されなかったペアは待機として返す
-    unused_pairs = [scored_pairs[i][0] for i in range(len(scored_pairs)) if i not in used_indices]
+        # i と最も差が小さい未使用ペアを探す
+        best_j = None
+        best_diff = float("inf")
+        for j in range(i + 1, len(scored)):
+            if used[j]:
+                continue
+            diff = abs(scored[i][1] - scored[j][1])
+            if diff < best_diff:
+                best_diff = diff
+                best_j = j
+                if best_diff == 0:
+                    break
 
+        if best_j is None:
+            # 相手が見つからないなら戻す
+            used[i] = False
+            break
+
+        used[best_j] = True
+        matches.append((scored[i][0], scored[best_j][0]))
+
+    unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
     return matches, unused_pairs
+
+
+def pair_strength(p1: Player, p2: Player) -> float:
+    s1 = getattr(p1, "skill_score", None)
+    s2 = getattr(p2, "skill_score", None)
+    if s1 is not None and s2 is not None:
+        return float(s1) + float(s2)
+    return float(getattr(p1, "level", 0)) + float(getattr(p2, "level", 0))
 
 
 def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
@@ -453,3 +500,4 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
             best_waiting = current_waiting
 
     return best_matches, best_waiting
+
