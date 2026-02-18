@@ -1,7 +1,7 @@
 from flask import current_app
 from trueskill import TrueSkill
 import random
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -501,3 +501,211 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
 
     return best_matches, best_waiting
 
+
+# 待機者選出ロジック（キュー方式）
+def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[list, list]:
+    """
+    sorted_entries: 休み選出前の候補（既に優先度順などでソート済みを想定）
+    waiting_count: 休みにする人数
+
+    Returns:
+        (active_entries, waiting_entries)
+    """
+    if waiting_count <= 0:
+        return sorted_entries, []
+
+    n = len(sorted_entries)
+    if n == 0:
+        return [], []
+    # 全員休み事故を防止（必要なら調整）
+    if waiting_count >= n:
+        waiting_count = max(0, n - 1)
+
+    active_entries, waiting_entries, meta = _pick_waiters_by_rest_queue(
+        entries=sorted_entries,
+        waiting_count=waiting_count,
+    )
+
+    current_app.logger.info(
+        "[rest_queue] gen=%s ver=%s waiting=%s queue_remaining=%s",
+        meta.get("generation"),
+        meta.get("version"),
+        ", ".join([e.get("display_name", "?") for e in waiting_entries]),
+        meta.get("queue_remaining"),
+    )
+    return active_entries, waiting_entries
+
+
+def _pick_waiters_by_rest_queue(
+    entries: List[Dict[str, Any]],
+    waiting_count: int,
+    *,
+    queue_key: str = "rest_queue",
+    max_retries: int = 5,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    休みロジック本体（キュー方式）
+    - 1巡するまで同じ人が2回休みにならない（キュー消費）
+    - 途中参加者は末尾
+    - 離脱者は除去
+    - キュー不足時は「残りを使い切ってから」次巡で補う（途中参加末尾の思想を壊しにくい）
+    - DynamoDB に version を持たせて簡易の競合対策（楽観ロック）
+
+    Returns:
+      active_entries, waiting_entries, meta
+    """
+    meta_table = current_app.dynamodb.Table("bad-game-matches")
+
+    # entries から必要情報
+    current_user_ids = [e["user_id"] for e in entries]
+    current_user_set = set(current_user_ids)
+    by_id = {e["user_id"]: e for e in entries}
+
+    for attempt in range(1, max_retries + 1):
+        queue_item = _load_rest_queue(meta_table, queue_key=queue_key)
+
+        queue: List[str] = list(queue_item.get("queue", []))
+        generation: int = int(queue_item.get("generation", 1))
+        version: int = int(queue_item.get("version", 0))
+
+        # --- 1) 不整合修正: 離脱者除去 ---
+        queue = [uid for uid in queue if uid in current_user_set]
+
+        # --- 2) 途中参加者: 末尾追加（キューにいない人） ---
+        queued_set = set(queue)
+        newcomers = [uid for uid in current_user_ids if uid not in queued_set]
+        if newcomers:
+            # 末尾に追加（順序はランダムでも良い／固定でも良い）
+            random.shuffle(newcomers)
+            queue.extend(newcomers)
+            current_app.logger.info("[rest_queue] newcomers added: %s", newcomers)
+
+        # --- 3) waiting_pick を作る（不足分は次巡から補う） ---
+        waiting_pick: List[str] = []
+
+        take1 = min(waiting_count, len(queue))
+        if take1 > 0:
+            waiting_pick.extend(queue[:take1])
+            queue = queue[take1:]
+
+        need = waiting_count - len(waiting_pick)
+        if need > 0:
+            # 次巡を生成して不足分だけ取る（残りは次巡のキューとして保存）
+            new_queue = list(current_user_ids)
+            random.shuffle(new_queue)
+            generation += 1
+
+            waiting_pick.extend(new_queue[:need])
+            queue = new_queue[need:]
+
+        waiting_ids = set(waiting_pick)
+
+        # --- 4) 返却: waiting はキュー順（waiting_pick順）で返す ---
+        waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
+        active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
+
+        # --- 5) 保存（version で楽観ロック） ---
+        save_ok = _save_rest_queue_optimistic(
+            meta_table,
+            queue_key=queue_key,
+            queue=queue,
+            generation=generation,
+            prev_version=version,
+        )
+        if save_ok:
+            meta = {
+                "generation": generation,
+                "version": version + 1,
+                "queue_remaining": len(queue),
+                "attempt": attempt,
+            }
+            return active_entries, waiting_entries, meta
+
+        # 競合したのでリトライ
+        current_app.logger.warning("[rest_queue] conflict retry %d/%d", attempt, max_retries)
+
+    # リトライ尽きたら最後は安全側：今回だけはキュー無しランダムで返す（落とさないため）
+    current_app.logger.error("[rest_queue] failed to save after retries; fallback random")
+    uids = list(current_user_ids)
+    random.shuffle(uids)
+    waiting_pick = uids[:waiting_count]
+    waiting_ids = set(waiting_pick)
+    waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
+    active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
+    meta = {"generation": None, "version": None, "queue_remaining": None, "attempt": max_retries, "fallback": True}
+    return active_entries, waiting_entries, meta
+
+
+def _load_rest_queue(meta_table, *, queue_key: str) -> Dict[str, Any]:
+    resp = meta_table.get_item(Key={"match_id": queue_key}, ConsistentRead=True)
+    item = resp.get("Item") or {}
+    # 初回のデフォルト
+    if "queue" not in item:
+        item["queue"] = []
+    if "generation" not in item:
+        item["generation"] = 1
+    if "version" not in item:
+        item["version"] = 0
+    return item
+
+
+def _save_rest_queue_optimistic(
+    meta_table,
+    *,
+    queue_key: str,
+    queue: List[str],
+    generation: int,
+    prev_version: int,
+) -> bool:
+    """
+    version を使った簡易な競合対策（楽観ロック）
+    - 既存アイテムがある: version が prev_version のときだけ更新
+    - 無い場合: attribute_not_exists(match_id) で作成（version=1）
+    """
+    now = datetime.now(JST).isoformat()
+
+    # 既存あり更新（Condition: version一致）
+    try:
+        meta_table.update_item(
+            Key={"match_id": queue_key},
+            UpdateExpression="SET #q=:q, generation=:g, updated_at=:u, version=:nv",
+            ConditionExpression="attribute_exists(match_id) AND version = :pv",
+            ExpressionAttributeNames={"#q": "queue"},
+            ExpressionAttributeValues={
+                ":q": queue,
+                ":g": int(generation),
+                ":u": now,
+                ":pv": int(prev_version),
+                ":nv": int(prev_version + 1),
+            },
+        )
+        return True
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        if code == "ConditionalCheckFailedException":
+            # 既存が無い or version競合の可能性
+            pass
+        else:
+            # 想定外は上に投げても良いが、ここでは失敗扱い
+            current_app.logger.exception("[rest_queue] update_item failed: %s", e)
+            return False
+
+    # 既存が無いケース（作成を試みる）
+    try:
+        meta_table.put_item(
+            Item={
+                "match_id": queue_key,
+                "queue": queue,
+                "generation": int(generation),
+                "updated_at": now,
+                "version": 1,
+            },
+            ConditionExpression="attribute_not_exists(match_id)",
+        )
+        return True
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        if code == "ConditionalCheckFailedException":
+            return False  # 他が先に作った
+        current_app.logger.exception("[rest_queue] put_item failed: %s", e)
+        return False

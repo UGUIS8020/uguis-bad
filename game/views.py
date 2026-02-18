@@ -8,7 +8,7 @@ from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 from flask import session
 from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, Player, generate_balanced_pairs_and_matches
-from .game_utils import generate_ai_best_pairings, sync_match_entries_with_updated_skills
+from .game_utils import generate_ai_best_pairings, sync_match_entries_with_updated_skills,_select_waiting_entries
 from utils.timezone import JST
 import re
 from decimal import Decimal
@@ -16,7 +16,7 @@ import time
 import logging
 from botocore.exceptions import ClientError
 from zoneinfo import ZoneInfo
-import json
+
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -139,11 +139,8 @@ def court():
     except Exception:
         # 例外ログは1本でスタックトレースまで出る
         logger.exception("コート入場エラー")
-        return "コート画面でエラーが発生しました", 500
+        return "コート画面でエラーが発生しました", 500  
 
-    
-def _now_utc_iso():
-    return datetime.now(timezone.utc).isoformat()
 
 def _since_iso(hours=12):
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="milliseconds")
@@ -159,73 +156,6 @@ def _scan_all(table, **kwargs):
         items.extend(resp.get("Items", []))
     return items
 
-def _has_entries_for_match(match_table, match_id):
-    resp = match_table.scan(
-        ProjectionExpression="entry_status",
-        FilterExpression=Attr("match_id").eq(match_id) & Attr("entry_status").eq("playing"),
-        Limit=1,
-        ConsistentRead=True,
-    )
-    items = resp.get("Items", [])
-    current_app.logger.info(f" _has_entries_for_match({match_id}): {len(items)}件のplayingエントリ")
-    return bool(items)
-
-# def get_latest_match_id(hours_window=12):
-#     """'playing' が残っている最新の match_id を返す（なければ None）"""
-#     current_app.logger.info(" get_latest_match_id 開始")
-
-#     match_table  = current_app.dynamodb.Table("bad-game-match_entries")
-#     result_table = current_app.dynamodb.Table("bad-game-results")
-
-#     since = _since_iso(hours_window)
-
-#     # 1) まず 'playing' のエントリーから探す（最新優先）
-#     current_app.logger.info("ステップ1: 進行中(playing)の試合を探す")
-#     playing_items = _scan_all(
-#         match_table,
-#         ProjectionExpression="match_id, entry_status, created_at",
-#         FilterExpression=Attr("entry_status").eq("playing") & Attr("created_at").gt(since),
-#         ConsistentRead=True  
-#     )
-#     current_app.logger.info(f"進行中のプレイヤー数: {len(playing_items)}")
-
-#     if playing_items:
-#         playing_items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-#         seen = set()
-#         for it in playing_items:
-#             mid = it.get("match_id")
-#             if not mid or mid in seen:
-#                 continue
-#             seen.add(mid)
-#             # その match_id に playing が1件以上あることを確認
-#             if _has_entries_for_match(match_table, mid):
-#                 current_app.logger.info(f"進行中の試合ID: {mid}")
-#                 return mid
-
-#     # 2) （保険）結果テーブル側を新しい順に当たり、playing が残っているものだけ採用
-#     current_app.logger.info("ステップ2: 結果テーブルから最新の試合を取得（playing確認つき）")
-#     result_items = _scan_all(
-#         result_table,
-#         ProjectionExpression="match_id, created_at",
-#         FilterExpression=Attr("created_at").gt(since)
-#     )
-#     current_app.logger.info(f" 結果テーブルのアイテム数(最近{hours_window}h): {len(result_items)}")
-
-#     if result_items:
-#         result_items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-#         current_app.logger.info(f"結果テーブルのmatch_id例: {[r.get('match_id') for r in result_items[:10]]}")
-#         seen = set()
-#         for r in result_items:
-#             mid = r.get("match_id")
-#             if not mid or mid in seen:
-#                 continue
-#             seen.add(mid)
-#             if _has_entries_for_match(match_table, mid):  # ← playing が残っている試合のみOK
-#                 current_app.logger.info(f"結果テーブルからの最新試合ID(playing有): {mid}")
-#                 return mid
-
-#     current_app.logger.info("進行中の試合はありません")
-#     return None
 
 def get_latest_match_id(hours_window=12):
     """
@@ -426,16 +356,7 @@ def court_status_api():
     except Exception as e:
         current_app.logger.error(f"コート状況API エラー: {str(e)}")
         return jsonify({'error': str(e), 'status': 'error'}), 500
-    
 
-# def get_pending_players()
-# def get_resting_players
-# get_user_status
-# をまとめるコード
-
-#get_players_status
-#主にコートの参加者（参加中 or 休憩中）のリスト表示やフィルタに使う。
-#user_id を指定した場合は、ログイン中ユーザーの status を確認する目的にも使える
 
 def get_players_status(status, user_id=None, debug_dump_all=False, debug_sample=0):
     """
@@ -519,12 +440,9 @@ def get_players_status(status, user_id=None, debug_dump_all=False, debug_sample=
             status,
             user_id or "-",
         )
-        return []
+        return []    
     
-    
-    #get_current_user_status
-    #現在のログインユーザーの状態だけ取得(1人（ログインユーザー)
-    #表示やボタン制御などテンプレートで多用
+   
 def get_current_user_status():
     """現在のユーザーの登録状態、休憩状態、スキルスコアを取得"""
     user_id = current_user.get_id()
@@ -728,57 +646,6 @@ def get_user_status(user_id):
             'is_resting': False,
             'skill_score': 50  # ←追加
         }
-    
-# @bp_game.route("/entry", methods=["POST"])
-# @login_required
-# def entry():
-#     """明示的な参加登録（重複チェック＋新規登録）"""
-#     user_id = current_user.get_id()
-#     now = datetime.now().isoformat()
-#     current_app.logger.info(f"[ENTRY] 参加登録開始: {user_id}")
-
-#     # すでにpending登録されていないかチェック
-#     response = match_table.scan(
-#         FilterExpression=Attr("user_id").eq(user_id) & Attr("match_id").eq("pending")
-#     )
-#     existing = response.get("Items", [])
-
-#     if existing:
-#         current_app.logger.info("[ENTRY] すでに参加登録済みのためスキップ")
-#         flash("すでに参加登録されています", "info")
-#         return redirect(url_for("game.court"))
-
-#     # 他の状態（restingなど）があれば削除
-#     cleanup_response = match_table.scan(
-#         FilterExpression=Attr("user_id").eq(user_id) & Attr("match_id").is_in(["resting", "active"])
-#     )
-#     for item in cleanup_response.get("Items", []):
-#         match_table.delete_item(Key={"entry_id": item["entry_id"]})
-#         current_app.logger.info(f"[ENTRY] 古いエントリ削除: {item['entry_id']}")
-
-#     # ユーザー情報から戦闘力を取得
-#     user_data = user_table.get_item(Key={"user#user_id": user_id}).get("Item", {})
-#     skill_score = user_data.get("skill_score", 50)
-#     display_name = user_data.get("display_name", "未設定")
-
-#     # 新規登録
-#     entry_item = {
-#             "entry_id": str(uuid.uuid4()),
-#             "user_id": user_id,
-#             "match_id": "pending",          # NoneまたはDBの制約に合わせて""などを使用
-#             "entry_status": "pending",  # 状態を示すフィールドはこちらを使用
-#             # "status": "pending",        # statusフィールドも設定
-#             "display_name": display_name,
-#             "skill_score": skill_score,
-#             "joined_at": now,
-#             "created_at": now,
-#             "rest_count": 0,      # 休憩回数を初期化
-#             "match_count": 0,     # 試合回数を初期化
-#         }
-#     match_table.put_item(Item=entry_item)
-#     current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}")    
-
-#     return redirect(url_for("game.court"))
 
 
 @bp_game.route("/entry", methods=["POST"])
@@ -969,108 +836,6 @@ def update_player_for_rest(entry_id):
         current_app.logger.info(f"休憩プレイヤー更新: entry_id={entry_id}")
     except Exception as e:
         current_app.logger.error(f"休憩プレイヤー更新エラー: {e}")
-
-
-# @bp_game.route('/create_pairings', methods=["POST"])
-# @login_required
-# def create_pairings():
-#     # 進行中の試合チェック
-#     if has_ongoing_matches():
-#         flash('進行中の試合があるため、新しいペアリングを実行できません。全ての試合のスコア入力を完了してください。', 'warning')
-#         return redirect(url_for('game.court'))
-    
-#     try:
-#         max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)        
-
-#         # 1. pendingエントリー取得 & ユーザーごとに最新だけ残す
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-#         response = match_table.scan(FilterExpression=Attr("entry_status").eq("pending"))
-#         entries_by_user = {}
-#         for e in response.get("Items", []):
-#             uid, joined_at = e["user_id"], e.get("joined_at", "")
-#             if uid not in entries_by_user or joined_at > entries_by_user[uid].get("joined_at", ""):
-#                 entries_by_user[uid] = e
-#         entries = list(entries_by_user.values())
-
-#         if len(entries) < 4:
-#             flash("4人以上のエントリーが必要です。", "warning")
-#             return redirect(url_for("game.court"))
-
-#         # 再度チェック（二重送信防止）
-#         if has_ongoing_matches():
-#             flash('他のユーザーが同時にペアリングを実行したため、処理を中止しました。', 'warning')
-#             return redirect(url_for('game.court'))
-
-#         # スキルスコア最下位2名を選定
-#         skill_sorted = sorted(
-#             [(e["display_name"], e["entry_id"], Decimal(e.get("skill_score", 50))) for e in entries],
-#             key=lambda x: x[2]
-#         )
-#         lowest_players = skill_sorted[:2]
-#         current_app.logger.info(f"🧠 スキル最下位2名: {lowest_players}")
-
-#         # 🎲 10%の確率で最下位2名を待機させる
-#         forced_wait_ids = []
-#         for name, entry_id, _ in lowest_players:
-#             if random.random() < 0.10:
-#                 forced_wait_ids.append(entry_id)
-#         current_app.logger.info(f"⏸ 実際の待機者（{len(forced_wait_ids)}名）: {[(n, s) for n, i, s in skill_sorted if i in forced_wait_ids]}")
-
-#         # 2. 休憩回数・試合回数に基づく優先順位付け
-#         sorted_entries = sorted(entries, key=lambda e: (
-#             -e.get("rest_count", 0),
-#             e.get("match_count", 0),
-#             random.random()
-#         ))
-
-#         # 3. 強制待機者を除外
-#         sorted_entries = [e for e in sorted_entries if e["entry_id"] not in forced_wait_ids]
-
-#         # 4. 必要なプレイヤー数を計算（4の倍数に調整）
-#         required_players = min(max_courts * 4, len(sorted_entries) - (len(sorted_entries) % 4))
-#         active_entries = sorted_entries[:required_players]
-#         waiting_entries = sorted_entries[required_players:]
-#         # 強制待機者を追加
-#         waiting_entries.extend([e for e in entries if e["entry_id"] in forced_wait_ids])
-
-#         # 5. シャッフル
-#         random.shuffle(active_entries)
-
-#         # 6. Player変換
-#         name_to_id, players, waiting_players = {}, [], []
-#         for e in active_entries:
-#             name = e["display_name"]
-#             p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
-#             p.match_count = e.get("match_count", 0)
-#             p.rest_count = e.get("rest_count", 0)
-#             name_to_id[name] = e["entry_id"]
-#             players.append(p)
-#         for e in waiting_entries:
-#             name = e["display_name"]
-#             p = Player(name, int(e.get("skill_score", 50)), e.get("gender", "M"))
-#             p.match_count = e.get("match_count", 0)
-#             p.rest_count = e.get("rest_count", 0)
-#             name_to_id[name] = e["entry_id"]
-#             waiting_players.append(p)
-
-#         # 7. ペア生成 & マッチ生成
-#         match_id = generate_match_id()
-#         pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
-#         waiting_players.extend(additional_waiting_players)
-
-#         # 8. 試合参加プレイヤー更新
-#         for court_num, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
-#             for name, team in [(a1.name, "A"), (a2.name, "A"), (b1.name, "B"), (b2.name, "B")]:
-#                 update_player_for_match(name_to_id[name], match_id, court_num, team)        
-        
-#         current_app.logger.info(f"ペアリング成功: {len(matches)}試合, {len(waiting_players)}人待機")
-
-#         return redirect(url_for("game.court"))
-
-#     except Exception as e:
-#         current_app.logger.error(f"[ペア生成エラー] {str(e)}", exc_info=True)
-#         flash("試合の作成中にエラーが発生しました。", "danger")
-#         return redirect(url_for("game.court"))
     
 
 def weighted_sample_no_replace(items, weights, k):
@@ -1118,6 +883,11 @@ def weighted_sample_no_replace(items, weights, k):
 #                 entries_by_user[uid] = e
 #         entries = list(entries_by_user.values())
 
+#         current_app.logger.info(
+#             "[pairing] pending_entries=%d max_courts=%d",
+#             len(entries), max_courts
+#         )
+
 #         if len(entries) < 4:
 #             flash("4人以上のエントリーが必要です。", "warning")
 #             return redirect(url_for("game.court"))
@@ -1132,6 +902,11 @@ def weighted_sample_no_replace(items, weights, k):
 #         cap_by_courts = min(max_courts * 4, len(sorted_entries))
 #         required_players = cap_by_courts - (cap_by_courts % 4)
 #         waiting_count = len(sorted_entries) - required_players
+
+#         current_app.logger.info(
+#             "[pairing] cap_by_courts=%d required_players=%d waiting_count=%d",
+#             cap_by_courts, required_players, waiting_count
+#         )
 
 #         # 4) 待機枠バイアス（skill低い2名の待機確率を微増）
 #         if waiting_count > 0:
@@ -1151,25 +926,48 @@ def weighted_sample_no_replace(items, weights, k):
 #             waiting_entries = [e for e in sorted_entries if e["entry_id"] in waiting_ids]
 
 #             current_app.logger.info("[wait-bias] waiting_count=%s, low_bias=%s", waiting_count, LOW_BIAS)
+
+#             # --- 追加ログ：待機が確定した瞬間 ---
+#             current_app.logger.info(
+#                 "[wait] required=%d waiting=%d active=%d",
+#                 required_players, waiting_count, len(active_entries)
+#             )
+#             current_app.logger.info(
+#                 "[wait] waiting_names=%s",
+#                 ", ".join([e.get("display_name", "?") for e in waiting_entries]) or "(none)"
+#             )
+#             current_app.logger.info(
+#                 "[wait] waiting_ids=%s",
+#                 ", ".join([e.get("entry_id", "?") for e in waiting_entries]) or "(none)"
+#             )
 #         else:
 #             active_entries = sorted_entries
 #             waiting_entries = []
 
+#             # --- 追加ログ：待機なし ---
+#             current_app.logger.info("[wait] waiting_count=0 (none)")
+
 #         random.shuffle(active_entries)
+
+#         # --- 追加ログ：active をシャッフルした結果 ---
+#         current_app.logger.info(
+#             "[active] active_names(shuffled)=%s",
+#             ", ".join([e.get("display_name", "?") for e in active_entries]) or "(none)"
+#         )
 
 #         # 5) Player変換
 #         name_to_id, players, waiting_players = {}, [], []
 
 #         for e in active_entries:
 #             name = e["display_name"]
-            
+
 #             # skill_score と skill_sigma を取得
 #             skill_score = float(e.get("skill_score", 50.0))
 #             skill_sigma = float(e.get("skill_sigma", 8.333))
-            
+
 #             # 保守的スキルを計算
 #             conservative = skill_score - 3 * skill_sigma
-            
+
 #             # Player オブジェクト作成
 #             p = Player(name, conservative, e.get("gender", "M"))
 #             p.skill_score = skill_score
@@ -1182,14 +980,14 @@ def weighted_sample_no_replace(items, weights, k):
 #         # 👇 waiting_entries の処理
 #         for e in waiting_entries:
 #             name = e["display_name"]
-            
+
 #             # skill_score と skill_sigma を取得
 #             skill_score = float(e.get("skill_score", 50.0))
 #             skill_sigma = float(e.get("skill_sigma", 8.333))
-            
+
 #             # 保守的スキルを計算
 #             conservative = skill_score - 3 * skill_sigma
-            
+
 #             # Player オブジェクト作成
 #             p = Player(name, conservative, e.get("gender", "M"))
 #             p.skill_score = skill_score
@@ -1199,14 +997,44 @@ def weighted_sample_no_replace(items, weights, k):
 #             name_to_id[name] = e["entry_id"]
 #             waiting_players.append(p)
 
+#         # --- 追加ログ：Player変換後の人数 ---
+#         current_app.logger.info(
+#             "[players] active_players=%d waiting_players(initial)=%d",
+#             len(players), len(waiting_players)
+#         )
+
 #         # 6) ペア生成
 #         match_id = generate_match_id()
-#         pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)        
+#         pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
 #         # matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
+
+#         # --- 追加ログ：matches 確定直後 ---
+#         current_app.logger.info(
+#             "[matches] match_id=%s courts=%d additional_waiting=%d",
+#             match_id, len(matches), len(additional_waiting_players)
+#         )
+#         for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
+#             current_app.logger.info(
+#                 "[match] C%d: A=[%s,%s] vs B=[%s,%s]",
+#                 i, a1.name, a2.name, b1.name, b2.name
+#             )
+#         if additional_waiting_players:
+#             current_app.logger.info(
+#                 "[wait] additional_waiting(from_unused_pairs)=%s",
+#                 ", ".join([p.name for p in additional_waiting_players])
+#             )
+
 #         waiting_players.extend(additional_waiting_players)
+
 #         if not matches:
 #             flash("試合を作成できませんでした（人数不足など）。", "warning")
 #             return redirect(url_for("game.court"))
+
+#         # --- 追加ログ：待機者の最終確定 ---
+#         current_app.logger.info(
+#             "[wait] final_waiting_names=%s",
+#             ", ".join([p.name for p in waiting_players]) or "(none)"
+#         )
 
 #         # -------------------------------------------------
 #         # TransactWriteItems：metaロック + 試合参加者更新
@@ -1220,7 +1048,6 @@ def weighted_sample_no_replace(items, weights, k):
 #             return redirect(url_for("game.court"))
 
 #         now_jst = datetime.now(JST).isoformat()
-#         import boto3
 #         dynamodb_client = boto3.client('dynamodb', region_name='ap-northeast-1')
 
 #         tx_items = []
@@ -1250,6 +1077,7 @@ def weighted_sample_no_replace(items, weights, k):
 #                 },
 #             }
 #         })
+
 #         # (2) pending の参加者を playing に（試合ID・コート・チームを付与）
 #         for court_num, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
 #             for pl, team in [(a1, "A"), (a2, "A"), (b1, "B"), (b2, "B")]:
@@ -1352,45 +1180,14 @@ def create_pairings():
             cap_by_courts, required_players, waiting_count
         )
 
-        # 4) 待機枠バイアス（skill低い2名の待機確率を微増）
+        # 4) 待機者選出（キュー方式）
         if waiting_count > 0:
-            skill_sorted = sorted(
-                [(e["entry_id"], Decimal(e.get("skill_score", 50))) for e in sorted_entries],
-                key=lambda x: x[1]
-            )
-            low2_ids = {eid for eid, _ in skill_sorted[:2]}
-
-            LOW_BIAS = random.uniform(1.15, 1.3)
-            weights = [(LOW_BIAS if e["entry_id"] in low2_ids else 1.0) for e in sorted_entries]
-
-            chosen_waiting = weighted_sample_no_replace(sorted_entries, weights, waiting_count)
-            waiting_ids = {e["entry_id"] for e in chosen_waiting}
-
-            active_entries = [e for e in sorted_entries if e["entry_id"] not in waiting_ids]
-            waiting_entries = [e for e in sorted_entries if e["entry_id"] in waiting_ids]
-
-            current_app.logger.info("[wait-bias] waiting_count=%s, low_bias=%s", waiting_count, LOW_BIAS)
-
-            # --- 追加ログ：待機が確定した瞬間 ---
-            current_app.logger.info(
-                "[wait] required=%d waiting=%d active=%d",
-                required_players, waiting_count, len(active_entries)
-            )
-            current_app.logger.info(
-                "[wait] waiting_names=%s",
-                ", ".join([e.get("display_name", "?") for e in waiting_entries]) or "(none)"
-            )
-            current_app.logger.info(
-                "[wait] waiting_ids=%s",
-                ", ".join([e.get("entry_id", "?") for e in waiting_entries]) or "(none)"
-            )
+            active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
         else:
-            active_entries = sorted_entries
-            waiting_entries = []
-
-            # --- 追加ログ：待機なし ---
+            active_entries, waiting_entries = sorted_entries, []
             current_app.logger.info("[wait] waiting_count=0 (none)")
 
+        # active 側だけシャッフル（待機はキュー順のまま）
         random.shuffle(active_entries)
 
         # --- 追加ログ：active をシャッフルした結果 ---
@@ -2214,47 +2011,6 @@ def start_next_match():
         flash(f"エラーが発生しました: {str(e)}", "danger")
         return redirect(url_for("game.court"))
 
-# @bp_game.route("/pairings", methods=["GET"])
-# @login_required
-# def show_pairings():
-#     try:
-#         match_id = get_latest_match_id()  # 最新のmatch_id取得（例: '20250701_027'）
-
-#         match_table = current_app.dynamodb.Table("bad-game-match_entries")
-#         response = match_table.scan(
-#             FilterExpression=Attr("match_id").eq(match_id) & Attr("type").ne("meta")
-#         )
-#         items = response.get("Items", [])
-
-#         # コートごとにまとめる
-#         court_dict = {}
-#         for item in items:
-#             court_no = item.get("court_number")
-#             team = item.get("team")  # 'A' or 'B'
-#             name = item.get("display_name")
-
-#             if court_no not in court_dict:
-#                 court_dict[court_no] = {"team_a": [], "team_b": []}
-#             if team == "A":
-#                 court_dict[court_no]["team_a"].append(name)
-#             elif team == "B":
-#                 court_dict[court_no]["team_b"].append(name)
-
-#         # court_dict を match_data のリスト形式に変換
-#         match_data = []
-#         for court_no in sorted(court_dict):
-#             match_data.append({
-#                 "court_number": court_no,
-#                 "team_a": court_dict[court_no]["team_a"],
-#                 "team_b": court_dict[court_no]["team_b"]
-#             })
-
-#         return render_template("game/court.html", match_data=match_data)
-
-#     except Exception as e:
-#         current_app.logger.error(f"[pairings] エラー: {str(e)}")
-#         return redirect(url_for("main.index"))
-    
 
 @bp_game.route("/pairings", methods=["GET"])
 @login_required
