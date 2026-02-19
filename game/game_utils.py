@@ -590,17 +590,34 @@ def _pick_waiters_by_rest_queue(
 
         need = waiting_count - len(waiting_pick)
         if need > 0:
-            # 次巡を生成して不足分だけ取る（残りは次巡のキューとして保存）
-            new_queue = list(current_user_ids)
-            random.shuffle(new_queue)
+            already = set(waiting_pick)
+            candidates = [uid for uid in current_user_ids if uid not in already]
+            random.shuffle(candidates)
             generation += 1
 
-            waiting_pick.extend(new_queue[:need])
-            queue = new_queue[need:]
+            waiting_pick.extend(candidates[:need])
+            queue = candidates[need:]
+
+            # ★まだ足りない場合のフォールバック
+            if len(waiting_pick) < waiting_count:
+                still_need = waiting_count - len(waiting_pick)
+                fallback = list(current_user_ids)
+                random.shuffle(fallback)
+                for uid in fallback:
+                    if uid in set(waiting_pick):
+                        continue
+                    waiting_pick.append(uid)
+                    still_need -= 1
+                    if still_need == 0:
+                        break
+
+        # ★ここ（waiting_ids 作成の直前）が最適
+        if len(waiting_pick) != len(set(waiting_pick)):
+            current_app.logger.warning("[rest_queue] duplicate waiting_pick detected: %s", waiting_pick)
+            waiting_pick = list(dict.fromkeys(waiting_pick))
 
         waiting_ids = set(waiting_pick)
 
-        # --- 4) 返却: waiting はキュー順（waiting_pick順）で返す ---
         waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
         active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
 

@@ -2603,7 +2603,7 @@ def reset_participants():
         deleted_count = 0
         last_evaluated_key = None
 
-        current_app.logger.info("🔄 全エントリー削除開始")
+        current_app.logger.info("全エントリー削除開始")
         
         while True:
             if last_evaluated_key:
@@ -2616,9 +2616,9 @@ def reset_participants():
                 try:
                     match_table.delete_item(Key={'entry_id': item['entry_id']})
                     deleted_count += 1
-                    current_app.logger.info(f"🗑️ 削除: {item.get('display_name', 'Unknown')} - {item['entry_id']}")
+                    current_app.logger.info(f"削除: {item.get('display_name', 'Unknown')} - {item['entry_id']}")
                 except Exception as e:
-                    current_app.logger.error(f"❌ エントリー削除エラー: {item.get('display_name', 'Unknown')} - {str(e)}")
+                    current_app.logger.error(f"エントリー削除エラー: {item.get('display_name', 'Unknown')} - {str(e)}")
 
             last_evaluated_key = response.get('LastEvaluatedKey')
             if not last_evaluated_key:
@@ -2632,15 +2632,25 @@ def reset_participants():
         remaining_items = check_response.get('Items', [])
         
         if remaining_items:
-            current_app.logger.warning(f"⚠️ 削除後も残っているエントリー: {len(remaining_items)}件")
+            current_app.logger.warning(f"削除後も残っているエントリー: {len(remaining_items)}件")
             for item in remaining_items:
-                current_app.logger.warning(f"⚠️ 残存: {item.get('display_name', 'Unknown')} - {item['entry_id']}")
+                current_app.logger.warning(f"残存: {item.get('display_name', 'Unknown')} - {item['entry_id']}")
         else:
             current_app.logger.info("全エントリー削除完了")
 
-        # 3. (オプション) results テーブルのメンテナンス
-        # ここでresultsテーブルに対する処理を行う場合は追加
-        
+        # 3. meta#current をリセット
+        try:
+            meta_table = current_app.dynamodb.Table("bad-game-matches")
+            meta_table.update_item(
+                Key={"match_id": "meta#current"},
+                UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count",
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={":idle": "idle"},
+            )
+            current_app.logger.info("[reset] meta#current をリセットしました")
+        except Exception as e:
+            current_app.logger.error(f"[reset] meta#current リセットエラー: {e}")
+
         current_app.logger.info(f"[全削除成功] エントリー削除件数: {deleted_count} by {current_user.email}")
 
     except Exception as e:
