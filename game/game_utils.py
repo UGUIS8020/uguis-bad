@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import logging
 from botocore.exceptions import ClientError
 from typing import Optional
+from decimal import Decimal
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -580,13 +581,17 @@ def _pick_waiters_by_rest_queue(
             queue.extend(newcomers)
             current_app.logger.info("[rest_queue] newcomers added: %s", newcomers)
 
-        # --- 3) waiting_pick を作る（不足分は次巡から補う） ---
-        waiting_pick: List[str] = []
+        # --- 3) waiting_pick を作る（下位2名ブースト込みサンプリング） ---
+        waiting_pick: List[str] = []        
 
-        take1 = min(waiting_count, len(queue))
-        if take1 > 0:
-            waiting_pick.extend(queue[:take1])
-            queue = queue[take1:]
+        waiting_pick, queue = _weighted_sample_from_queue(
+            queue=queue,
+            waiting_count=waiting_count,
+            by_id=by_id,
+            skill_key="skill_score",
+            bottom_n=2,
+            boost=1.15,
+        )        
 
         need = waiting_count - len(waiting_pick)
         if need > 0:
@@ -726,3 +731,73 @@ def _save_rest_queue_optimistic(
             return False  # 他が先に作った
         current_app.logger.exception("[rest_queue] put_item failed: %s", e)
         return False
+    
+
+def _safe_float(v: Any, default: float) -> float:
+    if v is None:
+        return default
+    try:
+        if isinstance(v, Decimal):
+            return float(v)
+        return float(v)
+    except Exception:
+        return default
+
+
+def _weighted_sample_from_queue(
+    queue: List[str],
+    waiting_count: int,
+    by_id: Dict[str, Any],
+    *,
+    skill_key: str = "skill_score",
+    bottom_n: int = 2,
+    boost: float = 1.15,
+) -> Tuple[List[str], List[str]]:
+    """
+    キュー内でスキル下位 bottom_n 名の選出確率を boost 倍にする
+    - 非復元
+    - 抽選のたびに bottom_n を再計算（ブースト対象がズレにくい）
+    - skill 未設定は「キュー内の中央値」で補完（1500固定はやめる）
+    """
+    if not queue or waiting_count <= 0:
+        return [], queue
+
+    remaining = list(queue)
+    take = min(waiting_count, len(remaining))
+    selected: List[str] = []
+
+    # キュー内の中央値をデフォルトに
+    nums: List[float] = []
+    for uid in remaining:
+        v = by_id.get(uid, {}).get(skill_key)
+        if v is None:
+            continue
+        try:
+            nums.append(float(v) if not isinstance(v, Decimal) else float(v))
+        except Exception:
+            pass
+    if nums:
+        nums.sort()
+        default_score = float(nums[len(nums) // 2])
+    else:
+        # 全員未設定なら、あなたのスケールに合わせて適当に（例: 50）
+        default_score = 50.0
+
+    for _ in range(take):
+        # ★毎回 bottom_n を更新
+        scores = {uid: _safe_float(by_id.get(uid, {}).get(skill_key), default_score) for uid in remaining}
+        bottom_ids = set(sorted(remaining, key=lambda uid: scores[uid])[:max(1, min(bottom_n, len(remaining)))])
+
+        weights = [boost if uid in bottom_ids else 1.0 for uid in remaining]
+        total = sum(weights)
+
+        r = random.uniform(0, total)
+        cumulative = 0.0
+        for j, w in enumerate(weights):
+            cumulative += w
+            if r <= cumulative:
+                selected.append(remaining[j])
+                remaining.pop(j)
+                break
+
+    return selected, remaining

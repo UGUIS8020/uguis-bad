@@ -51,8 +51,6 @@ def court():
     logger = current_app.logger
 
     try:
-        logger.info("=== コート入場開始 ===")
-
         # セッション初期値
         session.setdefault("score_format", "21")
 
@@ -65,58 +63,79 @@ def court():
             ConsistentRead=True
         )
 
-        # --- デフォルト値補完（ログは出さない） ---
+        # --- デフォルト値補完（ログ無し） ---
         for it in items:
             it["rest_count"]  = it.get("rest_count")  or 0
             it["match_count"] = it.get("match_count") or 0
             it["join_count"]  = it.get("join_count")  or 0
 
         # --- ステータス別に分類 ---
-        pending_players  = [it for it in items if it.get("entry_status") == "pending"]
-        resting_players  = [it for it in items if it.get("entry_status") == "resting"]
-        playing_players  = [it for it in items if it.get("entry_status") == "playing"]
+        pending_players = []
+        resting_players = []
+        playing_players = []
 
-        # INFOは “件数だけ”
-        logger.info(
-            "players total=%d pending=%d resting=%d playing=%d",
-            len(items), len(pending_players), len(resting_players), len(playing_players)
-        )
+        for it in items:
+            st = it.get("entry_status")
+            if st == "pending":
+                pending_players.append(it)
+            elif st == "resting":
+                resting_players.append(it)
+            elif st == "playing":
+                playing_players.append(it)
 
-        # --- ユーザー状態の判定 ---
+        # --- ユーザー状態の判定（1パスでまとめる） ---
         user_id = current_user.get_id()
 
-        # any() を3回回すより、user_entries を先に拾って使い回す
-        user_entries = [it for it in items if it.get("user_id") == user_id]
+        is_registered = False
+        is_resting = False
+        is_playing = False
+        skill_score = 50
+        match_count = 0
 
-        is_registered = any(it.get("entry_status") == "pending" for it in user_entries)
-        is_resting    = any(it.get("entry_status") == "resting" for it in user_entries)
-        is_playing    = any(it.get("entry_status") == "playing" for it in user_entries)
+        # user_entries を作るより、必要値だけ拾う（同一userが複数あっても最初の1件で十分ならbreak）
+        for it in items:
+            if it.get("user_id") != user_id:
+                continue
 
-        # スキル / 試合回数（見つからなければデフォルト）
-        if user_entries:
-            skill_score = user_entries[0].get("skill_score", 50)
-            match_count = user_entries[0].get("match_count", 0) or 0
-        else:
-            skill_score = 50
-            match_count = 0
+            st = it.get("entry_status")
+            if st == "pending":
+                is_registered = True
+            elif st == "resting":
+                is_resting = True
+            elif st == "playing":
+                is_playing = True
 
-        # --- 進行中試合関連 ---
-        # ここで複数回 scan する可能性があるので、ログは INFO最小・詳細はDEBUGのみ
+            # 代表値（最初に見つかったものでOKなら）
+            skill_score = it.get("skill_score", 50)
+            match_count = it.get("match_count", 0) or 0
+            # もう十分なら抜ける（状況に応じて）
+            # break
+
+        # --- 進行中試合関連（INFO最小、詳細はDEBUG） ---
         has_ongoing = has_ongoing_matches()
         completed, total = get_match_progress()
         current_courts = get_current_match_status()
 
-        logger.debug("has_ongoing_matches=%s match_progress=%s/%s", has_ongoing, completed, total)
-
-        # 試合情報の取得（match_id が無い時は INFO 1本だけ）
         match_id = get_latest_match_id()
-        if not match_id:
-            logger.info("進行中の試合はありません")
-            match_courts = {}
-        else:
-            logger.info("ongoing match_id=%s", match_id)
+        if match_id:
             match_courts = get_organized_match_data(match_id)
-            logger.debug("match_courts keys=%d", len(match_courts))
+        else:
+            match_courts = {}
+
+        # ここが「1リクエスト=基本1本」のINFOサマリ
+        logger.info(
+            "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
+            len(items), len(pending_players), len(resting_players), len(playing_players),
+            user_id,
+            ("playing" if is_playing else "resting" if is_resting else "pending" if is_registered else "none"),
+            has_ongoing, completed, total, match_id or "-"
+        )
+
+        # デバッグしたいときだけ
+        if logger.isEnabledFor(10):  # logging.DEBUG == 10
+            logger.debug("[court] current_courts=%s", current_courts)
+            if match_id:
+                logger.debug("[court] match_courts keys=%d", len(match_courts))
 
         return render_template(
             "game/court.html",
@@ -137,9 +156,8 @@ def court():
         )
 
     except Exception:
-        # 例外ログは1本でスタックトレースまで出る
-        logger.exception("コート入場エラー")
-        return "コート画面でエラーが発生しました", 500  
+        logger.exception("[court] error")
+        return "コート画面でエラーが発生しました", 500 
 
 
 def _since_iso(hours=12):
@@ -2547,7 +2565,10 @@ def submit_score(match_id, court_number):
             "created_at": str(timestamp),
         }
 
-        current_app.logger.info("保存する結果アイテム: %s", result_item)
+        current_app.logger.info(
+            "submit_score: match_id=%s court=%s score=%s-%s winner=%s",
+            match_id, court_number_int, team1_score, team2_score, winner
+        )
 
         try:
             resp_put = result_table.put_item(Item=result_item)
@@ -2555,7 +2576,7 @@ def submit_score(match_id, court_number):
                 "スコア送信成功: match_id=%s, court=%s, score=%s-%s",
                 match_id, court_number_int, team1_score, team2_score
             )
-            current_app.logger.info("DynamoDB応答: %s", resp_put)
+            current_app.logger.debug("DynamoDB resp_put: %s", resp_put)
         except Exception as e:
             current_app.logger.error("❌ 結果保存エラー: %s", str(e), exc_info=True)
             return "スコアの保存に失敗しました", 500
@@ -2603,7 +2624,7 @@ def reset_participants():
         deleted_count = 0
         last_evaluated_key = None
 
-        current_app.logger.info("全エントリー削除開始")
+        current_app.logger.info("🔄全エントリー削除開始")
         
         while True:
             if last_evaluated_key:
