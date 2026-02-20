@@ -516,12 +516,17 @@ class DynamoDB:
             return False
     
     def get_user_by_id(self, user_id: str) -> dict | None:
-        """ユーザー情報を取得（表示用に最低限整形）"""
         try:
             if not user_id:
                 return None
 
-            res = self.users_table.get_item(Key={"user#user_id": user_id})
+            # user# プレフィックスを付けて読む ✅
+            pk = f"user#{user_id}" if not user_id.startswith("user#") else user_id
+
+            res = self.users_table.get_item(
+                Key={"user#user_id": pk},
+                ConsistentRead=True   # ← 強整合読み取りも追加
+            )
             u = res.get("Item")
             if not u:
                 return None
@@ -1150,7 +1155,7 @@ class DynamoDB:
         """
         try:
             response = self.users_table.get_item(  # self.table → self.users_table に変更
-                Key={'user#user_id': user_id}
+                Key={'user#user_id': f"user#{user_id}"}
             )
             
             if 'Item' not in response:
@@ -1998,7 +2003,7 @@ class DynamoDB:
         """ユーザーのポイントを失効させる"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': f"user#{user_id}"},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': True}
             )
@@ -2012,7 +2017,7 @@ class DynamoDB:
         """ユーザーのポイント失効を解除"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': f"user#{user_id}"},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': False}
             )

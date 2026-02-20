@@ -83,7 +83,7 @@ def court():
             elif st == "playing":
                 playing_players.append(it)
 
-        # --- ユーザー状態の判定（1パスでまとめる） ---
+        # --- ユーザー状態の判定（自分の entry は「最新1件」を採用） ---
         user_id = current_user.get_id()
 
         is_registered = False
@@ -92,24 +92,45 @@ def court():
         skill_score = 50
         match_count = 0
 
-        # user_entries を作るより、必要値だけ拾う（同一userが複数あっても最初の1件で十分ならbreak）
-        for it in items:
-            if it.get("user_id") != user_id:
-                continue
+        def _ts(it):
+            # 文字列ISO前提。無ければ空文字で最小扱い
+            return str(it.get("updated_at") or it.get("joined_at") or it.get("created_at") or "")
 
-            st = it.get("entry_status")
-            if st == "pending":
-                is_registered = True
-            elif st == "resting":
-                is_resting = True
-            elif st == "playing":
-                is_playing = True
+        my_entries = [it for it in items if it.get("user_id") == user_id]
 
-            # 代表値（最初に見つかったものでOKなら）
-            skill_score = it.get("skill_score", 50)
-            match_count = it.get("match_count", 0) or 0
-            # もう十分なら抜ける（状況に応じて）
-            # break
+        me = None
+        if my_entries:
+            me = max(my_entries, key=_ts)  # 最新を採用
+            st = me.get("entry_status")
+
+            is_registered = (st == "pending")
+            is_resting    = (st == "resting")
+            is_playing    = (st == "playing")
+
+            # いったん entry の値（無ければ50）
+            skill_score = me.get("skill_score", 50)
+            match_count = me.get("match_count", 0) or 0
+
+        # =========================================================
+        # ★ 追加：ユーザーテーブルを正として skill_score を上書き ★
+        #   -> 試合後に「スキル永続化」した値(例:63.74)がここで反映される
+        # =========================================================
+        try:
+            # あなたのユーザーテーブル名に合わせて変更
+            users_table = current_app.dynamodb.Table("bad-users")  # 例: "bad-users"
+
+            # あなたのPK形式に合わせて変更
+            # 例: Key={"user#user_id": f"user#{user_id}"} が既存コードと整合しているならこれ
+            resp_u = users_table.get_item(
+                Key={"user#user_id": f"user#{user_id}"},
+                ConsistentRead=True
+            )
+            u = resp_u.get("Item")
+
+            if u and u.get("skill_score") is not None:
+                skill_score = u["skill_score"]  # DecimalのままでOK
+        except Exception:
+            logger.exception("[court] user skill_score reload failed")
 
         # --- 進行中試合関連（INFO最小、詳細はDEBUG） ---
         has_ongoing = has_ongoing_matches()
@@ -122,7 +143,6 @@ def court():
         else:
             match_courts = {}
 
-        # ここが「1リクエスト=基本1本」のINFOサマリ
         logger.info(
             "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
             len(items), len(pending_players), len(resting_players), len(playing_players),
@@ -131,11 +151,15 @@ def court():
             has_ongoing, completed, total, match_id or "-"
         )
 
-        # デバッグしたいときだけ
-        if logger.isEnabledFor(10):  # logging.DEBUG == 10
+        if logger.isEnabledFor(10):  # DEBUG
             logger.debug("[court] current_courts=%s", current_courts)
             if match_id:
                 logger.debug("[court] match_courts keys=%d", len(match_courts))
+            if my_entries and me:
+                logger.debug(
+                    "[court][me] entries=%d picked_ts=%s picked_entry_skill=%s final_skill=%s",
+                    len(my_entries), _ts(me), me.get("skill_score"), skill_score
+                )
 
         return render_template(
             "game/court.html",
@@ -157,7 +181,7 @@ def court():
 
     except Exception:
         logger.exception("[court] error")
-        return "コート画面でエラーが発生しました", 500 
+        return "コート画面でエラーが発生しました", 500
 
 
 def _since_iso(hours=12):
@@ -1611,6 +1635,48 @@ def perform_pairing(entries, match_id, max_courts=6):
         except Exception as e:
             current_app.logger.error(f"⚠️ 休憩者更新エラー: {p.get('display_name')} - {str(e)}")
 
+
+def normalize_user_pk(uid: str) -> str:
+    uid = str(uid)
+    return uid if uid.startswith("user#") else f"user#{uid}"
+
+def persist_skill_to_bad_users(updated_skills: dict):
+    users_table = current_app.dynamodb.Table("bad-users")
+    ok, ng = 0, 0
+
+    for uid, vals in (updated_skills or {}).items():
+        if str(uid).startswith("test_"):
+            continue
+
+        try:
+            # Clean Decimal conversion
+            new_s = Decimal(str(round(vals.get("skill_score", 25.0), 2)))
+            new_g = Decimal(str(round(vals.get("skill_sigma", 8.333), 4)))
+
+            # Update item and get the result in one trip
+            resp = users_table.update_item(
+                Key={"user#user_id": normalize_user_pk(uid)},
+                UpdateExpression="SET skill_score=:s, skill_sigma=:g",
+                ExpressionAttributeValues={":s": new_s, ":g": new_g},
+                ReturnValues="ALL_NEW",
+            )
+            
+            # The 'Attributes' key contains the state after update (no need for get_item)
+            updated_attrs = resp.get("Attributes")
+            current_app.logger.info("[bad-users] Updated uid=%s: %s", uid, updated_attrs)
+            ok += 1
+
+        except ClientError as e:
+            ng += 1
+            error_code = e.response.get("Error", {}).get("Code")
+            current_app.logger.error("[bad-users] ClientError uid=%s code=%s", uid, error_code)
+        except Exception as e:
+            ng += 1
+            current_app.logger.error("[bad-users] Unexpected error uid=%s err=%s", uid, e)
+
+    current_app.logger.info("[bad-users] Persist finished. ok=%d ng=%d", ok, ng)
+    return ok, ng
+
     
 @bp_game.route("/finish_current_match", methods=["POST"])
 @login_required
@@ -1842,6 +1908,8 @@ def finish_current_match():
         # =========================================================
         sync_count = sync_match_entries_with_updated_skills(player_mapping, updated_skills)
         current_app.logger.info("エントリーテーブル同期完了: %d件", sync_count)
+
+        persist_skill_to_bad_users(updated_skills)
 
         # =========================================================
         # 5) meta解除 + playing→pending を 1トランザクションで確定
@@ -2750,16 +2818,28 @@ def get_organized_match_data(match_id):
 @bp_game.route("/api/skill_score")
 @login_required
 def api_skill_score():
-    user_id = current_user.get_id()
-    table = current_app.dynamodb.Table("bad-users")
-    response = table.get_item(Key={"user#user_id": user_id})
+    uid = current_user.get_id()
+    user_table = current_app.dynamodb.Table("bad-users")
 
-    if "Item" not in response:
-        return jsonify({"error": "User not found"}), 404
+    k = {"user#user_id": f"user#{uid}"}
+    resp = user_table.get_item(Key=k, ConsistentRead=True)
+    item = resp.get("Item") or {}
 
-    score = float(response["Item"].get("skill_score", 50))
-    return jsonify({"skill_score": round(score, 2)})
+    def f(x):
+        return float(x) if x is not None else None
 
+    current_app.logger.info(
+        "[api/skill_score] uid=%s score=%s sigma=%s",
+        uid, item.get("skill_score"), item.get("skill_sigma")
+    )
+
+    return jsonify({
+        "pk": k["user#user_id"],
+        "skill_score": f(item.get("skill_score")),
+        "skill_sigma": f(item.get("skill_sigma")),
+        "last_participation_date": item.get("last_participation_date"),
+        "last_participation_updated_at": item.get("last_participation_updated_at"),
+    })
 
 @bp_game.route('/create_test_data')
 @login_required
@@ -2810,7 +2890,7 @@ def create_test_data():
         
         # ユーザーテーブルにユーザーを作成
         user_item = {
-            'user#user_id': user_id,
+            'user#user_id': f"user#{user_id}",
             'user_id': user_id,
             'display_name': player['display_name'],
             'user_name': f"テスト_{player['display_name']}",

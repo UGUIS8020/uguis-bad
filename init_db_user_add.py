@@ -14,7 +14,7 @@ now = date.today().isoformat()
 
 # ユーザー情報
 user_item = {
-    'user#user_id': user_id,  # プライマリキー
+    'user#user_id': f"user#{user_id}",  # プライマリキー
     'display_name': "UGUIS.渋谷",
     'user_name': "渋谷　正彦",
     'furigana': "シブヤ　マサヒコ",

@@ -590,9 +590,13 @@ class User(UserMixin):
     def from_dynamodb_item(item):
         def get_value(field, default=None):
             return item.get(field, default)
+        
+        # user# プレフィックスを除去してUIDだけにする
+        raw_user_id = get_value('user#user_id') or ""
+        user_id = raw_user_id[len("user#"):] if raw_user_id.startswith("user#") else raw_user_id
 
         return User(
-            user_id=get_value('user#user_id'),
+            user_id=user_id,
             display_name=get_value('display_name'),
             user_name=get_value('user_name'),
             furigana=get_value('furigana'),
@@ -738,7 +742,7 @@ def get_participants_info(schedule):
 
         request = {
             table_name: {
-                "Keys": [{"user#user_id": uid} for uid in ids],
+                "Keys": [{"user#user_id": f"user#{uid}" if not uid.startswith("user#") else uid} for uid in ids],
                 "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
                 "ExpressionAttributeNames": {"#uid": "user#user_id"},
             }
@@ -759,8 +763,10 @@ def get_participants_info(schedule):
 
         by_id = {it["user#user_id"]: it for it in responses}
 
+        # 修正後：1つのループに統合 ✅
         for uid in ids:
-            user = by_id.get(uid)
+            pk = f"user#{uid}" if not uid.startswith("user#") else uid
+            user = by_id.get(pk)
             if user:
                 raw_score = user.get("skill_score")
                 skill_score = int(raw_score) if isinstance(raw_score, (int, float, Decimal)) else None
@@ -1067,10 +1073,12 @@ def index():
 
             # 候補キーを両方作る（uuid / user#uuid）
             keys = []
+            seen_keys = set()
             for uid in batch_ids:
-                keys.append({"user#user_id": uid})
-                if not str(uid).startswith("user#"):
-                    keys.append({"user#user_id": f"user#{uid}"})
+                pk = f"user#{uid}" if not str(uid).startswith("user#") else uid
+                if pk not in seen_keys:
+                    seen_keys.add(pk)
+                    keys.append({"user#user_id": pk})
 
             try:
                 response = current_app.dynamodb.batch_get_item(
@@ -1644,17 +1652,30 @@ def previously_joined(schedule_id, user_id):
     )
     return bool(response.get('Items'))
 
+def _user_pk(user_id: str) -> dict:
+    return {"user#user_id": f"user#{user_id}" if not str(user_id).startswith("user#") else str(user_id)}
+
 def increment_practice_count(user_id):
     user_table = app.dynamodb.Table(app.table_name_users)
 
-    user_table.update_item(
-        Key={'user#user_id': user_id},
-        UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
-        ExpressionAttributeValues={
-            ':start': Decimal(0),
-            ':inc': Decimal(1)
-        }
-    )
+    try:
+        user_table.update_item(
+            Key=_user_pk(user_id),
+            UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
+            ExpressionAttributeValues={
+                ":start": Decimal(0),
+                ":inc": Decimal(1),
+            },
+            ConditionExpression="attribute_exists(#pk)",
+            ExpressionAttributeNames={"#pk": "user#user_id"},
+        )
+    except ClientError as e:
+        # キー間違い/ユーザー未作成ならここに来る
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            app.logger.warning("[increment_practice_count] user not found: %s", user_id)
+            return False
+        raise
+    return True
 
 @app.route('/participants/by_date/<schedule_id>')
 @login_required
@@ -1708,7 +1729,7 @@ def signup():
 
     # ユーザーItem（作成）
     user_item = {
-        "user#user_id": user_id,
+        "user#user_id": f"user#{user_id}",
         "address": form.address.data,
         "administrator": False,
         "created_at": current_time,
@@ -1804,7 +1825,7 @@ def temp_register():
             table = current_app.table   # ✅ これ（または app.table）
 
             temp_data = {
-                "user#user_id": user_id,
+                "user#user_id": f"user#{user_id}",
                 "display_name": form.display_name.data,
                 "user_name": form.user_name.data,
                 "gender": form.gender.data,
@@ -2195,13 +2216,18 @@ def get_table_info():
     except Exception as e:
         return f'Error: {str(e)}'    
     
+    
+def _user_key(user_id: str) -> dict:
+    uid = str(user_id)
+    return {"user#user_id": uid if uid.startswith("user#") else f"user#{uid}"}
+
 
 @app.route('/account/<string:user_id>', methods=['GET', 'POST'])
 def account(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
         # 更新直後でも最新を読む
-        response = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        response = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
         user = response.get('Item')
         if not user:
             abort(404)
@@ -2306,9 +2332,11 @@ def account(user_id):
                 if update_expression_parts:
                     update_expression = "SET " + ", ".join(update_expression_parts)
                     table.update_item(
-                        Key={'user#user_id': user_id},
+                        Key=_user_key(user_id),
                         UpdateExpression=update_expression,
                         ExpressionAttributeValues=expression_values,
+                        ConditionExpression="attribute_exists(#pk)",
+                        ExpressionAttributeNames={"#pk": "user#user_id"},
                         ReturnValues="ALL_NEW"
                     )
                     flash('プロフィールが更新されました。', 'success')
@@ -2342,43 +2370,43 @@ def is_image_accessible(url):
         return False                
 
 @app.route("/delete_user/<string:user_id>")
+@login_required
 def delete_user(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(
-            TableName=app.table_name,
-            Key={
-                'user#user_id': user_id
-            }
-        )
-        user = response.get('Item')
-        
+        key = _user_key(user_id)
+
+        response = table.get_item(Key=key, ConsistentRead=True)
+        user = response.get("Item")
+
         if not user:
-            flash('ユーザーが見つかりません。', 'error')
-            return redirect(url_for('user_maintenance'))
-            
-          # 削除権限を確認（本人または管理者のみ許可）
-        if current_user.id != user_id and not current_user.administrator:
-            app.logger.warning(f"Unauthorized delete attempt by user {current_user.id} for user {user_id}.")
-            abort(403)  # 権限がない場合は403エラー
-        
-        # ここで実際の削除処理を実行
-        table = app.dynamodb.Table(app.table_name)
-        table.delete_item(Key={'user#user_id': user_id})
+            flash("ユーザーが見つかりません。", "error")
+            return redirect(url_for("user_maintenance"))
 
-         # ログイン中のユーザーが削除対象の場合はログアウト
-        if current_user.id == user_id:
+        # 権限チェック：current_user.id が uuid なら uuid に揃えて比較
+        uid_no_prefix = key["user#user_id"].replace("user#", "", 1)
+
+        if current_user.id != uid_no_prefix and not getattr(current_user, "administrator", False):
+            app.logger.warning(
+                "Unauthorized delete attempt by user %s for user %s",
+                current_user.id, uid_no_prefix
+            )
+            abort(403)
+
+        table.delete_item(Key=key)
+
+        if current_user.id == uid_no_prefix:
             logout_user()
-            flash('アカウントが削除されました。再度ログインしてください。', 'info')
-            return redirect(url_for('login'))
+            flash("アカウントが削除されました。再度ログインしてください。", "info")
+            return redirect(url_for("login"))
 
-        flash('ユーザーアカウントが削除されました', 'success')
-        return redirect(url_for('user_maintenance'))
+        flash("ユーザーアカウントが削除されました", "success")
+        return redirect(url_for("user_maintenance"))
 
     except ClientError as e:
-        app.logger.error(f"DynamoDB error: {str(e)}")
-        flash('データベースエラーが発生しました。', 'error')
-        return redirect(url_for('user_maintenance'))
+        app.logger.error("DynamoDB error: %s", str(e), exc_info=True)
+        flash("データベースエラーが発生しました。", "error")
+        return redirect(url_for("user_maintenance"))
     
 
 @app.route("/gallery", methods=["GET", "POST"])
@@ -2592,74 +2620,70 @@ def api_chat_logs():
     result = get_badminton_chat_logs(cache_filter, limit)
     return jsonify(result)
 
+
 @app.route('/update_skill_score', methods=['POST'])
+@login_required
 def update_skill_score():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         user_id = data.get("user_id")
         new_score = data.get("skill_score")
 
         if not user_id or new_score is None:
             return jsonify({"success": False, "error": "Missing parameters"}), 400
 
-        # DynamoDB テーブルを取得
         table = app.dynamodb.Table(app.table_name)
 
-        # データ更新
-        table.update_item(
-            Key={'user#user_id': user_id},
+        resp = table.update_item(
+            Key=_user_key(user_id),
             UpdateExpression='SET skill_score = :score',
-            ExpressionAttributeValues={':score': Decimal(str(new_score))}
+            ExpressionAttributeValues={':score': Decimal(str(new_score))},
+            ReturnValues="UPDATED_NEW"
         )
 
         return jsonify({
             "success": True,
             "message": "Skill score updated",
-            "updated_score": new_score
+            "updated_score": new_score,
+            "ddb": resp.get("Attributes", {})
         }), 200
 
     except Exception as e:
-        app.logger.error(f"[update_skill_score] 更新エラー: {e}")
-        return jsonify({
-            "success": False,
-            "error": "更新に失敗しました"
-        }), 500
+        app.logger.error("[update_skill_score] 更新エラー: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "更新に失敗しました"}), 500
     
-@app.route('/api/user_info/<user_id>')
-def get_user_info(self, user_id: str):
-    """
-    ユーザー情報を取得（生年月日を含む）
-    """
+    
+@app.route('/api/user_info/<string:user_id>')
+@login_required
+def api_user_info(user_id):
     try:
-        response = self.table.get_item(
-            Key={'user#user_id': user_id}
+        table = current_app.dynamodb.Table(current_app.table_name)  # usersテーブル想定
+
+        resp = table.get_item(
+            Key=_user_key(user_id),
+            ConsistentRead=True
         )
-        
-        if 'Item' not in response:
-            print(f"[WARN] ユーザー情報が見つかりません - user_id: {user_id}")
-            return None
-        
-        item = response['Item']
-        
-        # 生年月日を取得（date_of_birthフィールド）
-        birth_date = item.get('date_of_birth', None)
-        
-        user_info = {
-            'user_id': user_id,
-            'birth_date': birth_date,
-            'display_name': item.get('display_name', ''),
-            'skill_score': item.get('skill_score', 0)
-        }
-        
-        print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
-        
-        return user_info
-        
+
+        item = resp.get("Item")
+        if not item:
+            current_app.logger.warning("[api_user_info] not found user_id=%s", user_id)
+            return jsonify({"success": False, "error": "not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "birth_date": item.get("date_of_birth"),
+            "display_name": item.get("display_name", ""),
+            "skill_score": item.get("skill_score", 0),
+        }), 200
+
+    except ClientError as e:
+        current_app.logger.error("[api_user_info] ddb error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "ddb error"}), 500
     except Exception as e:
-        print(f"[ERROR] ユーザー情報取得エラー: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+        current_app.logger.error("[api_user_info] error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "server error"}), 500
+    
     
 @app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
 @login_required
@@ -2667,17 +2691,26 @@ def profile_image_edit(user_id):
     """プロフィール画像編集ページ"""
     try:
         table = app.dynamodb.Table(app.table_name)
-        resp = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        resp = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
+
+        table.update_item(
+            Key=_user_key(user_id),
+            UpdateExpression="SET profile_image_url = :p, large_image_url = :l, updated_at = :u",
+            ExpressionAttributeValues={...},
+        )
         user = resp.get('Item')
         if not user:
             flash('ユーザーが見つかりません。', 'error')
             return redirect(url_for('index'))
 
         # 内部表記を統一
-        user['user_id'] = user.get('user#user_id', user_id)
+        pk = user.get("user#user_id", user_id)
+        user["user_id"] = pk.replace("user#", "", 1) if isinstance(pk, str) else user_id
 
         # 権限チェック
-        if session.get('_user_id') != user_id:
+        me = current_user.get_id()   # 例: "user#xxxxx" の可能性
+        me_uuid = me.replace("user#", "", 1) if isinstance(me, str) else ""
+        if me_uuid != user_id:
             flash('アクセス権限がありません。', 'error')
             return redirect(url_for('index'))
 
@@ -2716,11 +2749,7 @@ def profile_image_edit(user_id):
             # 座標（クライアントで計算したクロップ位置が来ていれば使用）
             sx  = request.form.get('crop_sx',   type=float)
             sy  = request.form.get('crop_sy',   type=float)
-            ssz = request.form.get('crop_side', type=float)
-
-            # ★ここに追加★
-            print(f"Debug received: sx={sx}, sy={sy}, ssz={ssz}")
-            print(f"Debug orig_file exists: {orig_file is not None}")
+            ssz = request.form.get('crop_side', type=float)            
 
             # large と サーバ側プロフィール生成用に元画像のバイト列を確保
             source_for_large = orig_file or profile_file

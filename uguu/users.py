@@ -69,6 +69,10 @@ def add_point(user_id):
 @users.route('/user/<user_id>')
 def user_profile(user_id):
     try:
+        # user# プレフィックスを除去してUIDに統一
+        if user_id.startswith("user#"):
+            user_id = user_id[len("user#"):]
+
         print(f"[DEBUG] Start loading profile for user_id: {user_id}")
 
         # ユーザー情報
@@ -217,9 +221,12 @@ def user_profile(user_id):
                 print(f"[WARN] failed to build admin_participation_dates: {e}")
                 admin_participation_dates = []
 
+        plain_user_id = user.get('user#user_id', '').replace('user#', '')        
+
         return render_template(
             'uguu/users.html',
             user=user,
+            plain_user_id=plain_user_id,
             posts=user_posts,
             posts_count=len(user_posts) if user_posts else 0,
 
@@ -265,6 +272,10 @@ def point_participation():
         if str(current_user.id) != user_id:
             print("[TRACE] blocked: not owner")
             return jsonify({'error': '本人のみ実行できます'}), 403
+
+        # ★追加：user# プレフィックスを除去
+        if user_id.startswith("user#"):
+            user_id = user_id[len("user#"):]
 
         # event_date の形式チェック（YYYY-MM-DDに正規化）
         if not event_date:

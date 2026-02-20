@@ -26,7 +26,7 @@ def restore_specific_user():
     
     # 復元するデータ
     restored_data = {
-        'user#user_id': user_id,
+        'user#user_id': f"user#{user_id}",
         'display_name': 'UGUIS渋谷',
         'user_name': '渋谷まさひこ',
         'email': 'shibuyamasahiko@gmail.com',
