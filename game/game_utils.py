@@ -124,7 +124,7 @@ def update_trueskill_for_players_and_return_updates(result_item):
 
     def normalize_user_pk(uid: str) -> str:
         uid = str(uid)
-        return uid if uid.startswith("user#") else f"user#{uid}"
+        return uid
 
     def get_team_ratings(team, user_table):
         ratings = []

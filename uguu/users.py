@@ -69,23 +69,20 @@ def add_point(user_id):
 @users.route('/user/<user_id>')
 def user_profile(user_id):
     try:
-        # user# プレフィックスを除去してUIDに統一
-        if user_id.startswith("user#"):
-            user_id = user_id[len("user#"):]
-
-        print(f"[DEBUG] Start loading profile for user_id: {user_id}")
-
         # ユーザー情報
         user = db.get_user_by_id(user_id)
         if not user:
             flash('ユーザーが見つかりませんでした。', 'error')
             return redirect(url_for('index'))
 
-        # 投稿
+        # ==========================================
+        # ★ここが抜けていた（あるいは飛ばされていた）部分です
+        # ==========================================
         user_posts, _next_cursor = db.get_posts_by_user(user_id)
         if user_posts is None:
             user_posts = []
-        if user_posts:
+        else:
+            # 日付順にソート
             user_posts = sorted(user_posts, key=lambda x: x.get('created_at', ''), reverse=True)
 
         # ==========================================================
@@ -271,11 +268,7 @@ def point_participation():
         # 本人確認（型ずれ防止のため文字列比較）
         if str(current_user.id) != user_id:
             print("[TRACE] blocked: not owner")
-            return jsonify({'error': '本人のみ実行できます'}), 403
-
-        # ★追加：user# プレフィックスを除去
-        if user_id.startswith("user#"):
-            user_id = user_id[len("user#"):]
+            return jsonify({'error': '本人のみ実行できます'}), 403        
 
         # event_date の形式チェック（YYYY-MM-DDに正規化）
         if not event_date:

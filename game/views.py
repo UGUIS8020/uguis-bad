@@ -118,11 +118,9 @@ def court():
         try:
             # あなたのユーザーテーブル名に合わせて変更
             users_table = current_app.dynamodb.Table("bad-users")  # 例: "bad-users"
-
-            # あなたのPK形式に合わせて変更
-            # 例: Key={"user#user_id": f"user#{user_id}"} が既存コードと整合しているならこれ
+           
             resp_u = users_table.get_item(
-                Key={"user#user_id": f"user#{user_id}"},
+                Key={"user#user_id": user_id},
                 ConsistentRead=True
             )
             u = resp_u.get("Item")
@@ -725,15 +723,7 @@ def entry():
     
     # まずは現在の user_id でそのまま検索
     resp = user_table.get_item(Key={"user#user_id": user_id})
-    user_data = resp.get("Item")
-
-    if not user_data:
-        # 見つからない場合、逆のパターンを試す
-        alternative_id = f"user#{user_id}" if not str(user_id).startswith("user#") else str(user_id).replace("user#", "")
-        current_app.logger.info(f"[ENTRY] ID検索再試行: {user_id} -> {alternative_id}")
-        
-        resp = user_table.get_item(Key={"user#user_id": alternative_id})
-        user_data = resp.get("Item")
+    user_data = resp.get("Item")    
 
     # 最終的にデータが見つかったか確認
     if user_data:
@@ -1621,7 +1611,7 @@ def perform_pairing(entries, match_id, max_courts=6):
 
 def normalize_user_pk(uid: str) -> str:
     uid = str(uid)
-    return uid if uid.startswith("user#") else f"user#{uid}"
+    return uid
 
 def persist_skill_to_bad_users(updated_skills: dict):
     users_table = current_app.dynamodb.Table("bad-users")
@@ -2804,7 +2794,7 @@ def api_skill_score():
     uid = current_user.get_id()
     user_table = current_app.dynamodb.Table("bad-users")
 
-    k = {"user#user_id": f"user#{uid}"}
+    k = {"user#user_id": uid}
     resp = user_table.get_item(Key=k, ConsistentRead=True)
     item = resp.get("Item") or {}
 
@@ -2873,7 +2863,7 @@ def create_test_data():
         
         # ユーザーテーブルにユーザーを作成
         user_item = {
-            'user#user_id': f"user#{user_id}",
+            'user#user_id': user_id,
             'user_id': user_id,
             'display_name': player['display_name'],
             'user_name': f"テスト_{player['display_name']}",

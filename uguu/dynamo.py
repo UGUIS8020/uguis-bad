@@ -517,19 +517,16 @@ class DynamoDB:
     
     def get_user_by_id(self, user_id: str) -> dict | None:
         try:
-            if not user_id:
-                return None
+            if not user_id: return None
 
-            # user# プレフィックスを付けて読む ✅
-            pk = f"user#{user_id}" if not user_id.startswith("user#") else user_id
-
+            # 余計なプレフィックス付与をせず、そのままのIDで検索
             res = self.users_table.get_item(
-                Key={"user#user_id": pk},
-                ConsistentRead=True   # ← 強整合読み取りも追加
+                Key={"user#user_id": user_id},
+                ConsistentRead=True
             )
             u = res.get("Item")
-            if not u:
-                return None
+            
+            if not u: return None
 
             # 表示名のフォールバック
             display_name = (u.get("display_name") or "").strip() or "不明"
@@ -1155,7 +1152,7 @@ class DynamoDB:
         """
         try:
             response = self.users_table.get_item(  # self.table → self.users_table に変更
-                Key={'user#user_id': f"user#{user_id}"}
+                Key={'user#user_id': user_id}
             )
             
             if 'Item' not in response:
@@ -2003,7 +2000,7 @@ class DynamoDB:
         """ユーザーのポイントを失効させる"""
         try:
             self.users_table.update_item(
-                Key={'user#user_id': f"user#{user_id}"},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': True}
             )
@@ -2017,7 +2014,7 @@ class DynamoDB:
         """ユーザーのポイント失効を解除"""
         try:
             self.users_table.update_item(
-                Key={'user#user_id': f"user#{user_id}"},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': False}
             )

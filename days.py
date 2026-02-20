@@ -68,7 +68,7 @@ def main():
         pk = u.get("user#user_id")
         if not pk:
             continue
-        user_id = pk.replace("user#", "")
+        user_id = pk
 
         last_date = get_last_registered_date(user_id)
 

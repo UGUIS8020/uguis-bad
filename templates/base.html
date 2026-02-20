@@ -271,17 +271,18 @@ body {
 
           <li class="nav-item ms-2">
             <a class="nav-link fw-bold text-warning d-flex align-items-center fs-6"
-            href="{{ url_for('users.user_profile', user_id=current_user.id) }}">
-            <span class="avatar-ig" style="--size:35px;--ring:3px;--gap:2px;">
+              {# participant ではなく current_user の ID を使うように修正 #}
+              href="{{ url_for('users.user_profile', user_id=current_user.user_id or current_user.id) }}">
+              <span class="avatar-ig" style="--size:35px;--ring:3px;--gap:2px;">
                 <img
-                src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-                alt="プロフィール画像"
-                loading="lazy" decoding="async"
-                onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-            </span>
-            <span class="ms-1 fs-6">{{ current_user.display_name | truncate(10) }}</span>
+                  src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                  alt="プロフィール画像"
+                  loading="lazy" decoding="async"
+                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+              </span>
+              <span class="ms-1 fs-6">{{ (current_user.display_name or current_user.user_name or "ユーザー") | truncate(10) }}</span>
             </a>
-            </li>
+          </li>
         {% else %}
           <li class="nav-item ms-4">
             <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
