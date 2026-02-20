@@ -1729,7 +1729,7 @@ def signup():
 
     # ユーザーItem（作成）
     user_item = {
-        "user#user_id": f"user#{user_id}",
+        "user#user_id": user_id,
         "address": form.address.data,
         "administrator": False,
         "created_at": current_time,
@@ -1825,7 +1825,7 @@ def temp_register():
             table = current_app.table   # ✅ これ（または app.table）
 
             temp_data = {
-                "user#user_id": f"user#{user_id}",
+                "user#user_id": user_id,
                 "display_name": form.display_name.data,
                 "user_name": form.user_name.data,
                 "gender": form.gender.data,

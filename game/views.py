@@ -695,92 +695,75 @@ def get_user_status(user_id):
 def entry():
     """明示的な参加登録（重複チェック＋新規登録）"""
     user_id = current_user.get_id()
-    now = datetime.now(JST).isoformat()  # ← JST追加
+    now = datetime.now(JST).isoformat()
     current_app.logger.info(f"[ENTRY] 参加登録開始: {user_id}")
 
-    # ← テーブル取得を追加
     match_table = current_app.dynamodb.Table("bad-game-match_entries")
     user_table = current_app.dynamodb.Table("bad-users")
 
-    # すでにpending登録されていないかチェック
+    # 1) すでにpending登録されていないかチェック
     response = match_table.scan(
-        FilterExpression=Attr("user_id").eq(user_id) & Attr("entry_status").is_in(["pending", "resting", "playing"])  # ← 修正
+        FilterExpression=Attr("user_id").eq(user_id) & Attr("entry_status").is_in(["pending", "resting", "playing"])
     )
     existing = response.get("Items", [])
 
     if existing:
         current_app.logger.info("[ENTRY] すでに参加登録済みのためスキップ")
-        # flash("すでに参加登録されています", "info")  ← フラッシュ削除
         return redirect(url_for("game.court"))
 
-    # 他の状態のエントリがあれば削除（念のため）
+    # 2) 他の状態のエントリがあれば削除（念のため）
     cleanup_response = match_table.scan(
         FilterExpression=Attr("user_id").eq(user_id)
     )
     for item in cleanup_response.get("Items", []):
         match_table.delete_item(Key={"entry_id": item["entry_id"]})
-        current_app.logger.info(f"[ENTRY] 古いエントリ削除: {item['entry_id']}")
 
-    # ユーザー情報から戦闘力を取得
-    user_data = user_table.get_item(Key={"user#user_id": user_id}).get("Item", {})
-    skill_score = user_data.get("skill_score", 50)
-    display_name = user_data.get("display_name", "未設定")
+    # -------------------------------------------------------
+    # 3) ユーザー情報取得（user# プレフィックスの有無を吸収する暫定ロジック）
+    # -------------------------------------------------------
+    user_data = None
+    
+    # まずは現在の user_id でそのまま検索
+    resp = user_table.get_item(Key={"user#user_id": user_id})
+    user_data = resp.get("Item")
 
-    # 新規登録
+    if not user_data:
+        # 見つからない場合、逆のパターンを試す
+        alternative_id = f"user#{user_id}" if not str(user_id).startswith("user#") else str(user_id).replace("user#", "")
+        current_app.logger.info(f"[ENTRY] ID検索再試行: {user_id} -> {alternative_id}")
+        
+        resp = user_table.get_item(Key={"user#user_id": alternative_id})
+        user_data = resp.get("Item")
+
+    # 最終的にデータが見つかったか確認
+    if user_data:
+        skill_score = user_data.get("skill_score", 50)
+        display_name = user_data.get("display_name", "未設定")
+    else:
+        # どちらでも見つからなかった場合のフォールバック
+        current_app.logger.warning(f"[ENTRY] ユーザーデータがDBに見つかりません: {user_id}")
+        skill_score = 50
+        display_name = "未設定"
+    # -------------------------------------------------------
+
+    # 4) 新規登録
     entry_item = {
         "entry_id": str(uuid.uuid4()),
         "user_id": user_id,
         "match_id": "pending",
         "entry_status": "pending",
         "display_name": display_name,
-        "skill_score": Decimal(str(skill_score)),  # ← Decimalに変換
+        "skill_score": Decimal(str(skill_score)),
         "joined_at": now,
         "created_at": now,
         "rest_count": 0,
         "match_count": 0,
-        "join_count": 1  # ← 追加
+        "join_count": 1
     }
     match_table.put_item(Item=entry_item)
-    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}, スキルスコア: {skill_score}")
+    current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}, 名前: {display_name}")
 
     return redirect(url_for("game.court"))
-
-
-# さらに強力な重複クリーンアップ関数
-def cleanup_duplicate_entries(user_id=None):
-    """重複エントリのクリーンアップ（管理者用）"""
-    try:
-        if user_id:
-            # 特定ユーザーの重複クリーンアップ
-            users_to_check = [user_id]
-        else:
-            # 全ユーザーの重複チェック
-            response = match_table.scan()
-            all_entries = response.get('Items', [])
-            users_to_check = list(set(entry['user_id'] for entry in all_entries))
-        
-        cleanup_count = 0
-        for check_user_id in users_to_check:
-            # pending重複チェック
-            pending_response = match_table.scan(
-                FilterExpression=Attr('user_id').eq(check_user_id) & Attr('match_id').eq('pending')
-            )
-            pending_entries = pending_response.get('Items', [])
-            
-            if len(pending_entries) > 1:
-                # 最新以外を削除
-                sorted_entries = sorted(pending_entries, key=lambda x: x.get('joined_at', ''), reverse=True)
-                for old_entry in sorted_entries[1:]:
-                    match_table.delete_item(Key={'entry_id': old_entry['entry_id']})
-                    cleanup_count += 1
-                    current_app.logger.info(f"重複クリーンアップ: {check_user_id} -> {old_entry['entry_id']}")
-        
-        current_app.logger.info(f"重複クリーンアップ完了: {cleanup_count}件削除")
-        return cleanup_count
-        
-    except Exception as e:
-        current_app.logger.error(f"重複クリーンアップエラー: {e}")
-        return 0
 
 
 # 管理者用エンドポイント
