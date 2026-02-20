@@ -8,7 +8,7 @@ from boto3.dynamodb.conditions import Key, Attr, And
 from flask import jsonify
 from flask import session
 from .game_utils import update_trueskill_for_players_and_return_updates, parse_players, Player, generate_balanced_pairs_and_matches
-from .game_utils import generate_ai_best_pairings, sync_match_entries_with_updated_skills,_select_waiting_entries
+from .game_utils import generate_ai_best_pairings, sync_match_entries_with_updated_skills, _select_waiting_entries
 from utils.timezone import JST
 import re
 from decimal import Decimal
@@ -1634,9 +1634,11 @@ def persist_skill_to_bad_users(updated_skills: dict):
                 ReturnValues="ALL_NEW",
             )
             
-            # The 'Attributes' key contains the state after update (no need for get_item)
-            updated_attrs = resp.get("Attributes")
-            current_app.logger.info("[bad-users] Updated uid=%s: %s", uid, updated_attrs)
+            # ★ 修正ポイント: 辞書全体 (updated_attrs) ではなく、主要項目のみをログに出力
+            current_app.logger.info(
+                "[bad-users] Updated uid=%s (score: %s, sigma: %s)", 
+                uid, new_s, new_g
+            )
             ok += 1
 
         except ClientError as e:
@@ -2479,19 +2481,14 @@ def score_input():
 @login_required
 def submit_score(match_id, court_number):
     """
-    submit_score 修正版（安全ログ + 取得ロジック整理）
-    - court_number は int なので最初に1回だけ使う
-    - primary(court=文字列) → fallback(court_number=数値)
-    - scan 失敗時は exc_info=True で原因追跡
-    - team フィールドが不一致でも調査しやすいログを追加
+    submit_score 整理版
+    - 成功時のログを最小限に抑え、エラー時の追跡性は維持
     """
     try:
-        current_app.logger.info("スコア送信開始: match_id=%s, court=%s", match_id, court_number)
-        current_app.logger.info("リクエストデータ: %s", dict(request.form))
-
-        # ---- 入力値の検証 ----
+        # ---- 1. 入力値の検証 ----
         team1_raw = request.form.get("team1_score")
         team2_raw = request.form.get("team2_score")
+        
         if team1_raw is None or team2_raw is None:
             return "スコアが送信されていません", 400
 
@@ -2505,95 +2502,44 @@ def submit_score(match_id, court_number):
             return "スコアが同点です。勝者を決めてください。", 400
 
         winner = "A" if team1_score > team2_score else "B"
-
-        # ---- match_id 形式チェック（警告のみ） ----
-        if not re.match(r"^\d{8}_\d{6}$", str(match_id)):
-            current_app.logger.warning("非標準形式の試合ID: %s", match_id)
-
-       # ---- エントリー取得 ----
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
         court_number_int = int(court_number)
 
-        try:
-            resp = match_table.scan(
-                FilterExpression=Attr("match_id").eq(str(match_id)) & Attr("court_number").eq(court_number_int)
-            )
-            entries = resp.get("Items", [])
+        # ---- 2. エントリー取得 (Scan) ----
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        
+        resp = match_table.scan(
+            FilterExpression=Attr("match_id").eq(str(match_id)) & Attr("court_number").eq(court_number_int)
+        )
+        entries = resp.get("Items", [])
 
-            current_app.logger.info(
-                "[entries] got=%d | match_id=%s court_number=%s",
-                len(entries), match_id, court_number_int
-            )
-            if entries:
-                current_app.logger.info("[entries] sample keys=%s", list(entries[0].keys()))
-
-        except Exception as e:
-            current_app.logger.warning("[entries] scan failed: %s", str(e), exc_info=True)
-            entries = []
-
-        current_app.logger.info("[entries] total entries=%d", len(entries))
-
-        # エントリーが取れなければ即エラー
         if not entries:
-            current_app.logger.error(
-                "コート%sのエントリーが見つかりません match_id=%s",
-                court_number_int, match_id
-            )
+            current_app.logger.error("❌ エントリー不在: match=%s, court=%d", match_id, court_number_int)
             return "コートのエントリーが見つかりません", 404
 
-        # ---- チーム分類 ----
-        team_a = []
-        team_b = []
-
+        # ---- 3. チーム分類（正規化は維持） ----
+        team_a, team_b = [], []
         for entry in entries:
-            # team 判定キーを広めに見る（運用で揺れても拾える）
-            team_value = entry.get("team")
-            if team_value is None:
-                team_value = entry.get("team_side")
-            if team_value is None:
-                team_value = entry.get("side")
-            if team_value is None:
-                team_value = entry.get("teamName")
+            # 揺れに対応する取得ロジックは維持
+            t_val = entry.get("team") or entry.get("team_side") or entry.get("side") or entry.get("teamName")
+            team_norm = str(t_val).strip().upper() if t_val is not None else ""
 
-            # 値の正規化（"a","A","team_a" など混入しても耐える）
-            team_norm = str(team_value).strip().upper() if team_value is not None else ""
-
-            player_data = {
+            player = {
                 "user_id": str(entry.get("user_id", "")),
                 "display_name": str(entry.get("display_name", "不明")),
                 "entry_id": str(entry.get("entry_id", "")),
             }
 
             if team_norm in ("A", "TEAM_A", "TEAM A"):
-                team_a.append(player_data)
+                team_a.append(player)
             elif team_norm in ("B", "TEAM_B", "TEAM B"):
-                team_b.append(player_data)
-
-        current_app.logger.info("チームA: %s", team_a)
-        current_app.logger.info("チームB: %s", team_b)
+                team_b.append(player)
 
         if not team_a or not team_b:
-            # デバッグ用：実際に入っていた team 系の値を出す
-            debug_team_values = []
-            for e in entries:
-                debug_team_values.append({
-                    "entry_id": e.get("entry_id"),
-                    "user_id": e.get("user_id"),
-                    "team": e.get("team"),
-                    "team_side": e.get("team_side"),
-                    "side": e.get("side"),
-                    "teamName": e.get("teamName"),
-                })
-            current_app.logger.error(
-                "コート%sのチームデータが不完全 match_id=%s team_values=%s",
-                court_number_int, match_id, debug_team_values
-            )
+            current_app.logger.error("❌ チーム不完全: match=%s, court=%d", match_id, court_number_int)
             return "コートのチームデータが不完全です", 404
 
-        # ---- 結果保存 ----
+        # ---- 4. 結果保存 ----
         result_table = current_app.dynamodb.Table("bad-game-results")
-        timestamp = datetime.now(JST).isoformat()
-
         result_item = {
             "result_id": str(uuid.uuid4()),
             "match_id": str(match_id),
@@ -2603,24 +2549,14 @@ def submit_score(match_id, court_number):
             "winner": winner,
             "team_a": team_a,
             "team_b": team_b,
-            "created_at": str(timestamp),
+            "created_at": datetime.now(JST).isoformat(),
         }
 
-        current_app.logger.info(
-            "submit_score: match_id=%s court=%s score=%s-%s winner=%s",
-            match_id, court_number_int, team1_score, team2_score, winner
-        )
-
-        try:
-            resp_put = result_table.put_item(Item=result_item)
-            current_app.logger.info(
-                "スコア送信成功: match_id=%s, court=%s, score=%s-%s",
-                match_id, court_number_int, team1_score, team2_score
-            )
-            current_app.logger.debug("DynamoDB resp_put: %s", resp_put)
-        except Exception as e:
-            current_app.logger.error("❌ 結果保存エラー: %s", str(e), exc_info=True)
-            return "スコアの保存に失敗しました", 500
+        result_table.put_item(Item=result_item)
+        
+        # 成功時はこの1行のみ
+        current_app.logger.info("✅ Score: Match=%s, Court=%d, %d-%d (Win:%s)", 
+                                 match_id, court_number_int, team1_score, team2_score, winner)
 
         return "", 200
 
@@ -2799,12 +2735,7 @@ def api_skill_score():
     item = resp.get("Item") or {}
 
     def f(x):
-        return float(x) if x is not None else None
-
-    current_app.logger.info(
-        "[api/skill_score] uid=%s score=%s sigma=%s",
-        uid, item.get("skill_score"), item.get("skill_sigma")
-    )
+        return float(x) if x is not None else None  
 
     return jsonify({
         "pk": k["user#user_id"],
@@ -3197,6 +3128,7 @@ def reset_ongoing_matches():
         
         playing_entries = response.get("Items", [])
         reset_count = 0
+        now = datetime.now(JST).isoformat()
         
         # 各エントリーをpendingに戻す
         for entry in playing_entries:

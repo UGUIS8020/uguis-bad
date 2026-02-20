@@ -512,6 +512,11 @@ def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[l
     Returns:
         (active_entries, waiting_entries)
     """
+    current_app.logger.info(
+        "[DEBUG_CALL] _select_waiting_entries called: entries=%d, waiting_count=%d",
+        len(sorted_entries), waiting_count
+    )
+
     if waiting_count <= 0:
         return sorted_entries, []
 
@@ -537,6 +542,164 @@ def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[l
     return active_entries, waiting_entries
 
 
+# =========================================================
+# Rest queue (queue 방식 + late joiners at tail)
+# =========================================================
+from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime, timezone
+import random
+
+from botocore.exceptions import ClientError
+from flask import current_app
+
+
+def _parse_iso_dt(s: Optional[str]) -> Optional[datetime]:
+    """ISO8601文字列をUTC datetimeへ。失敗したらNone。"""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _rest_queue_pk(queue_key: str) -> str:
+    return f"meta#{queue_key}"
+
+
+def _load_rest_queue(meta_table, *, queue_key: str = "rest_queue") -> Dict[str, Any]:
+    """
+    Returns dict:
+      queue: List[str]
+      generation: int
+      version: int
+      cycle_started_at: Optional[str]
+    """
+    pk = _rest_queue_pk(queue_key)
+    try:
+        resp = meta_table.get_item(Key={"match_id": pk}, ConsistentRead=True)
+        item = resp.get("Item") or {}
+
+        q = item.get("queue", [])
+        if not isinstance(q, list):
+            q = []
+
+        return {
+            "queue": q,
+            "generation": int(item.get("generation", 1) or 1),
+            "version": int(item.get("version", 0) or 0),
+            "cycle_started_at": item.get("cycle_started_at"),
+        }
+    except ClientError as e:
+        current_app.logger.error("[rest_queue][LOAD_ERR] %s", e)
+        return {"queue": [], "generation": 1, "version": 0, "cycle_started_at": None}
+
+
+def _save_rest_queue_optimistic(
+    meta_table,
+    *,
+    queue_key: str,
+    queue: List[str],
+    generation: int,
+    prev_version: int,
+    cycle_started_at: Optional[str] = None,
+) -> bool:
+    """
+    楽観ロックで rest_queue を保存する
+    - match_id = meta#<queue_key>
+    - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
+    - cycle_started_at は指定された場合のみ更新
+    """
+    pk = _rest_queue_pk(queue_key)
+    new_version = int(prev_version) + 1
+
+    expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
+    expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
+
+    if cycle_started_at is not None:
+        expr_names["#cs"] = "cycle_started_at"
+        expr_vals[":cs"] = cycle_started_at
+        update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
+    else:
+        update_expr = "SET #q=:q, #g=:g, #v=:nv"
+
+    try:
+        meta_table.update_item(
+            Key={"match_id": pk},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_vals,
+            ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
+        )
+        return True
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        if code == "ConditionalCheckFailedException":
+            return False
+        current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
+        return False
+
+
+def _weighted_sample_from_queue(
+    *,
+    queue: List[str],
+    waiting_count: int,
+    by_id: Dict[str, Dict[str, Any]],
+    skill_key: str = "skill_score",
+    bottom_n: int = 2,
+    boost: float = 1.2,
+) -> Tuple[List[str], List[str]]:
+    """
+    queue から waiting_count 人を重み付きで非復元抽出。
+    戻り値: (picked_uids, remaining_queue)
+    ※ remaining_queue は picked を除いた queue（元の順序保持）
+    """
+    if waiting_count <= 0 or not queue:
+        return [], list(queue)
+
+    cand = list(queue)
+
+    def get_skill(uid: str) -> float:
+        v = by_id.get(uid, {}).get(skill_key, 50)
+        try:
+            return float(v)
+        except Exception:
+            return 50.0
+
+    skills = {uid: get_skill(uid) for uid in cand}
+    low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
+    weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
+
+    picked: List[str] = []
+    remaining = list(cand)
+
+    for _ in range(min(waiting_count, len(remaining))):
+        total = sum(weights[uid] for uid in remaining)
+        r = random.random() * total
+        acc = 0.0
+        chosen = remaining[-1]
+        for uid in remaining:
+            acc += weights[uid]
+            if acc >= r:
+                chosen = uid
+                break
+        picked.append(chosen)
+        remaining = [u for u in remaining if u != chosen]
+
+    picked_set = set(picked)
+    remaining_queue = [uid for uid in queue if uid not in picked_set]
+    return picked, remaining_queue
+
+
 def _pick_waiters_by_rest_queue(
     entries: List[Dict[str, Any]],
     waiting_count: int,
@@ -545,108 +708,197 @@ def _pick_waiters_by_rest_queue(
     max_retries: int = 5,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     """
-    休みロジック本体（キュー方式）
-    - 1巡するまで同じ人が2回休みにならない（キュー消費）
-    - 途中参加者は末尾
-    - 離脱者は除去
-    - キュー不足時は「残りを使い切ってから」次巡で補う（途中参加末尾の思想を壊しにくい）
-    - DynamoDB に version を持たせて簡易の競合対策（楽観ロック）
+    キュー方式 + 途中参加者を末尾に追加 + サイクル完了で全員シャッフルして次巡へ
 
-    Returns:
-      active_entries, waiting_entries, meta
+    途中参加者:
+      - cycle_started_at(メタに保存) より後に joined_at があるユーザーのみ
+      - queue の末尾に追加
+
+    ブースト:
+      - 現状は「サイクル末尾(残り <= waiting_count)」で weighted を実行
     """
     meta_table = current_app.dynamodb.Table("bad-game-matches")
 
-    # entries から必要情報
     current_user_ids = [e["user_id"] for e in entries]
     current_user_set = set(current_user_ids)
     by_id = {e["user_id"]: e for e in entries}
 
+    def _names(uids: List[str], limit: int = 8) -> str:
+        out = []
+        for uid in uids[:limit]:
+            out.append(by_id.get(uid, {}).get("display_name", uid))
+        s = ", ".join(out)
+        if len(uids) > limit:
+            s += f" ...(+{len(uids)-limit})"
+        return s
+
     for attempt in range(1, max_retries + 1):
-        queue_item = _load_rest_queue(meta_table, queue_key=queue_key)
+        qi = _load_rest_queue(meta_table, queue_key=queue_key)
 
-        queue: List[str] = list(queue_item.get("queue", []))
-        generation: int = int(queue_item.get("generation", 1))
-        version: int = int(queue_item.get("version", 0))
+        queue = list(qi.get("queue", []))
+        generation = int(qi.get("generation", 1) or 1)
+        version = int(qi.get("version", 0) or 0)
+        cycle_started_at = qi.get("cycle_started_at")
+        cycle_started_dt = _parse_iso_dt(cycle_started_at)
 
-        # --- 1) 不整合修正: 離脱者除去 ---
+        current_app.logger.info(
+            "[rest_queue][LOAD] key=%s attempt=%d gen=%d ver=%d len=%d head=%s cycle_started_at=%s",
+            queue_key, attempt, generation, version, len(queue), _names(queue, 5), cycle_started_at
+        )
+
+        # 1) leavers cleanup
+        before_len = len(queue)
         queue = [uid for uid in queue if uid in current_user_set]
+        if len(queue) != before_len:
+            current_app.logger.info("[rest_queue][CLEAN] removed=%d -> len=%d", before_len - len(queue), len(queue))
 
-        # --- 2) 途中参加者: 末尾追加（キューにいない人） ---
-        queued_set = set(queue)
-        newcomers = [uid for uid in current_user_ids if uid not in queued_set]
-        if newcomers:
-            # 末尾に追加（順序はランダムでも良い／固定でも良い）
-            random.shuffle(newcomers)
-            queue.extend(newcomers)
-            current_app.logger.info("[rest_queue] newcomers added: %s", newcomers)
+        # 1.5) init: queue empty -> shuffle initial cycle
+        cycle_started_at_to_save = None
+        if not queue:
+            generation = max(1, generation)
+            queue = list(current_user_ids)
+            random.shuffle(queue)
+            cycle_started_at = _utc_now_iso()
+            cycle_started_dt = _parse_iso_dt(cycle_started_at)
+            cycle_started_at_to_save = cycle_started_at
+            current_app.logger.info(
+                "[rest_queue][INIT] empty queue -> init shuffle gen=%d head=%s cycle_started_at=%s",
+                generation, _names(queue, 8), cycle_started_at
+            )
 
-        # --- 3) waiting_pick を作る（下位2名ブースト込みサンプリング） ---
-        waiting_pick: List[str] = []        
+        # 2) late joiners to tail: joined_at > cycle_started_at
+        late_joiners: List[str] = []
+        if cycle_started_dt is not None:
+            queued_set = set(queue)
+            for uid in current_user_ids:
+                if uid in queued_set:
+                    continue
+                joined_at = by_id.get(uid, {}).get("joined_at")
+                joined_dt = _parse_iso_dt(joined_at)
+                if joined_dt and joined_dt > cycle_started_dt:
+                    late_joiners.append(uid)
 
-        waiting_pick, queue = _weighted_sample_from_queue(
-            queue=queue,
-            waiting_count=waiting_count,
-            by_id=by_id,
-            skill_key="skill_score",
-            bottom_n=2,
-            boost=1.15,
-        )        
+        if late_joiners:
+            queue.extend(late_joiners)
+            current_app.logger.info(
+                "[rest_queue][LATE_JOIN] added_to_tail=%d (%s) -> queue_len=%d tail=%s",
+                len(late_joiners), _names(late_joiners, 10), len(queue), _names(queue[-8:], 8)
+            )
 
-        need = waiting_count - len(waiting_pick)
-        if need > 0:
-            already = set(waiting_pick)
-            candidates = [uid for uid in current_user_ids if uid not in already]
-            random.shuffle(candidates)
+        current_app.logger.info(
+            "[rest_queue][PRE_PICK] users=%d waiting_count=%d queue_len=%d gen=%d ver=%d head=%s",
+            len(current_user_ids), waiting_count, len(queue), generation, version, _names(queue, 8)
+        )
+
+        # 3) boost check（末尾ブースト）
+        will_complete = (len(queue) <= waiting_count and len(queue) > 0)
+        boost = will_complete
+        current_app.logger.info(
+            "[rest_queue][BOOST_CHECK] queue_len=%d waiting_count=%d will_complete=%s boost=%s gen=%d",
+            len(queue), waiting_count, will_complete, boost, generation
+        )
+
+        # 4) pick
+        if boost:
+            current_app.logger.info("🔥 [rest_queue] サイクル節目ブースト発動 (gen=%d): 1.2倍", generation)
+            before_q_len = len(queue)
+            waiting_pick, queue = _weighted_sample_from_queue(
+                queue=queue,
+                waiting_count=waiting_count,
+                by_id=by_id,
+                skill_key="skill_score",
+                bottom_n=2,
+                boost=1.2,
+            )
+            still = [uid for uid in waiting_pick if uid in set(queue)]
+            current_app.logger.info(
+                "[rest_queue][WEIGHTED] picked=%s | q_len %d->%d | picked_in_queue=%d (%s)",
+                _names(waiting_pick, 10),
+                before_q_len,
+                len(queue),
+                len(still),
+                (_names(still, 10) if still else "none"),
+            )
+            if still:
+                current_app.logger.warning(
+                    "[rest_queue][BUG] picked still remains in queue. "
+                    "Fix _weighted_sample_from_queue to remove picked from queue."
+                )
+        else:
+            waiting_pick = queue[:waiting_count]
+            queue = queue[waiting_count:]
+            current_app.logger.info(
+                "[rest_queue][SIMPLE] picked=%s -> queue_len=%d head=%s",
+                _names(waiting_pick, 10), len(queue), _names(queue, 8)
+            )
+
+        # 5) cycle completed -> rebuild+shuffle gen++ and update cycle_started_at
+        cycle_reset = False
+        if len(queue) == 0:
             generation += 1
+            queue = list(current_user_ids)
+            random.shuffle(queue)
+            cycle_started_at = _utc_now_iso()
+            cycle_started_at_to_save = cycle_started_at
+            cycle_reset = True
+            current_app.logger.info(
+                "🔄 [rest_queue][CYCLE_RESET] completed -> rebuild+shuffle gen=%d head=%s cycle_started_at=%s",
+                generation, _names(queue, 8), cycle_started_at
+            )
 
-            waiting_pick.extend(candidates[:need])
-            queue = candidates[need:]
-
-            # ★まだ足りない場合のフォールバック
-            if len(waiting_pick) < waiting_count:
-                still_need = waiting_count - len(waiting_pick)
-                fallback = list(current_user_ids)
-                random.shuffle(fallback)
-                for uid in fallback:
-                    if uid in set(waiting_pick):
-                        continue
-                    waiting_pick.append(uid)
-                    still_need -= 1
-                    if still_need == 0:
-                        break
-
-        # ★ここ（waiting_ids 作成の直前）が最適
-        if len(waiting_pick) != len(set(waiting_pick)):
-            current_app.logger.warning("[rest_queue] duplicate waiting_pick detected: %s", waiting_pick)
-            waiting_pick = list(dict.fromkeys(waiting_pick))
-
+        # 6) build entries
+        waiting_pick = list(dict.fromkeys(waiting_pick))
         waiting_ids = set(waiting_pick)
-
         waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
         active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
 
-        # --- 5) 保存（version で楽観ロック） ---
+        current_app.logger.info(
+            "[rest_queue][RESULT] active=%d waiting=%d waiting_names=%s queue_remaining=%d gen=%d cycle_reset=%s",
+            len(active_entries),
+            len(waiting_entries),
+            ", ".join([e.get("display_name", "?") for e in waiting_entries]),
+            len(queue),
+            generation,
+            cycle_reset,
+        )
+
+        # 7) save
+        current_app.logger.info(
+            "[rest_queue][SAVE_TRY] prev_ver=%d save_len=%d gen=%d head=%s cycle_started_at_to_save=%s",
+            version, len(queue), generation, _names(queue, 8), cycle_started_at_to_save
+        )
+
         save_ok = _save_rest_queue_optimistic(
             meta_table,
             queue_key=queue_key,
             queue=queue,
             generation=generation,
             prev_version=version,
+            cycle_started_at=cycle_started_at_to_save,
         )
+
+        current_app.logger.info(
+            "[rest_queue][SAVE_DONE] ok=%s prev_ver=%d new_ver_expected=%d",
+            save_ok, version, version + 1
+        )
+
         if save_ok:
             meta = {
                 "generation": generation,
                 "version": version + 1,
                 "queue_remaining": len(queue),
                 "attempt": attempt,
+                "boost_round": bool(boost),
+                "will_complete_cycle": bool(will_complete),
+                "cycle_reset": bool(cycle_reset),
+                "cycle_started_at": cycle_started_at,
+                "late_joiners_added": len(late_joiners),
             }
             return active_entries, waiting_entries, meta
 
-        # 競合したのでリトライ
         current_app.logger.warning("[rest_queue] conflict retry %d/%d", attempt, max_retries)
 
-    # リトライ尽きたら最後は安全側：今回だけはキュー無しランダムで返す（落とさないため）
+    # fallback
     current_app.logger.error("[rest_queue] failed to save after retries; fallback random")
     uids = list(current_user_ids)
     random.shuffle(uids)
@@ -654,8 +906,13 @@ def _pick_waiters_by_rest_queue(
     waiting_ids = set(waiting_pick)
     waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
     active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
-    meta = {"generation": None, "version": None, "queue_remaining": None, "attempt": max_retries, "fallback": True}
-    return active_entries, waiting_entries, meta
+    return active_entries, waiting_entries, {
+        "generation": None,
+        "version": None,
+        "queue_remaining": None,
+        "attempt": max_retries,
+        "fallback": True,
+    }
 
 
 def _load_rest_queue(meta_table, *, queue_key: str) -> Dict[str, Any]:
@@ -678,58 +935,51 @@ def _save_rest_queue_optimistic(
     queue: List[str],
     generation: int,
     prev_version: int,
+    cycle_started_at: Optional[str] = None,
 ) -> bool:
     """
-    version を使った簡易な競合対策（楽観ロック）
-    - 既存アイテムがある: version が prev_version のときだけ更新
-    - 無い場合: attribute_not_exists(match_id) で作成（version=1）
+    楽観ロックで rest_queue を保存する
+    - match_id = meta#<queue_key>
+    - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
+    - cycle_started_at は指定された場合のみ更新
     """
-    now = datetime.now(JST).isoformat()
+    pk = _rest_queue_pk(queue_key)
+    new_version = int(prev_version) + 1
 
-    # 既存あり更新（Condition: version一致）
+    expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
+    expr_vals = {
+        ":q": list(queue),
+        ":g": int(generation),
+        ":nv": int(new_version),
+        ":pv": int(prev_version),
+    }
+
+    if cycle_started_at is not None:
+        expr_names["#cs"] = "cycle_started_at"
+        expr_vals[":cs"] = cycle_started_at
+        update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
+    else:
+        update_expr = "SET #q=:q, #g=:g, #v=:nv"
+
     try:
         meta_table.update_item(
-            Key={"match_id": queue_key},
-            UpdateExpression="SET #q=:q, generation=:g, updated_at=:u, version=:nv",
-            ConditionExpression="attribute_exists(match_id) AND version = :pv",
-            ExpressionAttributeNames={"#q": "queue"},
-            ExpressionAttributeValues={
-                ":q": queue,
-                ":g": int(generation),
-                ":u": now,
-                ":pv": int(prev_version),
-                ":nv": int(prev_version + 1),
-            },
+            Key={"match_id": pk},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_vals,
+            ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
         )
         return True
+
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code")
         if code == "ConditionalCheckFailedException":
-            # 既存が無い or version競合の可能性
-            pass
-        else:
-            # 想定外は上に投げても良いが、ここでは失敗扱い
-            current_app.logger.exception("[rest_queue] update_item failed: %s", e)
+            current_app.logger.warning(
+                "[rest_queue][SAVE_CONFLICT] key=%s prev_ver=%s", queue_key, prev_version
+            )
             return False
 
-    # 既存が無いケース（作成を試みる）
-    try:
-        meta_table.put_item(
-            Item={
-                "match_id": queue_key,
-                "queue": queue,
-                "generation": int(generation),
-                "updated_at": now,
-                "version": 1,
-            },
-            ConditionExpression="attribute_not_exists(match_id)",
-        )
-        return True
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        if code == "ConditionalCheckFailedException":
-            return False  # 他が先に作った
-        current_app.logger.exception("[rest_queue] put_item failed: %s", e)
+        current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
         return False
     
 
@@ -751,13 +1001,10 @@ def _weighted_sample_from_queue(
     *,
     skill_key: str = "skill_score",
     bottom_n: int = 2,
-    boost: float = 1.15,
+    boost: float = 1.2,
 ) -> Tuple[List[str], List[str]]:
     """
     キュー内でスキル下位 bottom_n 名の選出確率を boost 倍にする
-    - 非復元
-    - 抽選のたびに bottom_n を再計算（ブースト対象がズレにくい）
-    - skill 未設定は「キュー内の中央値」で補完（1500固定はやめる）
     """
     if not queue or waiting_count <= 0:
         return [], queue
@@ -780,13 +1027,16 @@ def _weighted_sample_from_queue(
         nums.sort()
         default_score = float(nums[len(nums) // 2])
     else:
-        # 全員未設定なら、あなたのスケールに合わせて適当に（例: 50）
         default_score = 50.0
 
-    for _ in range(take):
-        # ★毎回 bottom_n を更新
+    for i in range(take):
+        # 毎回 bottom_n を更新
         scores = {uid: _safe_float(by_id.get(uid, {}).get(skill_key), default_score) for uid in remaining}
         bottom_ids = set(sorted(remaining, key=lambda uid: scores[uid])[:max(1, min(bottom_n, len(remaining)))])
+
+        # ★【追加ログ】ブースト対象者の名前を表示
+        bottom_names = [by_id[uid].get("display_name", "不明") for uid in bottom_ids if uid in by_id]
+        current_app.logger.info("[rest_queue] 抽選%d回目 - ブースト対象(x%.2f): %s", i+1, boost, bottom_names)
 
         weights = [boost if uid in bottom_ids else 1.0 for uid in remaining]
         total = sum(weights)
@@ -796,7 +1046,14 @@ def _weighted_sample_from_queue(
         for j, w in enumerate(weights):
             cumulative += w
             if r <= cumulative:
-                selected.append(remaining[j])
+                picked_uid = remaining[j]
+                picked_name = by_id.get(picked_uid, {}).get("display_name", "不明")
+                is_boosted = " (ブースト適用済)" if picked_uid in bottom_ids else ""
+                
+                # ★【追加ログ】実際に誰が選ばれたかを表示
+                current_app.logger.info("[rest_queue] 選出結果: %s%s", picked_name, is_boosted)
+                
+                selected.append(picked_uid)
                 remaining.pop(j)
                 break
 
