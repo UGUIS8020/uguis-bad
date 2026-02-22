@@ -741,14 +741,14 @@ def get_participants_info(schedule):
 
         batch_request = {
             table_name: {
-                "Keys": [{"user#user_id": id} for id in ids],  # ← ids 全件を渡す
+                "Keys": [{"user#user_id": id} for id in ids],
                 "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
                 "ExpressionAttributeNames": {"#uid": "user#user_id"}
             }
         }
 
         responses = []
-        unprocessed = request
+        unprocessed = batch_request
 
         client = dynamodb.meta.client if hasattr(dynamodb, "meta") else dynamodb
 
