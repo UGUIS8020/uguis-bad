@@ -9,6 +9,7 @@ import logging
 from botocore.exceptions import ClientError
 from typing import Optional
 from decimal import Decimal
+from trueskill import Rating, rate
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -24,6 +25,7 @@ def get_current_match_meta():
     table = current_app.dynamodb.Table("bad-game-matches")
     resp = table.get_item(Key={"match_id": META_PK}, ConsistentRead=True)
     return resp.get("Item")
+
 
 def get_current_match_id():
     meta = get_current_match_meta()
@@ -100,46 +102,59 @@ def finish_match_meta(match_id: str):
             return False
         raise
 
+def normalize_user_pk(uid: str) -> str:
+    if uid is None:
+        raise ValueError("uid is None")
+    s = str(uid).strip()
+    if not s:
+        raise ValueError("uid is empty")
+    return s if s.startswith("user#") else f"user#{s}"
+
 def update_trueskill_for_players_and_return_updates(result_item):
-    from decimal import Decimal
-    from trueskill import Rating, rate
-    
-    updated_skills = {}
+    """
+    result_item から team_a/team_b のプレイヤーを取り出して TrueSkill 更新し、
+    updated_skills = {user_id: {skill_score: float, skill_sigma: float}} を返す。
+    同時に bad-users にも永続化する（test_ は除外）。
+    """
     user_table = current_app.dynamodb.Table("bad-users")
 
     def safe_get_score(item, keys):
         for k in keys:
             val = item.get(k)
             if val is not None:
-                try: return int(float(val))
-                except: continue
+                try:
+                    return int(float(val))
+                except Exception:
+                    continue
         return 0
 
     t1 = safe_get_score(result_item, ["team1_score", "team_a_score", "score1"])
     t2 = safe_get_score(result_item, ["team2_score", "team_b_score", "score2"])
     winner = str(result_item.get("winner", "A")).upper()
+    # score_diff は今は未使用なら消してOK（残したいならそのまま）
     score_diff = (t1 - t2) if winner == "A" else (t2 - t1)
 
-    # 【削除】RawItemのログを削除（中身が巨大なため）
-
-    def normalize_user_pk(uid: str) -> str:
-        uid = str(uid)
-        return uid
-
-    def get_team_ratings(team, user_table):
-        ratings = []
-        for player in team:
-            uid = player.get("user_id")
-            if not uid:
+    def get_team_ratings(team):
+        """
+        team: [{user_id, skill_score?, skill_sigma?, ...}, ...]
+        戻り: [(player_uid, Rating), ...]
+        """
+        out = []
+        for player in team or []:
+            player_uid = player.get("user_id")
+            if not player_uid:
                 continue
 
             mu = player.get("skill_score")
             sig = player.get("skill_sigma")
 
+            # 足りなければ bad-users から拾う
             if mu is None or sig is None:
                 try:
-                    res = user_table.get_item(Key={"user#user_id": normalize_user_pk(uid)})
-                    data = res.get("Item", {}) or {}
+                    res = user_table.get_item(
+                        Key={"user#user_id": normalize_user_pk(player_uid)}
+                    )
+                    data = res.get("Item") or {}
                     mu = data.get("skill_score", 25.0)
                     sig = data.get("skill_sigma", 8.333)
                 except Exception:
@@ -154,27 +169,22 @@ def update_trueskill_for_players_and_return_updates(result_item):
             except Exception:
                 sig = 8.333
 
-            ratings.append((str(uid), Rating(mu=mu, sigma=sig)))
+            out.append((str(player_uid), Rating(mu=mu, sigma=sig)))
 
-        return ratings
+        return out
 
-    # --- ここで user_table を用意 ---
-    user_table = current_app.dynamodb.Table("bad-users")
-
-    ratings_a = get_team_ratings(result_item.get("team_a", []), user_table)
-    ratings_b = get_team_ratings(result_item.get("team_b", []), user_table)
+    ratings_a = get_team_ratings(result_item.get("team_a", []))
+    ratings_b = get_team_ratings(result_item.get("team_b", []))
 
     if not ratings_a or not ratings_b:
         return {}
 
-    team_a_uids = [uid for uid, r in ratings_a]
-    team_b_uids = [uid for uid, r in ratings_b]
-    team_a_ratings = [r for uid, r in ratings_a]
-    team_b_ratings = [r for uid, r in ratings_b]
+    team_a_uids = [uid for uid, _r in ratings_a]
+    team_b_uids = [uid for uid, _r in ratings_b]
+    team_a_ratings = [_r for _uid, _r in ratings_a]
+    team_b_ratings = [_r for _uid, _r in ratings_b]
 
-    # 勝敗 → ranks（小さいほど勝ち）
     ranks = [0, 1] if winner == "A" else [1, 0]
-
     new_team_a, new_team_b = rate([team_a_ratings, team_b_ratings], ranks=ranks)
 
     updated_skills = {}
@@ -189,23 +199,7 @@ def update_trueskill_for_players_and_return_updates(result_item):
         result_item.get("court_number"),
         len(updated_skills),
         next(iter(updated_skills.items()), None),
-    )
-
-    for uid, vals in updated_skills.items():
-        if str(uid).startswith("test_"):
-            continue
-        try:
-            user_table.update_item(
-                Key={"user#user_id": normalize_user_pk(uid)},
-                UpdateExpression="SET skill_score = :s, skill_sigma = :g",
-                ExpressionAttributeValues={
-                    ":s": Decimal(str(round(vals["skill_score"], 2))),
-                    ":g": Decimal(str(round(vals["skill_sigma"], 4))),
-                }
-            )
-            current_app.logger.info(f"スキル永続化: {uid} → {vals['skill_score']:.2f}")
-        except Exception as e:
-            current_app.logger.error(f"スキル永続化エラー [{uid}]: {e}")
+    )    
 
     return updated_skills
 
@@ -510,41 +504,6 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
-# 待機者選出ロジック（キュー方式）
-def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[list, list]:
-    """
-    sorted_entries: 休み選出前の候補（既に優先度順などでソート済みを想定）
-    waiting_count: 休みにする人数
-
-    Returns:
-        (active_entries, waiting_entries)
-    """
-
-    if waiting_count <= 0:
-        return sorted_entries, []
-
-    n = len(sorted_entries)
-    if n == 0:
-        return [], []
-    # 全員休み事故を防止（必要なら調整）
-    if waiting_count >= n:
-        waiting_count = max(0, n - 1)
-
-    active_entries, waiting_entries, meta = _pick_waiters_by_rest_queue(
-        entries=sorted_entries,
-        waiting_count=waiting_count,
-    )
-
-    current_app.logger.info(
-        "[rest_queue] gen=%s ver=%s waiting=%s queue_remaining=%s",
-        meta.get("generation"),
-        meta.get("version"),
-        ", ".join([e.get("display_name", "?") for e in waiting_entries]),
-        meta.get("queue_remaining"),
-    )
-    return active_entries, waiting_entries
-
-
 # =========================================================
 # Rest queue (queue 방식 + late joiners at tail)
 # =========================================================
@@ -701,271 +660,6 @@ def _weighted_sample_from_queue(
     picked_set = set(picked)
     remaining_queue = [uid for uid in queue if uid not in picked_set]
     return picked, remaining_queue
-
-
-def _pick_waiters_by_rest_queue(
-    entries: List[Dict[str, Any]],
-    waiting_count: int,
-    *,
-    queue_key: str = "rest_queue",
-    max_retries: int = 5,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    キュー方式 + 途中参加者を末尾に追加 + サイクル完了で全員シャッフルして次巡へ
-
-    途中参加者:
-      - cycle_started_at(メタに保存) より後に joined_at があるユーザーのみ
-      - queue の末尾に追加
-
-    ブースト:
-      - 現状は「サイクル末尾(残り <= waiting_count)」で weighted を実行
-    """
-    meta_table = current_app.dynamodb.Table("bad-game-matches")
-
-    current_user_ids = [e["user_id"] for e in entries]
-    current_user_set = set(current_user_ids)
-    by_id = {e["user_id"]: e for e in entries}
-
-    def _names(uids: List[str], limit: int = 8) -> str:
-        out = []
-        for uid in uids[:limit]:
-            out.append(by_id.get(uid, {}).get("display_name", uid))
-        s = ", ".join(out)
-        if len(uids) > limit:
-            s += f" ...(+{len(uids)-limit})"
-        return s
-
-    for attempt in range(1, max_retries + 1):        
-        qi = _load_rest_queue(meta_table, queue_key=queue_key)
-        # pk = _rest_queue_pk(queue_key)  <-- 不要なので削除
-
-        # 以前エラーが出ていた info(queue_key, pk) 行も削除
-
-        queue = list(qi.get("queue", []))
-        generation = int(qi.get("generation", 1) or 1)
-        version = int(qi.get("version", 0) or 0)
-        cycle_started_at = qi.get("cycle_started_at")
-        cycle_started_dt = _parse_iso_dt(cycle_started_at)
-
-        # 必要な情報を1行に集約したメインのログ
-        current_app.logger.info(
-            "[rest_queue][LOAD] key=%s attempt=%d gen=%d ver=%d len=%d head=%s",
-            queue_key, attempt, generation, version, len(queue), _names(queue, 5)
-        )
-
-        # 1) leavers cleanup
-        before_len = len(queue)
-        queue = [uid for uid in queue if uid in current_user_set]
-        if len(queue) != before_len:
-            current_app.logger.info("[rest_queue][CLEAN] removed=%d -> len=%d", before_len - len(queue), len(queue))
-
-        # 1.5) init: queue empty -> shuffle initial cycle
-        cycle_started_at_to_save = None
-        if not queue:
-            generation = max(1, generation)
-            queue = list(current_user_ids)
-            random.shuffle(queue)
-            cycle_started_at = _utc_now_iso()
-            cycle_started_dt = _parse_iso_dt(cycle_started_at)
-            cycle_started_at_to_save = cycle_started_at
-            current_app.logger.info(
-                "[rest_queue][INIT] empty queue -> init shuffle gen=%d head=%s cycle_started_at=%s",
-                generation, _names(queue, 8), cycle_started_at
-            )
-
-        # --- 2) late joiners to tail ---
-        # サイクル開始後に参加した人を抽出
-        late_joiners: List[str] = []
-        if cycle_started_dt is not None:
-            queued_set = set(queue)
-            for uid in current_user_ids:
-                if uid in queued_set:
-                    continue
-                joined_at = by_id.get(uid, {}).get("joined_at")
-                joined_dt = _parse_iso_dt(joined_at)
-                if joined_dt and joined_dt > cycle_started_dt:
-                    late_joiners.append(uid)
-
-        if late_joiners:
-            queue.extend(late_joiners)
-            current_app.logger.info(
-                "[rest_queue][LATE_JOIN] added_to_tail=%d (%s) -> 2巡目予約枠へ",
-                len(late_joiners), _names(late_joiners, 10)
-            )
-
-        # --- 3) Pick Waiters ---
-        # ブーストを削除し、純粋にキューの先頭から取得するロジックに一本化
-        waiting_pick = queue[:waiting_count]
-        queue = queue[waiting_count:]
-        
-        current_app.logger.info(
-            "[rest_queue][PICK] picked=%s -> remaining=%d",
-            _names(waiting_pick, 10), len(queue)
-        )
-
-        # --- 4) Cycle Completed -> Rebuild Queue (淳二さん問題対策) ---
-        cycle_reset = False
-        if len(queue) == 0:
-            generation += 1
-            
-            # 1.「1巡目メンバー」＝ サイクル開始時に存在し、まだ今日一度も休んでいない人
-            # 2.「2巡目グループ」＝ 既に1回休んだ人（淳二さん等）や、サイクル開始後に参加した人
-            unrested_original = [] 
-            future_round = []      
-            
-            for uid in current_user_ids:
-                user = by_id.get(uid, {})
-                joined_dt = _parse_iso_dt(user.get("joined_at"))
-                rest_count = int(user.get("rest_count", 0) or 0)
-                
-                # 判定条件: 
-                # サイクル開始以前に参加しており、かつ本日の休みがまだ 0 の人を優先
-                if rest_count == 0 and (joined_dt and cycle_started_dt and joined_dt <= cycle_started_dt):
-                    unrested_original.append(uid)
-                else:
-                    # すでに休んだ人や途中参加者は、次の巡回リストへ
-                    future_round.append(uid)
-            
-            # 2巡目グループは公平にシャッフル
-            random.shuffle(future_round)
-
-            if unrested_original:
-                # 1巡目の未休憩者を優先してキューの先頭に配置（淳二さんは後ろの future_round に回る）
-                random.shuffle(unrested_original)
-                queue = unrested_original + future_round
-                current_app.logger.info(
-                    "[rest_queue][CYCLE_VERIFY] 1巡目未休憩者 %d名を優先配置 (先頭: %s)",
-                    len(unrested_original), _names(unrested_original, 5)
-                )
-            else:
-                # 全員が1回休み終わった場合
-                queue = future_round
-                current_app.logger.info(
-                    "[rest_queue][CYCLE_VERIFY] 全員待機完了。次巡(gen=%d)を開始", generation
-                )
-
-            # サイクルの基準時刻を更新
-            cycle_started_at = _utc_now_iso()
-            cycle_started_at_to_save = cycle_started_at
-            cycle_reset = True
-
-        # --- 5) cycle completed -> rebuild+shuffle gen++ and update cycle_started_at ---
-        cycle_reset = False
-        if len(queue) == 0:
-            generation += 1
-
-            # --- 改良ロジック ---
-            # 1. 「1巡目メンバー」＝ 現在のサイクル開始(cycle_started_dt)より前からいる未待機者
-            # 2. 「2巡目以降」＝ サイクル開始後に参加した人、または既に1回休んだ人
-            
-            unrested_original = [] # このサイクル中に絶対に休ませるべき既存メンバー
-            future_round = []      # 次のサイクル（2巡目）に回すメンバー
-            
-            for uid in current_user_ids:
-                user = by_id.get(uid, {})
-                joined_dt = _parse_iso_dt(user.get("joined_at"))
-                rest_count = int(user.get("rest_count", 0) or 0)
-                
-                # 判定条件: 
-                # サイクル開始時(cycle_started_dt)以前に参加しており、かつ本日の休み(rest_count)がまだ 0 の人
-                if rest_count == 0 and (joined_dt and cycle_started_dt and joined_dt <= cycle_started_dt):
-                    unrested_original.append(uid)
-                else:
-                    # すでに休んだ淳二さんや、ゲーム開始後に来た人はこちらに入る
-                    future_round.append(uid)
-            
-            # 2巡目グループは公平にシャッフル
-            random.shuffle(future_round)
-
-            if unrested_original:
-                # 1巡目の未休憩者を優先してキューの先頭に配置
-                random.shuffle(unrested_original)
-                queue = unrested_original + future_round
-                current_app.logger.info(
-                    "[rest_queue][CYCLE_VERIFY] 1巡目未休憩者を優先: %d名 (先頭: %s)",
-                    len(unrested_original), _names(unrested_original, 5)
-                )
-            else:
-                # 全員1回休み終わったら、2巡目グループ全員で新サイクル開始
-                queue = future_round
-                current_app.logger.info(
-                    "[rest_queue][CYCLE_VERIFY] 全員1回待機完了。2巡目(途中参加含む)を開始 gen=%d", generation
-                )
-            # --- ここまで ---
-
-            cycle_started_at = _utc_now_iso()
-            cycle_started_at_to_save = cycle_started_at
-            cycle_reset = True
-            current_app.logger.info(
-                "🔄 [rest_queue][CYCLE_RESET] completed -> rebuild+shuffle gen=%d head=%s cycle_started_at=%s",
-                generation, _names(queue, 8), cycle_started_at
-            )
-
-        # 6) build entries
-        waiting_pick = list(dict.fromkeys(waiting_pick))
-        waiting_ids = set(waiting_pick)
-        waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
-        active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
-
-        current_app.logger.info(
-            "[rest_queue][RESULT] active=%d waiting=%d waiting_names=%s queue_remaining=%d gen=%d cycle_reset=%s",
-            len(active_entries),
-            len(waiting_entries),
-            ", ".join([e.get("display_name", "?") for e in waiting_entries]),
-            len(queue),
-            generation,
-            cycle_reset,
-        )
-
-        # 7) save
-        current_app.logger.info(
-            "[rest_queue][SAVE_TRY] prev_ver=%d save_len=%d gen=%d head=%s cycle_started_at_to_save=%s",
-            version, len(queue), generation, _names(queue, 8), cycle_started_at_to_save
-        )
-
-        save_ok = _save_rest_queue_optimistic(
-            meta_table,
-            queue_key=queue_key,
-            queue=queue,
-            generation=generation,
-            prev_version=version,
-            cycle_started_at=cycle_started_at_to_save,
-        )
-
-        current_app.logger.info(
-            "[rest_queue][SAVE_DONE] ok=%s prev_ver=%d new_ver_expected=%d",
-            save_ok, version, version + 1
-        )
-
-        if save_ok:
-            meta = {
-                "generation": generation,
-                "version": version + 1,
-                "queue_remaining": len(queue),
-                "attempt": attempt,                
-                "cycle_reset": bool(cycle_reset),
-                "cycle_started_at": cycle_started_at,
-                "late_joiners_added": len(late_joiners),
-            }
-            return active_entries, waiting_entries, meta
-
-        current_app.logger.warning("[rest_queue] conflict retry %d/%d", attempt, max_retries)
-
-    # fallback
-    current_app.logger.error("[rest_queue] failed to save after retries; fallback random")
-    uids = list(current_user_ids)
-    random.shuffle(uids)
-    waiting_pick = uids[:waiting_count]
-    waiting_ids = set(waiting_pick)
-    waiting_entries = [by_id[uid] for uid in waiting_pick if uid in by_id]
-    active_entries = [e for e in entries if e["user_id"] not in waiting_ids]
-    return active_entries, waiting_entries, {
-        "generation": None,
-        "version": None,
-        "queue_remaining": None,
-        "attempt": max_retries,
-        "fallback": True,
-    }
 
 
 def _safe_float(v: Any, default: float) -> float:
