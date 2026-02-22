@@ -343,6 +343,7 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 
     return pairs, matches, waiting_players
 
+
 def _names_sample(players: List["Player"], n: int = 12) -> str:
     """ログ用：先頭n人だけ名前を出す（多い時は ... を付ける）"""
     names = [p.name for p in players]
@@ -430,10 +431,16 @@ def generate_matches_by_pair_skill_balance(
 
 
 def pair_strength(p1: Player, p2: Player) -> float:
+    c1 = getattr(p1, "conservative", None)
+    c2 = getattr(p2, "conservative", None)
+    if c1 is not None and c2 is not None:
+        return float(c1) + float(c2)
+
     s1 = getattr(p1, "skill_score", None)
     s2 = getattr(p2, "skill_score", None)
     if s1 is not None and s2 is not None:
         return float(s1) + float(s2)
+
     return float(getattr(p1, "level", 0)) + float(getattr(p2, "level", 0))
 
 
@@ -482,8 +489,8 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
             
             for t1, t2 in possible_teams:
                 # 平均スキルの差（conservativeスキルを使用）
-                avg1 = (t1[0].skill_score + t1[1].skill_score) / 2
-                avg2 = (t2[0].skill_score + t2[1].skill_score) / 2
+                avg1 = (t1[0].conservative + t1[1].conservative) / 2
+                avg2 = (t2[0].conservative + t2[1].conservative) / 2
                 diff = abs(avg1 - avg2)
                 
                 if diff < best_court_diff:
@@ -512,10 +519,6 @@ def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[l
     Returns:
         (active_entries, waiting_entries)
     """
-    current_app.logger.info(
-        "[DEBUG_CALL] _select_waiting_entries called: entries=%d, waiting_count=%d",
-        len(sorted_entries), waiting_count
-    )
 
     if waiting_count <= 0:
         return sorted_entries, []
@@ -732,8 +735,11 @@ def _pick_waiters_by_rest_queue(
             s += f" ...(+{len(uids)-limit})"
         return s
 
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, max_retries + 1):        
         qi = _load_rest_queue(meta_table, queue_key=queue_key)
+        # pk = _rest_queue_pk(queue_key)  <-- 不要なので削除
+
+        # 以前エラーが出ていた info(queue_key, pk) 行も削除
 
         queue = list(qi.get("queue", []))
         generation = int(qi.get("generation", 1) or 1)
@@ -741,9 +747,10 @@ def _pick_waiters_by_rest_queue(
         cycle_started_at = qi.get("cycle_started_at")
         cycle_started_dt = _parse_iso_dt(cycle_started_at)
 
+        # 必要な情報を1行に集約したメインのログ
         current_app.logger.info(
-            "[rest_queue][LOAD] key=%s attempt=%d gen=%d ver=%d len=%d head=%s cycle_started_at=%s",
-            queue_key, attempt, generation, version, len(queue), _names(queue, 5), cycle_started_at
+            "[rest_queue][LOAD] key=%s attempt=%d gen=%d ver=%d len=%d head=%s",
+            queue_key, attempt, generation, version, len(queue), _names(queue, 5)
         )
 
         # 1) leavers cleanup
@@ -766,7 +773,8 @@ def _pick_waiters_by_rest_queue(
                 generation, _names(queue, 8), cycle_started_at
             )
 
-        # 2) late joiners to tail: joined_at > cycle_started_at
+        # --- 2) late joiners to tail ---
+        # サイクル開始後に参加した人を抽出
         late_joiners: List[str] = []
         if cycle_started_dt is not None:
             queued_set = set(queue)
@@ -781,63 +789,110 @@ def _pick_waiters_by_rest_queue(
         if late_joiners:
             queue.extend(late_joiners)
             current_app.logger.info(
-                "[rest_queue][LATE_JOIN] added_to_tail=%d (%s) -> queue_len=%d tail=%s",
-                len(late_joiners), _names(late_joiners, 10), len(queue), _names(queue[-8:], 8)
+                "[rest_queue][LATE_JOIN] added_to_tail=%d (%s) -> 2巡目予約枠へ",
+                len(late_joiners), _names(late_joiners, 10)
             )
 
+        # --- 3) Pick Waiters ---
+        # ブーストを削除し、純粋にキューの先頭から取得するロジックに一本化
+        waiting_pick = queue[:waiting_count]
+        queue = queue[waiting_count:]
+        
         current_app.logger.info(
-            "[rest_queue][PRE_PICK] users=%d waiting_count=%d queue_len=%d gen=%d ver=%d head=%s",
-            len(current_user_ids), waiting_count, len(queue), generation, version, _names(queue, 8)
+            "[rest_queue][PICK] picked=%s -> remaining=%d",
+            _names(waiting_pick, 10), len(queue)
         )
 
-        # 3) boost check（末尾ブースト）
-        will_complete = (len(queue) <= waiting_count and len(queue) > 0)
-        boost = will_complete
-        current_app.logger.info(
-            "[rest_queue][BOOST_CHECK] queue_len=%d waiting_count=%d will_complete=%s boost=%s gen=%d",
-            len(queue), waiting_count, will_complete, boost, generation
-        )
-
-        # 4) pick
-        if boost:
-            current_app.logger.info("🔥 [rest_queue] サイクル節目ブースト発動 (gen=%d): 1.2倍", generation)
-            before_q_len = len(queue)
-            waiting_pick, queue = _weighted_sample_from_queue(
-                queue=queue,
-                waiting_count=waiting_count,
-                by_id=by_id,
-                skill_key="skill_score",
-                bottom_n=2,
-                boost=1.2,
-            )
-            still = [uid for uid in waiting_pick if uid in set(queue)]
-            current_app.logger.info(
-                "[rest_queue][WEIGHTED] picked=%s | q_len %d->%d | picked_in_queue=%d (%s)",
-                _names(waiting_pick, 10),
-                before_q_len,
-                len(queue),
-                len(still),
-                (_names(still, 10) if still else "none"),
-            )
-            if still:
-                current_app.logger.warning(
-                    "[rest_queue][BUG] picked still remains in queue. "
-                    "Fix _weighted_sample_from_queue to remove picked from queue."
-                )
-        else:
-            waiting_pick = queue[:waiting_count]
-            queue = queue[waiting_count:]
-            current_app.logger.info(
-                "[rest_queue][SIMPLE] picked=%s -> queue_len=%d head=%s",
-                _names(waiting_pick, 10), len(queue), _names(queue, 8)
-            )
-
-        # 5) cycle completed -> rebuild+shuffle gen++ and update cycle_started_at
+        # --- 4) Cycle Completed -> Rebuild Queue (淳二さん問題対策) ---
         cycle_reset = False
         if len(queue) == 0:
             generation += 1
-            queue = list(current_user_ids)
-            random.shuffle(queue)
+            
+            # 1.「1巡目メンバー」＝ サイクル開始時に存在し、まだ今日一度も休んでいない人
+            # 2.「2巡目グループ」＝ 既に1回休んだ人（淳二さん等）や、サイクル開始後に参加した人
+            unrested_original = [] 
+            future_round = []      
+            
+            for uid in current_user_ids:
+                user = by_id.get(uid, {})
+                joined_dt = _parse_iso_dt(user.get("joined_at"))
+                rest_count = int(user.get("rest_count", 0) or 0)
+                
+                # 判定条件: 
+                # サイクル開始以前に参加しており、かつ本日の休みがまだ 0 の人を優先
+                if rest_count == 0 and (joined_dt and cycle_started_dt and joined_dt <= cycle_started_dt):
+                    unrested_original.append(uid)
+                else:
+                    # すでに休んだ人や途中参加者は、次の巡回リストへ
+                    future_round.append(uid)
+            
+            # 2巡目グループは公平にシャッフル
+            random.shuffle(future_round)
+
+            if unrested_original:
+                # 1巡目の未休憩者を優先してキューの先頭に配置（淳二さんは後ろの future_round に回る）
+                random.shuffle(unrested_original)
+                queue = unrested_original + future_round
+                current_app.logger.info(
+                    "[rest_queue][CYCLE_VERIFY] 1巡目未休憩者 %d名を優先配置 (先頭: %s)",
+                    len(unrested_original), _names(unrested_original, 5)
+                )
+            else:
+                # 全員が1回休み終わった場合
+                queue = future_round
+                current_app.logger.info(
+                    "[rest_queue][CYCLE_VERIFY] 全員待機完了。次巡(gen=%d)を開始", generation
+                )
+
+            # サイクルの基準時刻を更新
+            cycle_started_at = _utc_now_iso()
+            cycle_started_at_to_save = cycle_started_at
+            cycle_reset = True
+
+        # --- 5) cycle completed -> rebuild+shuffle gen++ and update cycle_started_at ---
+        cycle_reset = False
+        if len(queue) == 0:
+            generation += 1
+
+            # --- 改良ロジック ---
+            # 1. 「1巡目メンバー」＝ 現在のサイクル開始(cycle_started_dt)より前からいる未待機者
+            # 2. 「2巡目以降」＝ サイクル開始後に参加した人、または既に1回休んだ人
+            
+            unrested_original = [] # このサイクル中に絶対に休ませるべき既存メンバー
+            future_round = []      # 次のサイクル（2巡目）に回すメンバー
+            
+            for uid in current_user_ids:
+                user = by_id.get(uid, {})
+                joined_dt = _parse_iso_dt(user.get("joined_at"))
+                rest_count = int(user.get("rest_count", 0) or 0)
+                
+                # 判定条件: 
+                # サイクル開始時(cycle_started_dt)以前に参加しており、かつ本日の休み(rest_count)がまだ 0 の人
+                if rest_count == 0 and (joined_dt and cycle_started_dt and joined_dt <= cycle_started_dt):
+                    unrested_original.append(uid)
+                else:
+                    # すでに休んだ淳二さんや、ゲーム開始後に来た人はこちらに入る
+                    future_round.append(uid)
+            
+            # 2巡目グループは公平にシャッフル
+            random.shuffle(future_round)
+
+            if unrested_original:
+                # 1巡目の未休憩者を優先してキューの先頭に配置
+                random.shuffle(unrested_original)
+                queue = unrested_original + future_round
+                current_app.logger.info(
+                    "[rest_queue][CYCLE_VERIFY] 1巡目未休憩者を優先: %d名 (先頭: %s)",
+                    len(unrested_original), _names(unrested_original, 5)
+                )
+            else:
+                # 全員1回休み終わったら、2巡目グループ全員で新サイクル開始
+                queue = future_round
+                current_app.logger.info(
+                    "[rest_queue][CYCLE_VERIFY] 全員1回待機完了。2巡目(途中参加含む)を開始 gen=%d", generation
+                )
+            # --- ここまで ---
+
             cycle_started_at = _utc_now_iso()
             cycle_started_at_to_save = cycle_started_at
             cycle_reset = True
@@ -887,9 +942,7 @@ def _pick_waiters_by_rest_queue(
                 "generation": generation,
                 "version": version + 1,
                 "queue_remaining": len(queue),
-                "attempt": attempt,
-                "boost_round": bool(boost),
-                "will_complete_cycle": bool(will_complete),
+                "attempt": attempt,                
                 "cycle_reset": bool(cycle_reset),
                 "cycle_started_at": cycle_started_at,
                 "late_joiners_added": len(late_joiners),
@@ -914,74 +967,6 @@ def _pick_waiters_by_rest_queue(
         "fallback": True,
     }
 
-
-def _load_rest_queue(meta_table, *, queue_key: str) -> Dict[str, Any]:
-    resp = meta_table.get_item(Key={"match_id": queue_key}, ConsistentRead=True)
-    item = resp.get("Item") or {}
-    # 初回のデフォルト
-    if "queue" not in item:
-        item["queue"] = []
-    if "generation" not in item:
-        item["generation"] = 1
-    if "version" not in item:
-        item["version"] = 0
-    return item
-
-
-def _save_rest_queue_optimistic(
-    meta_table,
-    *,
-    queue_key: str,
-    queue: List[str],
-    generation: int,
-    prev_version: int,
-    cycle_started_at: Optional[str] = None,
-) -> bool:
-    """
-    楽観ロックで rest_queue を保存する
-    - match_id = meta#<queue_key>
-    - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
-    - cycle_started_at は指定された場合のみ更新
-    """
-    pk = _rest_queue_pk(queue_key)
-    new_version = int(prev_version) + 1
-
-    expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
-    expr_vals = {
-        ":q": list(queue),
-        ":g": int(generation),
-        ":nv": int(new_version),
-        ":pv": int(prev_version),
-    }
-
-    if cycle_started_at is not None:
-        expr_names["#cs"] = "cycle_started_at"
-        expr_vals[":cs"] = cycle_started_at
-        update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
-    else:
-        update_expr = "SET #q=:q, #g=:g, #v=:nv"
-
-    try:
-        meta_table.update_item(
-            Key={"match_id": pk},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_vals,
-            ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
-        )
-        return True
-
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        if code == "ConditionalCheckFailedException":
-            current_app.logger.warning(
-                "[rest_queue][SAVE_CONFLICT] key=%s prev_ver=%s", queue_key, prev_version
-            )
-            return False
-
-        current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
-        return False
-    
 
 def _safe_float(v: Any, default: float) -> float:
     if v is None:

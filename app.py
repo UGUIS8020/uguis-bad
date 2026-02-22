@@ -739,9 +739,9 @@ def get_participants_info(schedule):
         if not ids:
             return participants_info
 
-        request = {
+        batch_request = {
             table_name: {
-                "Keys": [{"user#user_id": uid}],
+                "Keys": [{"user#user_id": id} for id in ids],  # ← ids 全件を渡す
                 "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
                 "ExpressionAttributeNames": {"#uid": "user#user_id"}
             }
@@ -762,7 +762,7 @@ def get_participants_info(schedule):
 
         by_id = {it["user#user_id"]: it for it in responses}
 
-        # 修正後：1つのループに統合 ✅
+        # 修正後：1つのループに統合
         for uid in ids:
             pk = uid
             user = by_id.get(pk)
@@ -1789,7 +1789,7 @@ def temp_register():
             hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
             user_id = str(uuid.uuid4())
 
-            table = current_app.table   # ✅ これ（または app.table）
+            table = current_app.table   
 
             temp_data = {
                 "user#user_id": user_id,
@@ -1804,7 +1804,7 @@ def temp_register():
                 "created_at": current_time,
                 "administrator": False,
 
-                # ✅ DynamoDBのNumberはDecimalが安全
+                # DynamoDBのNumberはDecimalが安全
                 "skill_score": Decimal(str(skill_score)),
                 "skill_sigma": Decimal("8.333"),
 

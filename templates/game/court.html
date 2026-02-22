@@ -375,8 +375,9 @@
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% set selected = (session.get("selected_max_courts", 3)) | int %}
                     {% for i in range(1, 7) %}
-                        <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
+                        <option value="{{ i }}" {% if i == selected %}selected{% endif %}>{{ i }}面</option>
                     {% endfor %}
                     </select>
 
