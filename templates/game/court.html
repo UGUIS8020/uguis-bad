@@ -642,6 +642,9 @@
                 }
             }
 
+            window._stopPolling = stopPolling;
+            window._startPolling = startPolling;
+
             // タブの表示/非表示を検知
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
@@ -668,4 +671,5 @@
             }
         });
     </script>
+
 </body>

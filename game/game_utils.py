@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 from typing import Optional
 from decimal import Decimal
 from trueskill import Rating, rate
+from typing import Optional, List
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -193,7 +194,7 @@ def update_trueskill_for_players_and_return_updates(result_item):
     for uid, new_r in zip(team_b_uids, new_team_b):
         updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
 
-    current_app.logger.info(
+    current_app.logger.debug(
         "[ts-after-rate] match=%s court=%s | updated=%d sample=%s",
         result_item.get("match_id"),
         result_item.get("court_number"),
@@ -216,7 +217,7 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     
     try:
         # 同期開始のサマリー
-        current_app.logger.info(f"エントリー同期開始: 対象 {total_count} 件")
+        current_app.logger.debug(f"エントリー同期開始: 対象 {total_count} 件")
         
         for user_id, data in updated_skills.items():
             entry_id = data.get("entry_id") or entry_mapping.get(user_id)
@@ -566,174 +567,108 @@ def _load_rest_queue(meta_table, *, queue_key: str = "rest_queue") -> Dict[str, 
         return {"queue": [], "generation": 1, "version": 0, "cycle_started_at": None}
 
 
-def _save_rest_queue_optimistic(
-    meta_table,
-    *,
-    queue_key: str,
-    queue: List[str],
-    generation: int,
-    prev_version: int,
-    cycle_started_at: Optional[str] = None,
-) -> bool:
-    """
-    楽観ロックで rest_queue を保存する
-    - match_id = meta#<queue_key>
-    - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
-    - cycle_started_at は指定された場合のみ更新
-    """
-    pk = _rest_queue_pk(queue_key)
-    new_version = int(prev_version) + 1
+# def _save_rest_queue_optimistic(
+#     meta_table,
+#     *,
+#     queue_key: str,
+#     queue: List[str],
+#     generation: int,
+#     prev_version: int,
+#     cycle_started_at: Optional[str] = None,
+# ) -> bool:
+#     """
+#     楽観ロックで rest_queue を保存する
+#     - match_id = meta#<queue_key>
+#     - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
+#     - cycle_started_at は指定された場合のみ更新
+#     """
+#     pk = _rest_queue_pk(queue_key)
+#     new_version = int(prev_version) + 1
 
-    expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
-    expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
+#     expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
+#     expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
 
-    if cycle_started_at is not None:
-        expr_names["#cs"] = "cycle_started_at"
-        expr_vals[":cs"] = cycle_started_at
-        update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
-    else:
-        update_expr = "SET #q=:q, #g=:g, #v=:nv"
+#     if cycle_started_at is not None:
+#         expr_names["#cs"] = "cycle_started_at"
+#         expr_vals[":cs"] = cycle_started_at
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
+#     else:
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv"
 
-    try:
-        meta_table.update_item(
-            Key={"match_id": pk},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_vals,
-            ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
-        )
-        return True
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        if code == "ConditionalCheckFailedException":
-            return False
-        current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
-        return False
-
-
-def _weighted_sample_from_queue(
-    *,
-    queue: List[str],
-    waiting_count: int,
-    by_id: Dict[str, Dict[str, Any]],
-    skill_key: str = "skill_score",
-    bottom_n: int = 2,
-    boost: float = 1.2,
-) -> Tuple[List[str], List[str]]:
-    """
-    queue から waiting_count 人を重み付きで非復元抽出。
-    戻り値: (picked_uids, remaining_queue)
-    ※ remaining_queue は picked を除いた queue（元の順序保持）
-    """
-    if waiting_count <= 0 or not queue:
-        return [], list(queue)
-
-    cand = list(queue)
-
-    def get_skill(uid: str) -> float:
-        v = by_id.get(uid, {}).get(skill_key, 50)
-        try:
-            return float(v)
-        except Exception:
-            return 50.0
-
-    skills = {uid: get_skill(uid) for uid in cand}
-    low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
-    weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
-
-    picked: List[str] = []
-    remaining = list(cand)
-
-    for _ in range(min(waiting_count, len(remaining))):
-        total = sum(weights[uid] for uid in remaining)
-        r = random.random() * total
-        acc = 0.0
-        chosen = remaining[-1]
-        for uid in remaining:
-            acc += weights[uid]
-            if acc >= r:
-                chosen = uid
-                break
-        picked.append(chosen)
-        remaining = [u for u in remaining if u != chosen]
-
-    picked_set = set(picked)
-    remaining_queue = [uid for uid in queue if uid not in picked_set]
-    return picked, remaining_queue
+#     try:
+#         meta_table.update_item(
+#             Key={"match_id": pk},
+#             UpdateExpression=update_expr,
+#             ExpressionAttributeNames=expr_names,
+#             ExpressionAttributeValues=expr_vals,
+#             ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
+#         )
+#         return True
+#     except ClientError as e:
+#         code = e.response.get("Error", {}).get("Code")
+#         if code == "ConditionalCheckFailedException":
+#             return False
+#         current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
+#         return False
 
 
-def _safe_float(v: Any, default: float) -> float:
-    if v is None:
-        return default
-    try:
-        if isinstance(v, Decimal):
-            return float(v)
-        return float(v)
-    except Exception:
-        return default
+# def _weighted_sample_from_queue(
+#     *,
+#     queue: List[str],
+#     waiting_count: int,
+#     by_id: Dict[str, Dict[str, Any]],
+#     skill_key: str = "skill_score",
+#     bottom_n: int = 2,
+#     boost: float = 1.2,
+# ) -> Tuple[List[str], List[str]]:
+#     """
+#     queue から waiting_count 人を重み付きで非復元抽出。
+#     戻り値: (picked_uids, remaining_queue)
+#     ※ remaining_queue は picked を除いた queue（元の順序保持）
+#     """
+#     if waiting_count <= 0 or not queue:
+#         return [], list(queue)
+
+#     cand = list(queue)
+
+#     def get_skill(uid: str) -> float:
+#         v = by_id.get(uid, {}).get(skill_key, 50)
+#         try:
+#             return float(v)
+#         except Exception:
+#             return 50.0
+
+#     skills = {uid: get_skill(uid) for uid in cand}
+#     low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
+#     weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
+
+#     picked: List[str] = []
+#     remaining = list(cand)
+
+#     for _ in range(min(waiting_count, len(remaining))):
+#         total = sum(weights[uid] for uid in remaining)
+#         r = random.random() * total
+#         acc = 0.0
+#         chosen = remaining[-1]
+#         for uid in remaining:
+#             acc += weights[uid]
+#             if acc >= r:
+#                 chosen = uid
+#                 break
+#         picked.append(chosen)
+#         remaining = [u for u in remaining if u != chosen]
+
+#     picked_set = set(picked)
+#     remaining_queue = [uid for uid in queue if uid not in picked_set]
+#     return picked, remaining_queue
 
 
-def _weighted_sample_from_queue(
-    queue: List[str],
-    waiting_count: int,
-    by_id: Dict[str, Any],
-    *,
-    skill_key: str = "skill_score",
-    bottom_n: int = 2,
-    boost: float = 1.2,
-) -> Tuple[List[str], List[str]]:
-    """
-    キュー内でスキル下位 bottom_n 名の選出確率を boost 倍にする
-    """
-    if not queue or waiting_count <= 0:
-        return [], queue
-
-    remaining = list(queue)
-    take = min(waiting_count, len(remaining))
-    selected: List[str] = []
-
-    # キュー内の中央値をデフォルトに
-    nums: List[float] = []
-    for uid in remaining:
-        v = by_id.get(uid, {}).get(skill_key)
-        if v is None:
-            continue
-        try:
-            nums.append(float(v) if not isinstance(v, Decimal) else float(v))
-        except Exception:
-            pass
-    if nums:
-        nums.sort()
-        default_score = float(nums[len(nums) // 2])
-    else:
-        default_score = 50.0
-
-    for i in range(take):
-        # 毎回 bottom_n を更新
-        scores = {uid: _safe_float(by_id.get(uid, {}).get(skill_key), default_score) for uid in remaining}
-        bottom_ids = set(sorted(remaining, key=lambda uid: scores[uid])[:max(1, min(bottom_n, len(remaining)))])
-
-        # ★【追加ログ】ブースト対象者の名前を表示
-        bottom_names = [by_id[uid].get("display_name", "不明") for uid in bottom_ids if uid in by_id]
-        current_app.logger.info("[rest_queue] 抽選%d回目 - ブースト対象(x%.2f): %s", i+1, boost, bottom_names)
-
-        weights = [boost if uid in bottom_ids else 1.0 for uid in remaining]
-        total = sum(weights)
-
-        r = random.uniform(0, total)
-        cumulative = 0.0
-        for j, w in enumerate(weights):
-            cumulative += w
-            if r <= cumulative:
-                picked_uid = remaining[j]
-                picked_name = by_id.get(picked_uid, {}).get("display_name", "不明")
-                is_boosted = " (ブースト適用済)" if picked_uid in bottom_ids else ""
-                
-                # ★【追加ログ】実際に誰が選ばれたかを表示
-                current_app.logger.info("[rest_queue] 選出結果: %s%s", picked_name, is_boosted)
-                
-                selected.append(picked_uid)
-                remaining.pop(j)
-                break
-
-    return selected, remaining
+# def _safe_float(v: Any, default: float) -> float:
+#     if v is None:
+#         return default
+#     try:
+#         if isinstance(v, Decimal):
+#             return float(v)
+#         return float(v)
+#     except Exception:
+#         return default

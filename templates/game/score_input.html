@@ -325,6 +325,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // 自動finish（二重実行防止）
   let finishTriggered = false;
+  let finishInFlight = false;
 
   function setEndButtonProcessing() {
     if (!endButton) return;
@@ -370,10 +371,15 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function finishMatchAjax({ auto = false } = {}) {
+    if (finishInFlight) return;   // ★追加
+    finishInFlight = true;        // ★追加
+
     if (auto) {
-      if (finishTriggered) return;
+      if (finishTriggered) { finishInFlight = false; return; }
       finishTriggered = true;
     }
+
+    if (window._stopPolling) window._stopPolling();
 
     setEndButtonProcessing();
 
@@ -392,13 +398,17 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((data) => {
         if (data && data.success) {
           window.location.href = "/game/court";
-          return;
+          return;          
         }
+        finishInFlight = false;
+        if (window._startPolling) window._startPolling();
         if (auto) finishTriggered = false;
         restoreEndButton();
         alert((data && data.error) || "試合終了に失敗しました");
       })
       .catch((err) => {
+        finishInFlight = false;  
+        if (window._startPolling) window._startPolling();
         if (auto) finishTriggered = false;
         restoreEndButton();
         alert(err.message || "通信エラーが発生しました");
@@ -414,12 +424,13 @@ document.addEventListener("DOMContentLoaded", function () {
   // 各スコアフォームの送信処理
   forms.forEach((form) => {
     const formId = form.getAttribute("id") || `score-form-${Math.random().toString(36).slice(2)}`;
-    formStatus[formId] = { submitted: false };
+    formStatus[formId] = { submitted: false, inFlight: false };
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
 
-      if (formStatus[formId].submitted) return;
+      if (formStatus[formId].submitted || formStatus[formId].inFlight) return;
+      formStatus[formId].inFlight = true; 
 
       const formData = new FormData(form);
       const actionUrl = form.getAttribute("action");
@@ -428,10 +439,12 @@ document.addEventListener("DOMContentLoaded", function () {
       const team2Score = Number(formData.get("team2_score"));
 
       if (Number.isNaN(team1Score) || Number.isNaN(team2Score)) {
+        formStatus[formId].inFlight = false;   // ←追加
         alert("スコアを入力してください。");
         return;
       }
       if (team1Score === team2Score) {
+        formStatus[formId].inFlight = false;   // ←追加
         alert("スコアが同点です。勝者を決めてください。");
         return;
       }
@@ -463,6 +476,7 @@ document.addEventListener("DOMContentLoaded", function () {
           form.style.opacity = "0.9";
 
           formStatus[formId].submitted = true;
+          formStatus[formId].inFlight = false;
           submittedCount++;
 
           if (submittedCount === totalForms) {
@@ -472,6 +486,7 @@ document.addEventListener("DOMContentLoaded", function () {
           }
         })
         .catch((error) => {
+          formStatus[formId].inFlight = false;
           if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i class="fas fa-trophy me-2"></i>スコア送信';
@@ -491,8 +506,7 @@ document.addEventListener("DOMContentLoaded", function () {
         alert("未送信のコートがあります。すべて送信してください。");
         return;
       }
-      if (finishTriggered) return;
-
+      if (finishInFlight) return;
       finishMatchAjax({ auto: false });
     });
   }
