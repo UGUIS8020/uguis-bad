@@ -2843,7 +2843,7 @@ def api_skill_score():
     uid = current_user.get_id()
     user_table = current_app.dynamodb.Table("bad-users")
 
-    k = {"user#user_id": uid}
+    k = {"user#user_id": normalize_user_pk(uid)}  # ← uid → normalize_user_pk(uid)
     resp = user_table.get_item(Key=k, ConsistentRead=True)
     item = resp.get("Item") or {}
 

@@ -415,3 +415,44 @@ def _is_junior_high_or_below(user_info):  # ← selfを削除
     except Exception as e:
         print(f"[WARN] 中学生以下判定エラー: {str(e)} → ポイント半減対象外として扱う")
         return False
+
+
+def is_adult(self, user_info):
+    """
+    生年月日から「成人（18歳以上）」かどうかを判定
+    ※日本の改正民法（18歳成人）に準拠
+    """
+    if not user_info or not user_info.get('birth_date'):
+        print(f"[DEBUG] 生年月日情報なし → 判定不可")
+        return False
+    
+    try:
+        from datetime import datetime
+        
+        birth_date = user_info['birth_date']
+        
+        # 文字列型(YYYY-MM-DD)の場合はdate型に変換
+        if isinstance(birth_date, str):
+            birth_date = datetime.strptime(birth_date, '%Y-%m-%d').date()
+        elif isinstance(birth_date, datetime):
+            birth_date = birth_date.date()
+        
+        # 判定日の基準（本日）
+        today = datetime.now(JST).date()
+        
+        # 満年齢の計算
+        # 本日の(月, 日)が誕生日の(月, 日)より前なら、まだ歳をとっていない（-1する）
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        
+        # 18歳以上なら成人（True）
+        is_adult_status = age >= 18
+        
+        print(f"[DEBUG] 生年月日: {birth_date}, 現在の年齢: {age}歳, 成人判定: {is_adult_status}")
+        
+        return is_adult_status
+        
+    except Exception as e:
+        print(f"[WARN] 成人判定エラー: {str(e)} → 未成年扱いとして処理")
+        return False
