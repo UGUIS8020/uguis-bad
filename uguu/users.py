@@ -4,6 +4,8 @@ from datetime import datetime
 import os
 import boto3
 from typing import Any, cast
+from game.game_utils import normalize_user_pk
+
 
 # ❶ Blueprint は一番最初に作る（route より前）
 users = Blueprint('users', __name__)
@@ -140,7 +142,14 @@ def user_profile(user_id):
             except Exception:
                 return None
 
-        skill_score = _to_float_or_none(user.get("skill_score"))
+        bad_users_table = current_app.dynamodb.Table("bad-users")
+        resp = bad_users_table.get_item(
+            Key={"user#user_id": user_id},
+            ConsistentRead=True
+        )
+        bad_user = resp.get("Item") or {}
+        print(f"[DEBUG] bad_user skill_score = {bad_user.get('skill_score')}, key={user_id}")
+        skill_score = _to_float_or_none(bad_user.get("skill_score"))
 
         def _parse_ymd10(x):
             if x is None:
