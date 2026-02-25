@@ -1719,12 +1719,13 @@ def persist_skill_to_bad_users(updated_skills: dict):
     ok, ng = 0, 0
 
     for uid, vals in (updated_skills or {}).items():
+        current_app.logger.info("[bad-users] Persist uid=%s", str(uid))
         try:
             new_s = Decimal(str(round(float(vals.get("skill_score", 25.0)), 2)))
             new_g = Decimal(str(round(float(vals.get("skill_sigma", 8.333)), 4)))
 
             users_table.update_item(
-                Key={"user#user_id": normalize_user_pk(uid)},
+                Key={"user#user_id": uid},
                 UpdateExpression="SET skill_score=:s, skill_sigma=:g",
                 ExpressionAttributeValues={":s": new_s, ":g": new_g},
                 # ★存在しないユーザーは作らない
@@ -2843,7 +2844,7 @@ def api_skill_score():
     uid = current_user.get_id()
     user_table = current_app.dynamodb.Table("bad-users")
 
-    k = {"user#user_id": normalize_user_pk(uid)}  # ← uid → normalize_user_pk(uid)
+    k = {"user#user_id": uid}
     resp = user_table.get_item(Key=k, ConsistentRead=True)
     item = resp.get("Item") or {}
 
@@ -2870,13 +2871,7 @@ def create_test_data():
     if not current_user.administrator:
         return redirect(url_for('index'))
 
-    test_players = [
-        {'display_name': 'テスト太郎', 'skill_score': 40},
-        {'display_name': 'テスト花子', 'skill_score': 60},
-        {'display_name': 'テスト一郎', 'skill_score': 50},
-        {'display_name': 'ノーマン', 'skill_score': 58},
-        {'display_name': 'ロバート', 'skill_score': 35},
-        {'display_name': 'キャメロン', 'skill_score': 100},
+    test_players = [        
         {'display_name': 'テスト01', 'skill_score': 52},
         {'display_name': 'テスト02', 'skill_score': 48},
         {'display_name': 'テスト03', 'skill_score': 62},
@@ -2885,6 +2880,10 @@ def create_test_data():
         {'display_name': 'テスト06', 'skill_score': 41},
         {'display_name': 'テスト07', 'skill_score': 73},
         {'display_name': 'テスト08', 'skill_score': 38},
+        {'display_name': 'テスト09', 'skill_score': 38},
+        {'display_name': 'テスト10', 'skill_score': 38},
+        {'display_name': 'テスト11', 'skill_score': 38},
+        {'display_name': 'テスト12', 'skill_score': 38},
     ]
 
     now = datetime.now(timezone.utc).isoformat()
@@ -2911,13 +2910,9 @@ def create_test_data():
         })
 
         # 2) bad-users（PK=user#user_id が必須）
-        user_table.put_item(Item={
-            # ★これが無いと ValidationException
-            "user#user_id": f"user#{user_id}",
-
-            # 任意（ただしアプリ内で user_id を参照してるなら残すのが安全）
+        user_table.put_item(Item={            
+            "user#user_id": user_id,            
             "user_id": user_id,
-
             "display_name": player["display_name"],
             "user_name": f"テスト_{player['display_name']}",
             "email": f"{user_id}@example.com",
@@ -2994,6 +2989,7 @@ def clear_test_data():
         current_app.logger.error(f"[clear_test_data] Meta reset failed: {e}")
 
     return redirect(url_for('game.court'))
+
 
 @bp_game.route('/test_data_status')
 @login_required

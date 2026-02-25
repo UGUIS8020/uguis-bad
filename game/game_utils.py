@@ -153,7 +153,7 @@ def update_trueskill_for_players_and_return_updates(result_item):
             if mu is None or sig is None:
                 try:
                     res = user_table.get_item(
-                        Key={"user#user_id": normalize_user_pk(player_uid)}
+                        Key={"user#user_id": player_uid}
                     )
                     data = res.get("Item") or {}
                     mu = data.get("skill_score", 25.0)
@@ -382,46 +382,64 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
     return pairs, waiting_players
 
 
-def generate_matches_by_pair_skill_balance(
-    pairs: List[Tuple[Player, Player]],
-    max_courts: int
-):
+# def generate_matches_by_pair_skill_balance(
+#     pairs: List[Tuple[Player, Player]],
+#     max_courts: int
+# ):
+#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+#     scored.sort(key=lambda x: x[1])
+
+#     max_matches = min(len(scored) // 2, max_courts)
+#     matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
+#     used = [False] * len(scored)
+
+#     for _ in range(max_matches):
+#         # まだ使ってない最小のペアを探す
+#         i = next((k for k, u in enumerate(used) if not u), None)
+#         if i is None:
+#             break
+#         used[i] = True
+
+#         # i と最も差が小さい未使用ペアを探す
+#         best_j = None
+#         best_diff = float("inf")
+#         for j in range(i + 1, len(scored)):
+#             if used[j]:
+#                 continue
+#             diff = abs(scored[i][1] - scored[j][1])
+#             if diff < best_diff:
+#                 best_diff = diff
+#                 best_j = j
+#                 if best_diff == 0:
+#                     break
+
+#         if best_j is None:
+#             # 相手が見つからないなら戻す
+#             used[i] = False
+#             break
+
+#         used[best_j] = True
+#         matches.append((scored[i][0], scored[best_j][0]))
+
+#     unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
+#     return matches, unused_pairs
+
+
+def generate_matches_by_pair_skill_balance(pairs, max_courts):
+    # スキル合計でソート
     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
     scored.sort(key=lambda x: x[1])
 
-    max_matches = min(len(scored) // 2, max_courts)
-    matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
-    used = [False] * len(scored)
+    matches = []
+    # シンプルに、実力が近い隣り合わせのペア同士で試合を組む
+    # こうすることで、極端に強いペアは、次に強いペアと当たりやすくなる
+    for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+        matches.append((scored[i][0], scored[i+1][0]))
 
-    for _ in range(max_matches):
-        # まだ使ってない最小のペアを探す
-        i = next((k for k, u in enumerate(used) if not u), None)
-        if i is None:
-            break
-        used[i] = True
-
-        # i と最も差が小さい未使用ペアを探す
-        best_j = None
-        best_diff = float("inf")
-        for j in range(i + 1, len(scored)):
-            if used[j]:
-                continue
-            diff = abs(scored[i][1] - scored[j][1])
-            if diff < best_diff:
-                best_diff = diff
-                best_j = j
-                if best_diff == 0:
-                    break
-
-        if best_j is None:
-            # 相手が見つからないなら戻す
-            used[i] = False
-            break
-
-        used[best_j] = True
-        matches.append((scored[i][0], scored[best_j][0]))
-
-    unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
+    # 余ったペアを待機リストへ
+    used_count = len(matches) * 2
+    unused_pairs = [p[0] for p in scored[used_count:]]
+    
     return matches, unused_pairs
 
 
