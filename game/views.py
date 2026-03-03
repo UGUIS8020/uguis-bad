@@ -3370,8 +3370,8 @@ def create_pairings():
         session["selected_max_courts"] = max_courts
 
         # =========================================================
-        # 0) 「交互に使う」ための状態取得
-        #    - meta#pairing に last_mode を保存して試合ごとに交互切り替え
+        # 0) 「2回シャッフル → 1回AI」サイクル管理
+        #    cycle_index: 0=random, 1=random, 2=ai
         # =========================================================
         meta_table = current_app.dynamodb.Table("bad-game-matches")
 
@@ -3380,13 +3380,18 @@ def create_pairings():
             ConsistentRead=True
         ).get("Item", {}) or {}
 
-        last_mode = pairing_meta.get("last_mode")  # "random" / "ai"
+        cycle_index = int(pairing_meta.get("cycle_index", 0))
 
-        # 試合ごとに交互切り替え
-        mode = "ai" if last_mode == "random" else "random"
+        if cycle_index == 2:
+            mode = "ai"
+            next_cycle_index = 0
+        else:
+            mode = "random"
+            next_cycle_index = cycle_index + 1
 
         current_app.logger.info(
-            "[pairing-mode] last=%s -> now=%s", last_mode, mode
+            "[pairing-mode] cycle_index=%d -> mode=%s (next=%d)",
+            cycle_index, mode, next_cycle_index
         )
         # =========================================================
         # 1) pendingエントリー取得 & ユーザーごとに最新だけ残す
@@ -3610,12 +3615,13 @@ def create_pairings():
             raise
 
         # =========================================================
-        # ★交互モードの状態を保存（成功後だけ）
+        # ★サイクル状態を保存（成功後だけ）
         # =========================================================
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
-            UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now",
+            UpdateExpression="SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now",
             ExpressionAttributeValues={
+                ":ci": next_cycle_index,
                 ":m": mode,
                 ":mid": str(match_id),
                 ":now": now_jst,

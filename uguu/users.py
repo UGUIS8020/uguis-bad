@@ -6,13 +6,11 @@ import boto3
 from typing import Any, cast
 from game.game_utils import normalize_user_pk
 
-
-# ❶ Blueprint は一番最初に作る（route より前）
 users = Blueprint('users', __name__)
 
-# ❷ 以降に他の import（循環回避のためなるべく上に集約しすぎない）
 from .dynamo import db
 from utils.points import record_earn
+from uguu.point import get_current_points_hybrid
 
 print("[DEBUG] AWS_REGION =", os.getenv("AWS_REGION"))
 print("[DEBUG] DYNAMO_UGU_POINTS_TABLE =", os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points"))
@@ -151,22 +149,6 @@ def user_profile(user_id):
         print(f"[DEBUG] bad_user skill_score = {bad_user.get('skill_score')}, key={user_id}")
         skill_score = _to_float_or_none(bad_user.get("skill_score"))
 
-        def _parse_ymd10(x):
-            if x is None:
-                return None
-            s = str(x).strip()[:10]
-            if not s:
-                return None
-            try:
-                return datetime.strptime(s, "%Y-%m-%d")
-            except ValueError:
-                return None
-
-        # ==========================================================
-        # ★追加：表示用「参加回数」（official_count）を履歴から算出
-        #   - status が無い場合は action から推定
-        #   - registered のみ数える（cancelled は除外）
-        # ==========================================================
         def _is_registered(rec: dict) -> bool:
             st = (rec.get("status") or "").lower().strip()
             if not st:
@@ -227,7 +209,23 @@ def user_profile(user_id):
                 print(f"[WARN] failed to build admin_participation_dates: {e}")
                 admin_participation_dates = []
 
-        plain_user_id = user.get('user#user_id', '').replace('user#', '')        
+        points_info = get_current_points_hybrid(
+            dynamodb=current_app.dynamodb,
+            user_id=user.get("user#user_id", "")
+        )
+
+        participation_points = int(points_info.get("current_points", 0))
+
+        print(
+            f"[USER_POINTS] user={user.get('user#user_id', '')} "
+            f"base={points_info.get('base_current_points')} "
+            f"earn={points_info.get('earned_after_cutoff')} "
+            f"spend={points_info.get('spent_after_cutoff')} "
+            f"adjust={points_info.get('adjusted_after_cutoff')} "
+            f"current={points_info.get('current_points')}"
+        )
+
+        plain_user_id = user.get('user#user_id', '').replace('user#', '')
 
         return render_template(
             'uguu/users.html',
@@ -239,7 +237,7 @@ def user_profile(user_id):
             # ★ここを修正：practice_count ではなく official_count を表示
             past_participation_count=int(official_count),
 
-            participation_points=user_stats.get('uguu_points', 0),
+            participation_points=participation_points,
 
             followers_count=0,
             following_count=0,
@@ -250,6 +248,7 @@ def user_profile(user_id):
             point_spends=point_spends,
             point_total_spent_recent=point_total_spent_recent,
             skill_score=skill_score,
+            points_info=points_info,
         )
 
     except Exception as e:

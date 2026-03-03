@@ -1,9 +1,13 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from datetime import datetime, date
+
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass
+from datetime import date, datetime, time
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 from utils.timezone import JST
+
 
 @dataclass(frozen=True)
 class ParticipationRecord:
@@ -525,3 +529,177 @@ def get_point_multiplier(birth_date: date, gender: str) -> float:
     print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
 
     return 1.0
+
+
+POINTS_CUTOFF_DATE = date(2026, 3, 1)
+
+
+def to_decimal(value, default="0") -> Decimal:
+    """
+    int / float / str / Decimal を Decimal に揃える
+    """
+    if value is None:
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+
+def get_points_cutoff_datetime() -> datetime:
+    """
+    基準日時: 2026-03-04 00:00:00 JST
+    """
+    return datetime.combine(POINTS_CUTOFF_DATE, time.min, tzinfo=JST)
+
+
+def parse_iso_datetime(dt_str):
+    """
+    ISO日時文字列を datetime に変換して JST に揃える
+    例:
+      2026-03-04T12:34:56+09:00
+      2026-03-04T03:34:56Z
+      2026-03-04 12:34:56
+    """
+    if not dt_str:
+        return None
+
+    try:
+        s = str(dt_str).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=JST)
+        return dt.astimezone(JST)
+    except Exception:
+        return None
+
+
+def get_saved_point_snapshot(dynamodb, user_id: str) -> dict:
+    """
+    ugu_points から保存済みスナップショットを取得する
+
+    戻り値例:
+    {
+        "user_id": "abc123",
+        "snapshot_date": "2026-03-03",
+        "current_points": Decimal("120"),
+        "base_points": Decimal("120"),
+        "used_points": Decimal("0"),
+        "raw_item": {...}
+    }
+
+    ※ テーブルのキー名が user_id でない場合はここだけ直してください。
+    """
+    table = dynamodb.Table("ugu_points")
+
+    resp = table.get_item(
+        Key={
+            "user_id": user_id
+        }
+    )
+    item = resp.get("Item") or {}
+
+    snapshot = {
+        "user_id": user_id,
+        "snapshot_date": item.get("snapshot_date"),
+        "current_points": to_decimal(item.get("current_points", 0)),
+        "base_points": to_decimal(item.get("base_points", item.get("current_points", 0))),
+        "used_points": to_decimal(item.get("used_points", 0)),
+        "raw_item": item,
+    }
+
+    return snapshot
+
+
+def sum_history_points_after_cutoff(history_repo, user_id: str) -> dict:
+    """
+    基準日(2026-03-04 00:00 JST)以降の履歴だけを集計する
+
+    history_repo に以下の関数がある前提:
+      - list_point_earns(user_id=...)
+      - list_point_spends(user_id=...)
+      - list_point_adjusts(user_id=...)
+
+    戻り値例:
+    {
+        "earned_after_cutoff": Decimal("30"),
+        "spent_after_cutoff": Decimal("10"),
+        "adjusted_after_cutoff": Decimal("-5"),
+        "earn_count": 3,
+        "spend_count": 1,
+        "adjust_count": 1,
+        "earn_items": [...],
+        "spend_items": [...],
+        "adjust_items": [...]
+    }
+    """
+    cutoff_dt = get_points_cutoff_datetime()
+
+    earns = history_repo.list_point_earns(user_id=user_id) or []
+    spends = history_repo.list_point_spends(user_id=user_id) or []
+    adjusts = history_repo.list_point_adjusts(user_id=user_id) or []
+
+    def _filter_after_cutoff(items):
+        filtered = []
+        for item in items:
+            created_at = parse_iso_datetime(item.get("created_at"))
+            if created_at and created_at >= cutoff_dt:
+                filtered.append(item)
+        return filtered
+
+    earn_items = _filter_after_cutoff(earns)
+    spend_items = _filter_after_cutoff(spends)
+    adjust_items = _filter_after_cutoff(adjusts)
+
+    earned_after_cutoff = sum((to_decimal(x.get("points", 0)) for x in earn_items), Decimal("0"))
+    spent_after_cutoff = sum((to_decimal(x.get("points", 0)) for x in spend_items), Decimal("0"))
+    adjusted_after_cutoff = sum((to_decimal(x.get("points", 0)) for x in adjust_items), Decimal("0"))
+
+    return {
+        "earned_after_cutoff": earned_after_cutoff,
+        "spent_after_cutoff": spent_after_cutoff,
+        "adjusted_after_cutoff": adjusted_after_cutoff,
+        "earn_count": len(earn_items),
+        "spend_count": len(spend_items),
+        "adjust_count": len(adjust_items),
+        "earn_items": earn_items,
+        "spend_items": spend_items,
+        "adjust_items": adjust_items,
+    }
+
+
+def get_current_points_hybrid(dynamodb, history_repo, user_id: str) -> dict:
+    """
+    保存済みスナップショット + 基準日以降の履歴
+    で現在ポイントを返す新方式
+
+    current_points =
+        snapshot.current_points
+        + earned_after_cutoff
+        - spent_after_cutoff
+        + adjusted_after_cutoff
+    """
+    snapshot = get_saved_point_snapshot(dynamodb=dynamodb, user_id=user_id)
+    delta = sum_history_points_after_cutoff(history_repo=history_repo, user_id=user_id)
+
+    current_points = (
+        snapshot["current_points"]
+        + delta["earned_after_cutoff"]
+        - delta["spent_after_cutoff"]
+        + delta["adjusted_after_cutoff"]
+    )
+
+    return {
+        "user_id": user_id,
+        "snapshot_date": snapshot["snapshot_date"],
+        "base_current_points": snapshot["current_points"],
+        "earned_after_cutoff": delta["earned_after_cutoff"],
+        "spent_after_cutoff": delta["spent_after_cutoff"],
+        "adjusted_after_cutoff": delta["adjusted_after_cutoff"],
+        "current_points": current_points,
+        "earn_count": delta["earn_count"],
+        "spend_count": delta["spend_count"],
+        "adjust_count": delta["adjust_count"],
+    }
