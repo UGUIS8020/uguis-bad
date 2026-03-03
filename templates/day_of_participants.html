@@ -237,28 +237,46 @@ function saveSkillScore(participantId, userId) {
         return;
     }
     
-    const numValue = parseInt(newValue);
+    const numValue = parseInt(newValue, 10);
     if (isNaN(numValue) || numValue < 0 || numValue > 100) {
         alert('0から100の数値を入力してください');
         return;
     }
+
+    const csrfToken = document
+        .querySelector('meta[name="csrf-token"]')
+        ?.getAttribute('content');
+
+    console.log('csrfToken =', csrfToken);
     
     // サーバーに保存
     fetch('/update_skill_score', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken || '',
+            'X-Requested-With': 'XMLHttpRequest'
         },
         body: JSON.stringify({
             user_id: userId,
             skill_score: numValue
         })
     })
-    .then(response => {
-        if (!response.ok) {
-            return response.json().then(err => Promise.reject(err));
+    .then(async response => {
+        const text = await response.text();
+
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error(text || `HTTP ${response.status}`);
         }
-        return response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || data.message || `HTTP ${response.status}`);
+        }
+
+        return data;
     })
     .then(data => {
         if (data.success) {
@@ -292,7 +310,7 @@ function saveSkillScore(participantId, userId) {
     })
     .catch(error => {
         console.error('保存エラー:', error);
-        alert('保存中にエラーが発生しました');
+        alert(`保存中にエラーが発生しました\n${error.message}`);
     });
 }
 

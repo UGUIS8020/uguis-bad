@@ -148,7 +148,7 @@
         }
     </style>
   
-<meta name="csrf-token" content="{{ csrf_token() }}">
+<!-- <meta name="csrf-token" content="{{ csrf_token() }}"> -->
 </head>
 <body class="bg-light">
 
@@ -428,14 +428,14 @@
             </div>
         </div>
 
-        {% if current_user.is_authenticated and current_user.administrator %}
+        {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
             <form method="POST" action="{{ url_for('game.score_input') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="text-center my-2">
                     <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
                 </div>
             </form>
-        {% endif %} 
+        {% endif %}
                        
         {% for court in match_courts.values() %}
         <div class="col">

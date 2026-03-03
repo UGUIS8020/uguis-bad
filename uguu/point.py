@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Set
 from utils.timezone import JST
@@ -20,16 +20,50 @@ class PointRules:
 
 def normalize_participation_history(raw_history: List[Dict[str, Any]]) -> List[ParticipationRecord]:
     records: List[ParticipationRecord] = []
+
     for r in raw_history:
         status = (r.get("status") or "registered").lower()
         if status == "cancelled":
             continue
+
         try:
-            event_date = datetime.strptime(r["event_date"], "%Y-%m-%d")
-            registered_at = datetime.strptime(r["registered_at"], "%Y-%m-%d %H:%M:%S")
-        except (KeyError, ValueError):
+            event_date_raw = r.get("event_date")
+            registered_at_raw = r.get("registered_at")
+
+            if not event_date_raw or not registered_at_raw:
+                continue
+
+            # event_date は YYYY-MM-DD を想定
+            if isinstance(event_date_raw, str):
+                event_date = datetime.strptime(event_date_raw[:10], "%Y-%m-%d")
+            else:
+                event_date = event_date_raw
+
+            # registered_at は
+            # 1) "2026-02-12 12:34:56"
+            # 2) "2026-02-12T07:35:29.131+00:00"
+            # の両方に対応
+            if isinstance(registered_at_raw, str):
+                s = registered_at_raw.strip()
+                if "T" in s:
+                    registered_at = datetime.fromisoformat(s)
+                else:
+                    registered_at = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            else:
+                registered_at = registered_at_raw
+
+        except Exception as e:
+            print(f"[WARN normalize] skip record={r} error={e}")
             continue
-        records.append(ParticipationRecord(event_date=event_date, registered_at=registered_at, status=status))
+
+        records.append(
+            ParticipationRecord(
+                event_date=event_date,
+                registered_at=registered_at,
+                status=status
+            )
+        )
+
     records.sort(key=lambda x: x.event_date)
     return records
 
@@ -189,6 +223,27 @@ PRIORITY = {
     "cancelled": 1,
     "other": 0,
 }
+
+
+def get_point_multiplier(birth_date: date, gender: str) -> float:
+    """
+    年齢・性別に応じたポイント倍率を返す
+    - 18歳未満          : 1.3倍
+    - 18歳以上 女性(F)  : 1.2倍
+    - 18歳以上 男性(M)  : 1.0倍
+    """
+    today = date.today()
+    age = today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day)
+    )
+    print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")  # 追加
+
+    if age < 18:
+        return 1.0  # テスト中
+    elif gender.lower() == "female":
+        return 1.0
+    else:
+        return 1.0
 
 
 def calc_streak_points(
@@ -456,3 +511,17 @@ def is_adult(self, user_info):
     except Exception as e:
         print(f"[WARN] 成人判定エラー: {str(e)} → 未成年扱いとして処理")
         return False
+    
+
+def get_point_multiplier(birth_date: date, gender: str) -> float:
+    """
+    現在の運用では、年齢・性別による倍率差は設けず
+    全ユーザー一律 1.0 倍を返す。
+    """
+    today = date.today()
+    age = today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day)
+    )
+    print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
+
+    return 1.0

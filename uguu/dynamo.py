@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
+from uguu.point import get_point_multiplier
 from typing import Any, Dict, List, Optional, Tuple, Set
 import json, base64
 from decimal import Decimal
@@ -10,6 +11,7 @@ from botocore.exceptions import ClientError
 import re
 from utils.timezone import JST
 from flask import current_app
+
 
 from uguu.point import (
     PointRules,
@@ -24,7 +26,7 @@ from uguu.point import (
     classify,
     better,
     calc_streak_points,
-    _is_junior_high_or_below
+    get_point_multiplier,
 )
 
 load_dotenv()
@@ -1166,7 +1168,8 @@ class DynamoDB:
                 'user_id': user_id,
                 'birth_date': birth_date,
                 'display_name': item.get('display_name', ''),
-                'skill_score': item.get('skill_score', 0)
+                'skill_score': item.get('skill_score', 0),
+                'gender': item.get('gender', 'male'),
             }
             
             print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
@@ -1765,14 +1768,24 @@ class DynamoDB:
 
         manual_points = self.get_manual_points(user_id)
 
-        # 中学生以下の倍率（1.0なら割引なし、0.7なら30%割引）
-        JUNIOR_HIGH_MULTIPLIER = 0.7
-
         user_info = self.get_user_info(user_id)
-        is_junior_high = _is_junior_high_or_below(user_info)
+        print(f"[DBG] user_info={user_info}")
 
-        # 中学生以下なら指定倍率、それ以外は通常料金
-        point_multiplier = JUNIOR_HIGH_MULTIPLIER if is_junior_high else 1.0
+        birth_date_str = user_info.get("birth_date")  # ← .birth_date ではなく .get("date_of_birth")
+        gender = user_info.get("gender", "male")
+
+        if birth_date_str:
+            birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date()
+            print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
+            try:
+                point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
+            except Exception as e:
+                print(f"[DBG] get_point_multiplier ERROR: {e}")
+                point_multiplier = 1.0
+        else:
+            point_multiplier = 1.0
+
+        print(f"[DBG] point_multiplier={point_multiplier}")
 
         # ★ raw_history が渡ってきたらそれを使う
         if raw_history is None:
@@ -1798,7 +1811,7 @@ class DynamoDB:
                 'direct_registration_count': 0,
                 'all_time_early_registration_count': 0,
                 'all_time_direct_registration_count': 0,
-                'is_junior_high': is_junior_high,
+                'is_junior_high': point_multiplier > 1.0,
                 'is_reset': False,
                 'days_until_reset': None,
                 'manual_points': manual_points,
@@ -1834,8 +1847,7 @@ class DynamoDB:
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
 
-        # 連続ポイント
-        from datetime import datetime
+        # 連続ポイント        
         today = datetime.now(JST).date()
 
         if all_schedules is None:
@@ -1946,10 +1958,11 @@ class DynamoDB:
             'current_streak_count': current_streak_count,
             'cumulative_count': cumulative_count,
             'monthly_bonuses': monthly_bonuses,
-            'is_junior_high': is_junior_high,
+            'is_junior_high': point_multiplier > 1.0,
             'is_reset': is_reset,
             'days_until_reset': days_until_reset,
             'manual_points': manual_points,
+            'point_multiplier': point_multiplier,
         }
         
     def calc_total_points_spent(self, user_id: str, since: str | None = None) -> int:

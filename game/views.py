@@ -2572,16 +2572,51 @@ def match_score_status(match_id):
 
 #     return render_template("game/score_input.html", court_data=court_data, match_id=match_id)
 
+# @bp_game.route("/score_input", methods=["GET", "POST"])
+# @login_required
+# def score_input():
+#     match_id = get_latest_match_id()
+#     current_app.logger.info(f"[score_input] match_id = {match_id}")
+    
+#     # 共通関数を使用
+#     match_courts = get_organized_match_data(match_id)
+    
+#     return render_template("game/score_input.html", match_courts=match_courts, match_id=match_id) 
+
+
 @bp_game.route("/score_input", methods=["GET", "POST"])
 @login_required
 def score_input():
+    # 1. 管理者以外は入れない
+    if not current_user.administrator:
+        flash("権限がありません。", "danger")
+        return redirect(url_for("game.court"))
+
+    # 2. 進行中の試合がないなら入れない
+    if not has_ongoing_matches():
+        flash("進行中の試合がないため、スコア入力はできません。", "warning")
+        return redirect(url_for("game.court"))
+
+    # 3. 最新の match_id を取得
     match_id = get_latest_match_id()
     current_app.logger.info(f"[score_input] match_id = {match_id}")
-    
-    # 共通関数を使用
+
+    if not match_id:
+        flash("試合情報が見つかりませんでした。", "warning")
+        return redirect(url_for("game.court"))
+
+    # 4. コート情報取得
     match_courts = get_organized_match_data(match_id)
-    
-    return render_template("game/score_input.html", match_courts=match_courts, match_id=match_id) 
+
+    if not match_courts:
+        flash("スコア入力対象の試合データが見つかりませんでした。", "warning")
+        return redirect(url_for("game.court"))
+
+    return render_template(
+        "game/score_input.html",
+        match_courts=match_courts,
+        match_id=match_id
+    )
 
 
 @bp_game.route("/submit_score/<match_id>/court/<int:court_number>", methods=["POST"])

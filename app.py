@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 login_manager = LoginManager()
 cache = Cache()
-csrf = CSRFProtect()   # ★グローバルで1回作る
+csrf = CSRFProtect()
 
 
 def create_app():
@@ -717,7 +717,7 @@ class User(UserMixin):
 
 #     return participants_info
 
-@cache.memoize(timeout=600)
+
 def get_participants_info(schedule):
     participants_info = []
     try:
@@ -1158,7 +1158,7 @@ def index():
                     "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
                     "join_count": _to_int(user.get("practice_count"), 0),
-                })
+                })           
 
             participants_info.sort(
                 key=lambda x: (
@@ -1168,6 +1168,7 @@ def index():
                 )
             )
             schedule["participants_info"] = participants_info
+            schedule["participants_count"] = len(participants_info)
 
             # --- たら参加者 ---
             tara_ids = []
@@ -1319,6 +1320,7 @@ def schedule_koyomi(year=None, month=None):
     
     
 @app.route("/day_of_participants", methods=["GET"])
+@login_required
 def day_of_participants():
     try:
         date = request.args.get("date")
