@@ -50,6 +50,12 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key
 from utils.timezone import JST
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+
 # あなたの既存関数を import
 from uguu.point import (
     PointRules,
