@@ -557,21 +557,21 @@ def get_one_user(user_id: str):
     return resp.get("Item")
 
 
-def main():
-    all_schedules = get_all_schedules()
+# def main():
+#     all_schedules = get_all_schedules()
 
-    test_user_id = "52b9d36e-1413-49c3-8362-9130016df2d4"
-    user_info = get_one_user(test_user_id)
+#     test_user_id = "52b9d36e-1413-49c3-8362-9130016df2d4"
+#     user_info = get_one_user(test_user_id)
 
-    if not user_info:
-        print(f"[NG] user not found: {test_user_id}")
-        return
+#     if not user_info:
+#         print(f"[NG] user not found: {test_user_id}")
+#         return
 
-    item = calc_user_snapshot(user_info, all_schedules)
+#     item = calc_user_snapshot(user_info, all_schedules)
 
-    print("[DRY RUN RESULT]")
-    for k, v in item.items():
-        print(f"{k} = {v}")
+#     print("[DRY RUN RESULT]")
+#     for k, v in item.items():
+#         print(f"{k} = {v}")
 
 
 if __name__ == "__main__":
