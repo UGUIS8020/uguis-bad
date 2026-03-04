@@ -229,7 +229,7 @@ def cleanup_duplicates(db, duplicates, batch_size=50):
     
     # 最終レポート
     print(f"\n\n{'='*80}")
-    print(f"🏁 クリーンアップ完了")
+    print(f"クリーンアップ完了")
     print(f"{'='*80}")
     print(f"処理グループ数: {i}件")
     print(f"削除レコード数: {deleted_count}件")

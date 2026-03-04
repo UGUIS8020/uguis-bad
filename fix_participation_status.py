@@ -248,7 +248,7 @@ def fix_status(db, invalid_records, batch_size=50):
     
     # 最終レポート
     print(f"\n\n{'='*80}")
-    print(f"🏁 修正完了")
+    print(f"修正完了")
     print(f"{'='*80}")
     print(f"処理レコード数: {i}件")
     print(f"更新成功: {updated_count}件")

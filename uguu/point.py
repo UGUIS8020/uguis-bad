@@ -74,9 +74,9 @@ def normalize_participation_history(raw_history: List[Dict[str, Any]]) -> List[P
 
 def calc_reset_index(records: List[ParticipationRecord], reset_days: int) -> Tuple[int, bool]:
     """
-    参加記録をチェックして、50日ルールでリセットされているか判定
-    - 参加記録間の間隔が50日超 → その地点でリセット（ポイント計算範囲を制限）
-    - 最後の参加日から現在まで50日超 → 現在リセット中（is_reset=True）
+    参加記録をチェックして、60日ルールでリセットされているか判定
+    - 参加記録間の間隔が60日超 → その地点でリセット（ポイント計算範囲を制限）
+    - 最後の参加日から現在まで60日超 → 現在リセット中（is_reset=True）
     """
     from datetime import datetime
     
@@ -498,17 +498,18 @@ def is_adult(self, user_info):
     
 
 def get_point_multiplier(birth_date: date, gender: str) -> float:
-    """
-    現在の運用では、年齢・性別による倍率差は設けず
-    全ユーザー一律 1.0 倍を返す。
-    """
     today = date.today()
     age = today.year - birth_date.year - (
         (today.month, today.day) < (birth_date.month, birth_date.day)
     )
     print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
 
-    return 1.0
+    if age < 18:
+        return 1.3
+    elif gender and gender.lower() == "female":
+        return 1.2
+    else:
+        return 1.0
 
 
 POINTS_CUTOFF_DATE = date(2026, 3, 1)

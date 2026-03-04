@@ -1719,7 +1719,7 @@ def persist_skill_to_bad_users(updated_skills: dict):
     ok, ng = 0, 0
 
     for uid, vals in (updated_skills or {}).items():
-        current_app.logger.info("[bad-users] Persist uid=%s", str(uid))
+        current_app.logger.debug("[bad-users] Persist uid=%s", str(uid))
         try:
             new_s = Decimal(str(round(float(vals.get("skill_score", 25.0)), 2)))
             new_g = Decimal(str(round(float(vals.get("skill_sigma", 8.333)), 4)))
@@ -1807,7 +1807,7 @@ def finish_current_match():
                 return jsonify({"success": False, "error": "アクティブな試合が見つかりません"}), 400
             return "アクティブな試合が見つかりません", 400
 
-        current_app.logger.info("🏁 試合終了処理開始(meta): match_id=%s court_count=%s", match_id, court_count)
+        current_app.logger.info("試合終了処理開始(meta): match_id=%s court_count=%s", match_id, court_count)
 
         # (任意) ID形式チェック
         if not re.compile(r"^\d{8}_\d{6}$").match(match_id):
@@ -1861,7 +1861,7 @@ def finish_current_match():
                     return jsonify({"success": False, "error": "スコアが未送信のため終了できません"}), 409
                 return "スコアが未送信のため終了できません", 409
 
-        current_app.logger.info("🎮 試合結果数(送信済み): %d", submitted_results_count)
+        current_app.logger.info("試合結果数(送信済み): %d", submitted_results_count)
 
         # =========================================================
         # 2) playing プレイヤー一覧（後で transaction に使う）
@@ -2061,14 +2061,56 @@ def finish_current_match():
                 current_app.logger.error(
                     "⚠️ Transaction canceled for match_id=%s: %s",
                     match_id, e.response.get("Error", {}).get("Message")
-                )
-                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                    return jsonify({"success": False, "error": "finish transaction canceled"}), 409
+                )                
                 return "finish transaction canceled", 409
-            raise
+            raise        
+        
+        # =========================================================
+        # 6) 試合履歴を bad-game-history テーブルに保存
+        # =========================================================
+        try:
+            history_table = current_app.dynamodb.Table("bad-game-history")
+
+            courts_data = []
+            for result in match_results:
+                team_a = parse_players(result.get("team_a", []))
+                team_b = parse_players(result.get("team_b", []))
+                courts_data.append({
+                    "court_number": result.get("court_number"),
+                    "team_a": [{"user_id": p.get("user_id"), "display_name": p.get("display_name", "")} for p in team_a],
+                    "team_b": [{"user_id": p.get("user_id"), "display_name": p.get("display_name", "")} for p in team_b],
+                    "team1_score": str(result.get("team1_score", "")),
+                    "team2_score": str(result.get("team2_score", "")),
+                    "winner": result.get("winner", ""),
+                })
+
+            skill_snapshot = {
+                uid: {
+                    "skill_score": str(round(v.get("skill_score", 25.0), 4)),
+                    "skill_sigma": str(round(v.get("skill_sigma", 8.333), 4)),
+                }
+                for uid, v in updated_skills.items()
+            }
+
+            history_item = {
+                "match_id": match_id,
+                "date": now_jst,
+                "mode": meta_item.get("pairing_mode", "unknown"),
+                "court_count": str(court_count or len(match_results)),
+                "courts": courts_data,
+                "skill_snapshot": skill_snapshot,
+                "waiting": meta_item.get("waiting_players", []),
+                "player_count": str(len(playing_players)),
+            }
+
+            history_table.put_item(Item=history_item)
+            current_app.logger.info("[history] 試合履歴保存完了: match_id=%s courts=%d", match_id, len(courts_data))
+
+        except Exception as e:
+            current_app.logger.warning("[history] 履歴保存失敗（無視）: %s", e)
 
         # =========================================================
-        # Ajax / 通常レスポンス
+        # Ajax / 通常レスポンス  ← ステップ6の後に移動
         # =========================================================
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify({
@@ -2083,7 +2125,7 @@ def finish_current_match():
             })
 
         return redirect(url_for("game.court"))
-
+    
     except Exception as e:
         current_app.logger.error("[試合終了処理エラー] %s", str(e), exc_info=True)
 
@@ -3426,7 +3468,7 @@ def create_pairings():
         required_players = cap_by_courts - (cap_by_courts % 4)
         waiting_count = len(sorted_entries) - required_players
 
-        current_app.logger.info(
+        current_app.logger.debug(
             "[pairing] cap_by_courts=%d required_players=%d waiting_count=%d",
             cap_by_courts, required_players, waiting_count
         )
@@ -3485,7 +3527,7 @@ def create_pairings():
             # ここで ValueError: too many values to unpack が起きていました
             pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
 
-        current_app.logger.info(
+        current_app.logger.debug(
             "[matches] match_id=%s courts=%d additional_waiting=%d mode=%s",
             match_id, len(matches), len(additional_waiting_players), mode
         )
@@ -3556,7 +3598,8 @@ def create_pairings():
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": "meta#current"}},
                 "UpdateExpression": (
-                    "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #sa = :now"
+                    "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #sa = :now, "
+                    "#pm = :mode, #wp = :waiting"  # ← 追加
                 ),
                 "ConditionExpression": "attribute_not_exists(#st) OR #st <> :playing",
                 "ExpressionAttributeNames": {
@@ -3565,12 +3608,18 @@ def create_pairings():
                     "#cc": "court_count",
                     "#ua": "updated_at",
                     "#sa": "started_at",
+                    "#pm": "pairing_mode",
+                    "#wp": "waiting_players",  # ← 追加
                 },
                 "ExpressionAttributeValues": {
                     ":playing": {"S": "playing"},
                     ":mid": {"S": str(match_id)},
                     ":cc": {"N": str(len(matches))},
                     ":now": {"S": now_jst},
+                    ":mode": {"S": mode},  # ← 追加
+                    ":waiting": {"L": [  # ← 追加
+                        {"S": p.name} for p in waiting_players
+                    ]},
                 },
             }
         })
