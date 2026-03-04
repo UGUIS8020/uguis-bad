@@ -65,7 +65,7 @@ from uguu.point import (
 AWS_REGION = "ap-northeast-1"
 
 USERS_TABLE = "bad-users"
-POINTS_TABLE = "ugu_points"
+POINTS_TABLE = "ugu_points_v2"
 HISTORY_TABLE = "bad-users-history"
 SCHEDULES_TABLE = "bad_schedules"
 
@@ -126,10 +126,20 @@ def get_all_users():
 
 
 def get_user_history(user_id: str):
-    resp = history_table.query(
-        KeyConditionExpression=Key("user_id").eq(user_id)
-    )
-    items = resp.get("Items", [])
+    items = []
+    kwargs = {
+        "KeyConditionExpression": Key("user_id").eq(user_id)
+    }
+
+    resp = history_table.query(**kwargs)
+    items.extend(resp.get("Items", []))
+
+    while "LastEvaluatedKey" in resp:
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        resp = history_table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+
+    print(f"[DEBUG] get_user_history user_id={user_id} total_items={len(items)}")
 
     # 1件だけ spend 履歴を確認
     for x in items:
@@ -144,6 +154,12 @@ def get_user_history(user_id: str):
         if "points#spend#" in marker:
             print("[DEBUG spend item]", x)
             break
+
+    # 3月履歴の有無を確認
+    for x in items:
+        event_date = str(x.get("event_date") or x.get("date") or "")
+        if event_date.startswith("2026-03"):
+            print("[DEBUG MARCH ITEM]", x)
 
     return items
 
@@ -165,25 +181,56 @@ def get_all_schedules():
 def build_participation_history_from_history_items(history_items):
     raw_history = []
 
+    snapshot_cutoff = datetime.strptime(SNAPSHOT_DATE, "%Y-%m-%d").date()
+
     for h in history_items:
-        action = h.get("action")
-        status = h.get("status", "registered")
+        action = str(h.get("action") or "").lower()
+        status = str(h.get("status") or "registered").lower()
 
         event_date = h.get("event_date") or h.get("date")
         registered_at = h.get("registered_at") or h.get("joined_at") or h.get("created_at")
 
+        marker = str(
+            h.get("history_id")
+            or h.get("sk")
+            or h.get("joined_at")
+            or h.get("registered_at")
+            or h.get("created_at")
+            or ""
+        )
+
+        kind = str(h.get("kind") or "").lower()
+
         if not event_date or not registered_at:
             continue
 
-        reg_str = str(registered_at)
+        # ポイント取引は除外
+        if kind in ("earn", "spend") or "points#earn#" in marker or "points#spend#" in marker:
+            continue
 
-        if reg_str.startswith("points#earn#") or reg_str.startswith("points#spend#"):
+        # tentative / tara_join は公式参加に含めない
+        if status == "tentative" or action == "tara_join":
+            continue
+
+        # キャンセル系は除外
+        if status in ("cancelled", "canceled"):
+            continue
+        if action in ("cancel", "cancelled", "canceled", "delete", "deleted", "remove", "removed"):
+            continue
+
+        # スナップショット日より未来は除外
+        try:
+            event_dt = datetime.strptime(str(event_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+
+        if event_dt > snapshot_cutoff:
             continue
 
         raw_history.append({
-            "event_date": event_date,
-            "registered_at": registered_at,
-            "status": status,
+            "event_date": str(event_date)[:10],
+            "registered_at": str(registered_at),
+            "status": status or "registered",
             "action": action,
         })
 
@@ -255,6 +302,30 @@ def is_early_registration_fn(item):
     return 50
 
 
+def dedupe_raw_history_by_event_date(raw_history):
+    by_date = {}
+
+    for h in raw_history:
+        event_date = str(h.get("event_date") or "")[:10]
+        registered_at = str(h.get("registered_at") or "")
+
+        if not event_date:
+            continue
+
+        prev = by_date.get(event_date)
+        if prev is None:
+            by_date[event_date] = h
+            continue
+
+        prev_registered_at = str(prev.get("registered_at") or "")
+
+        # 同じ event_date なら、より新しい registered_at を採用
+        if registered_at > prev_registered_at:
+            by_date[event_date] = h
+
+    return [by_date[d] for d in sorted(by_date.keys())]
+
+
 def calc_user_snapshot(user_info, all_schedules):
     user_id = user_info.get("user#user_id") or user_info.get("user_id")
     gender = (user_info.get("gender") or "").lower()
@@ -275,9 +346,22 @@ def calc_user_snapshot(user_info, all_schedules):
         print(f"[DEBUG] first_history={history_items[0]}")
 
     raw_history = build_participation_history_from_history_items(history_items)
+    raw_history = dedupe_raw_history_by_event_date(raw_history)
+
     print(f"[DEBUG] user_id={user_id} raw_history_count={len(raw_history)}")
     if raw_history:
         print(f"[DEBUG] first_raw_history={raw_history[0]}")
+
+    print("[DEBUG] raw_history detail start")
+    for i, h in enumerate(raw_history, 1):
+        print(
+            f"{i:02d} "
+            f"event_date={h.get('event_date')} "
+            f"registered_at={h.get('registered_at')} "
+            f"status={h.get('status')} "
+            f"action={h.get('action')}"
+        )
+    print("[DEBUG] raw_history detail end")
 
     records_all = normalize_participation_history(raw_history)
 
@@ -312,6 +396,9 @@ def calc_user_snapshot(user_info, all_schedules):
         point_multiplier=point_multiplier,
         is_early_registration_fn=is_early_registration_fn,
     )
+
+    legacy_participation_points = calc_legacy_participation_points(records_for_points)
+    print(f"[DEBUG] legacy_participation_points={legacy_participation_points}")
     print(f"[DEBUG] participation_result={participation_result}")
 
     monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(
@@ -333,19 +420,26 @@ def calc_user_snapshot(user_info, all_schedules):
         f"streak_start_date={streak_start_date}"
     )
 
+    admin_earn_points = sum_admin_earn(history_items)
+    print(f"[DEBUG] admin_earn_points={admin_earn_points}")
+
     total_earned = (
-        participation_result["participation_points"]
+        legacy_participation_points
         + participation_result["cumulative_bonus_points"]
         + monthly_bonus_points
         + streak_points
+        + admin_earn_points
     )
 
     total_spent = sum_total_spent(history_items)
-    current_points = total_earned - total_spent
+    legacy_current_points_v1 = total_earned - total_spent
+    snapshot_current_points = legacy_current_points_v1
 
     print(
         f"[DEBUG] total_earned={total_earned} "
-        f"total_spent={total_spent} current_points={current_points}"
+        f"total_spent={total_spent} "
+        f"legacy_current_points_v1={legacy_current_points_v1} "
+        f"snapshot_current_points={snapshot_current_points}"
     )
 
     now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
@@ -353,28 +447,77 @@ def calc_user_snapshot(user_info, all_schedules):
     item = {
         "user_id": user_id,
         "display_name": user_info.get("display_name", ""),
-        "current_points": current_points,
-        "total_earned": total_earned,
-        "total_spent": total_spent,
+        "snapshot_current_points": snapshot_current_points,
+        "legacy_current_points_v1": legacy_current_points_v1,
+        "total_earned_v1": total_earned,
+        "total_spent_v1": total_spent,
+        "admin_earn_points": admin_earn_points,
         "cumulative_count": participation_result["cumulative_count"],
         "current_streak": current_streak,
         "max_streak": max_streak,
         "early_registration_count": participation_result["early_registration_count"],
         "direct_registration_count": participation_result["direct_registration_count"],
         "monthly_bonus_points": monthly_bonus_points,
-        "streak_points": streak_points,
-        "participation_points": participation_result["participation_points"],
+        "streak_points": streak_points,        
+        "participation_points": legacy_participation_points,
         "cumulative_bonus_points": participation_result["cumulative_bonus_points"],
         "point_multiplier": Decimal(str(point_multiplier)),
         "is_reset": is_reset,
         "snapshot_rule_version": SNAPSHOT_RULE_VERSION,
-        "current_rule_version": CURRENT_RULE_VERSION,
+        "current_rule_version": "v2",
         "snapshot_date": SNAPSHOT_DATE,
         "snapshot_at": now_str,
         "updated_at": now_str,
     }
 
     return item
+
+
+def calc_legacy_participation_points(records_for_points):
+    count = len(records_for_points)
+    if count <= 0:
+        return 0
+    return 200 + max(0, count - 1) * 50
+
+
+def sum_admin_earn(history_items):
+    total_earn = 0
+
+    for h in history_items:
+        marker = str(
+            h.get("joined_at")
+            or h.get("history_id")
+            or h.get("sk")
+            or h.get("created_at")
+            or ""
+        )
+
+        kind = str(h.get("kind") or "").lower()
+        source = str(h.get("source") or "").lower()
+
+        raw_points = (
+            h.get("points_earned")
+            or h.get("points")
+            or h.get("point")
+            or h.get("amount")
+            or h.get("delta_points")
+            or 0
+        )
+
+        try:
+            points = int(raw_points)
+        except Exception:
+            try:
+                points = int(float(raw_points))
+            except Exception:
+                points = 0
+
+        # 管理者手動付与だけを合計
+        if kind == "earn" and source == "admin_manual":
+            total_earn += abs(points)
+
+    return total_earn
+
 
 
 def save_snapshot(item):
@@ -397,8 +540,10 @@ def main():
             save_snapshot(item)
             ok += 1
             print(
-                f"[OK] user_id={user_id} current_points={item['current_points']} "
-                f"earned={item['total_earned']} spent={item['total_spent']}"
+                f"[OK] user_id={user_id} "
+                f"snapshot_current_points={item['snapshot_current_points']} "
+                f"earned_v1={item['total_earned_v1']} "
+                f"spent_v1={item['total_spent_v1']}"
             )
         except Exception as e:
             ng += 1
@@ -407,49 +552,26 @@ def main():
     print(f"[DONE] ok={ok} ng={ng}")
 
 
-# def main():
-#     all_schedules = get_all_schedules()
-
-#     test_user_id = "52b9d36e-1413-49c3-8362-9130016df2d4"
-#     user_info = get_one_user(test_user_id)
-
-#     if not user_info:
-#         print(f"[NG] user not found: {test_user_id}")
-#         return
-
-#     item = calc_user_snapshot(user_info, all_schedules)
-#     print(item)
-
-# def scan_all(table, **kwargs):
-#     items = []
-#     resp = table.scan(**kwargs)
-#     items.extend(resp.get("Items", []))
-
-#     while "LastEvaluatedKey" in resp:
-#         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-#         resp = table.scan(**kwargs)
-#         items.extend(resp.get("Items", []))
-
-#     return items
+def get_one_user(user_id: str):
+    resp = users_table.get_item(Key={"user#user_id": user_id})
+    return resp.get("Item")
 
 
-# def get_all_schedules():
-#     items = scan_all(schedules_table)
-#     schedules = []
+def main():
+    all_schedules = get_all_schedules()
 
-#     for s in items:
-#         schedule_date = s.get("date") or s.get("event_date")
-#         if not schedule_date:
-#             continue
-#         schedules.append({"date": schedule_date})
+    test_user_id = "52b9d36e-1413-49c3-8362-9130016df2d4"
+    user_info = get_one_user(test_user_id)
 
-#     schedules.sort(key=lambda x: x["date"])
-#     return schedules
+    if not user_info:
+        print(f"[NG] user not found: {test_user_id}")
+        return
 
+    item = calc_user_snapshot(user_info, all_schedules)
 
-# def get_one_user(user_id: str):
-#     resp = users_table.get_item(Key={"user#user_id": user_id})
-#     return resp.get("Item")
+    print("[DRY RUN RESULT]")
+    for k, v in item.items():
+        print(f"{k} = {v}")
 
 
 if __name__ == "__main__":
