@@ -19,6 +19,19 @@ print("[DEBUG] DYNAMO_UGU_POINTS_TABLE =", os.getenv("DYNAMO_UGU_POINTS_TABLE", 
 UGU_POINTS_TABLE = os.getenv("DYNAMO_UGU_POINTS_TABLE", "ugu_points")
 UGU_PARTICIPATION_TABLE = "bad-users-history"
 
+
+def _parse_ymd10(s):
+    """
+    '2026-03-04' のような10文字の文字列を datetime オブジェクトに変換する
+    """
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        # 最初の10文字（YYYY-MM-DD）を抽出してパース
+        return datetime.strptime(s[:10], '%Y-%m-%d')
+    except (ValueError, TypeError):
+        return None
+
 # ❹ ルート定義（ここから下で @users.route を使う）
 @users.route("/admin/users/<user_id>/add-point", methods=["POST"])
 @login_required
@@ -318,4 +331,6 @@ def point_participation():
         print(f"[ERROR] ポイント支払いエラー: {e}")
         import traceback; traceback.print_exc()
         return jsonify({'error': '内部エラー'}), 500
+    
+
     
