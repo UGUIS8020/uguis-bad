@@ -328,11 +328,9 @@
        
         {% endif %}       
 
-        <div class="container mt-4">
+        
             <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
-                <h3 class="text-success fw-bold mb-0">
-                    本日の試合（{{ match_courts|length }}面）
-                </h3>
+                
                 <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="input-group">
@@ -344,7 +342,7 @@
                     </div>
                 </form>
             </div>
-        </div>
+        
 
         {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
             <form method="POST" action="{{ url_for('game.score_input') }}">
