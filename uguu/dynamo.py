@@ -797,6 +797,12 @@ class DynamoDB:
         def better_local(new: dict, old: dict) -> bool:
             cn, co = classify_local(new), classify_local(old)
 
+            # --- 追加: official 保護ロジック ---
+            # すでに official (参加) があるなら、後から来た cancelled や tara に上書きさせない
+            if co == "official" and cn in ["cancelled", "tara"]:
+                return False
+            # -------------------------------
+
             # other は参加履歴の採用対象外
             if cn == "other" and co != "other":
                 return False
@@ -809,7 +815,7 @@ class DynamoDB:
             if cn == "tara" and co == "official":
                 return False
 
-            # それ以外は時刻で比較
+            # それ以外（同じ種別同士など）は時刻で比較
             tn = new.get("registered_at_dt")
             to = old.get("registered_at_dt")
             if tn and to:
