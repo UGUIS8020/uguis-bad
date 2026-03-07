@@ -437,36 +437,59 @@
             </form>
         {% endif %}
                        
-        {% for court in match_courts.values() %}
-        <div class="col">
-            <div class="card h-100 shadow-sm">
-                <div class="card-header bg-success text-white text-center">
-                    <h4 class="mb-0">コート{{ court.court_number }}</h4>
-                </div>
-                <div class="card-body">
-                    <form class="score-form" 
-                        data-court-number="{{ court.court_number }}"
-                        action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
-                        
-                        <div class="d-flex justify-content-center align-items-center mb-3">               
-                            <div class="me-2">
-                                <span class="badge bg-danger me-2 fs-4">A</span>
-                                <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
-                            </div>                    
-                        </div>
+        {% set user_court = namespace(found=false) %}
 
-                        <div class="d-flex justify-content-center align-items-center mb-3">
-                            <div class="me-2">
-                                <span class="badge bg-primary me-2 fs-4">B</span>
-                                <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
-                            </div>
+        {% for court in match_courts.values() %}
+            {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+            {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+            {% set show_court = current_user.administrator or in_team_a or in_team_b %}
+
+            {% if show_court %}
+                {% set user_court.found = true %}
+                <div class="col">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header text-white text-center
+                            {% if in_team_a %}bg-danger
+                            {% elif in_team_b %}bg-primary
+                            {% else %}bg-success{% endif %}">
+                            <h4 class="mb-0">
+                                コート{{ court.court_number }}
+                                {% if in_team_a %}<span class="badge bg-white text-danger ms-2 fs-6">あなたはAチーム</span>{% endif %}
+                                {% if in_team_b %}<span class="badge bg-white text-primary ms-2 fs-6">あなたはBチーム</span>{% endif %}
+                            </h4>
                         </div>
-                    </form>
+                        <div class="card-body">
+                            <form class="score-form" 
+                                data-court-number="{{ court.court_number }}"
+                                action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
+                                
+                                <div class="d-flex justify-content-center align-items-center mb-3">               
+                                    <div class="me-2">
+                                        <span class="badge bg-danger me-2 fs-4">A</span>
+                                        <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
+                                    </div>                    
+                                </div>
+
+                                <div class="d-flex justify-content-center align-items-center mb-3">
+                                    <div class="me-2">
+                                        <span class="badge bg-primary me-2 fs-4">B</span>
+                                        <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+            {% endif %}
         {% endfor %}
-    </div>
+
+        {% if not current_user.administrator and not user_court.found and match_courts %}
+        <div class="alert alert-warning text-center mt-3 mx-3">
+            <i class="fas fa-couch fa-2x mb-2 d-block"></i>
+            <strong>今回はお休みです。次の試合をお待ちください。</strong>
+        </div>
+        {% endif %}
+        </div>
 
     <script>
         let lastUpdateTime = new Date();
