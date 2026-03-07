@@ -212,6 +212,7 @@
 
                 {% else %}
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
+                        
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-primary btn-lg px-5 py-3">
                         <i class="fas fa-sign-in-alt me-2"></i>
@@ -512,13 +513,9 @@
             return;
             }
             const playerName = playerElement.getAttribute('data-player-name') || 'プレイヤー';
+            const actionText = currentStatus === 'pending' ? '休憩' : '参加'; //
             
-            const actionText = currentStatus === 'pending' ? '休憩' : '参加';
             
-            if (!confirm(`${playerName}さんを${actionText}状態に変更しますか？`)) {
-                return;
-            }
-
             // ローディング表示
             document.getElementById('loadingOverlay').style.display = 'flex';
 
@@ -535,22 +532,24 @@
                     })
                 });
 
-                const result = await response.json();
+                const text = await response.text();
+                console.log('サーバー生レスポンス:', text);
+                const result = JSON.parse(text);  // これだけ、response.json()は削除
                 console.log('サーバー応答:', result);
 
                 if (result.success) {
                     console.log(`${playerName}さんの状態を${actionText}に変更しました`);
-                    // ページリロードして最新状態を反映
                     location.reload();
                 } else {
                     console.error('エラー詳細:', result);
                     alert(`エラー: ${result.message}`);
                 }
             } catch (error) {
-                console.error('⚠️ 状態変更エラー:', error);
-                alert('状態変更に失敗しました。再度お試しください。');
+                console.error('⚠️ 状態変更エラー詳細:', error);
+                console.error('エラータイプ:', error.constructor.name);
+                console.error('エラーメッセージ:', error.message);
+                alert('状態変更に失敗しました: ' + error.message);
             } finally {
-                // ローディング非表示
                 document.getElementById('loadingOverlay').style.display = 'none';
             }
         }
