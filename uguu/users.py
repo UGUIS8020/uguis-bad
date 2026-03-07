@@ -82,161 +82,120 @@ def add_point(user_id):
 @users.route('/user/<user_id>')
 def user_profile(user_id):
     try:
-        # ユーザー情報
+        # 1. ユーザー基本情報取得
         user = db.get_user_by_id(user_id)
         if not user:
             flash('ユーザーが見つかりませんでした。', 'error')
             return redirect(url_for('index'))
 
-        # ==========================================
-        # ★ここが抜けていた（あるいは飛ばされていた）部分です
-        # ==========================================
+        # 2. 投稿取得
         user_posts, _next_cursor = db.get_posts_by_user(user_id)
-        if user_posts is None:
-            user_posts = []
-        else:
-            # 日付順にソート
-            user_posts = sorted(user_posts, key=lambda x: x.get('created_at', ''), reverse=True)
+        user_posts = sorted(user_posts, key=lambda x: x.get('created_at', ''), reverse=True) if user_posts else []
 
-        # ==========================================================
-        # ★ここが重要：参加履歴 / spend は1回だけ取得して使い回す
-        # ==========================================================
+        # 3. 参加履歴・ポイント履歴取得
         raw_history = db.get_user_participation_history_with_timestamp(user_id) or []
-
-        # 直近のポイント支払い（spend履歴）
         point_spends = db.list_point_spends(user_id, limit=1000) or []
 
-        # 統計（ポイント/参加回数）
+        # 4. 統計計算（旧ルール計算結果を取得）
         user_stats = db.get_user_stats(user_id, raw_history=raw_history, spends=point_spends) or {}
 
-        # spend合計（amount ではなく points_used / delta_points を優先）
+        # 5. 支出計算
         def _pick_spend_amount(s: dict) -> int:
-            v = s.get("points_used")
-            if v is not None:
-                try:
-                    return int(v)
-                except Exception:
-                    pass
-
-            v = s.get("delta_points")
-            if v is not None:
-                try:
-                    return abs(int(v))
-                except Exception:
-                    pass
-
-            v = s.get("amount")
-            if v is not None:
-                try:
-                    return int(v)
-                except Exception:
-                    pass
-
+            for key in ["points_used", "delta_points", "amount"]:
+                v = s.get(key)
+                if v is not None:
+                    try: return abs(int(v))
+                    except: pass
             return 0
-
         point_total_spent_recent = sum(_pick_spend_amount(s) for s in point_spends)
 
-        # 今後の予定を取得（ポイント参加用）
-        upcoming_schedules = db.get_upcoming_schedules()
-        print(f"[DEBUG] upcoming_schedules: {upcoming_schedules}")
-        print(f"[DEBUG] upcoming_schedules count: {len(upcoming_schedules) if upcoming_schedules else 0}")
-
-        # 管理者用：参加日一覧（「YYYY年MM月DD日（曜）」）
-        is_admin = bool(getattr(current_user, "administrator", False))
-        admin_participation_dates = []
-
-        def _to_float_or_none(v):
-            if v is None:
-                return None
-            try:
-                return float(v)
-            except Exception:
-                return None
-
-        bad_users_table = current_app.dynamodb.Table("bad-users")
-        resp = bad_users_table.get_item(
-            Key={"user#user_id": user_id},
-            ConsistentRead=True
-        )
-        bad_user = resp.get("Item") or {}
-        print(f"[DEBUG] bad_user skill_score = {bad_user.get('skill_score')}, key={user_id}")
-        skill_score = _to_float_or_none(bad_user.get("skill_score"))
-
+        # 6. 参加判定ヘルパー
         def _is_registered(rec: dict) -> bool:
             st = (rec.get("status") or "").lower().strip()
             if not st:
                 act = (rec.get("action") or "").lower().strip()
-                if act in ("tara_join", "join", "register", "registered"):
-                    st = "registered"
-                elif act in ("tara_cancel", "cancel", "cancelled", "canceled"):
-                    st = "cancelled"
+                if act in ("tara_join", "join", "register", "registered"): st = "registered"
+                elif act in ("tara_cancel", "cancel", "cancelled", "canceled"): st = "cancelled"
             return st == "registered"
 
-        official_count = sum(
-            1 for r in (raw_history or [])
-            if isinstance(r, dict) and _is_registered(r)
-        )
-        print(f"[DBG] official_count(for display) = {official_count} (raw_history={len(raw_history)})")
+        # 7. 参加回数カウント
+        official_count = sum(1 for r in raw_history if isinstance(r, dict) and _is_registered(r))
 
+        # ==========================================================
+        # ★ 厳格な60日ルール適用（バイパスモード + 自動没収）
+        # ==========================================================
+        from datetime import datetime, date
+
+        # 全履歴から計算された合計ポイント（暫定値）
+        calculated_total = int(user_stats.get('uguu_points', 0))
+
+        # 最後に「参加(registered)」した日を特定
+        last_participation_date = None
+        sorted_history = sorted(raw_history, key=lambda x: str(x.get('date') or x.get('event_date') or ''), reverse=True)
+        
+        for rec in sorted_history:
+            if _is_registered(rec):
+                last_participation_date = rec.get('date') or rec.get('event_date') or rec.get('eventDay')
+                break
+
+        # 没収判定
+        is_expired = False
+        days_since_last = 0
+        if last_participation_date:
+            try:
+                last_dt = datetime.strptime(str(last_participation_date)[:10], '%Y-%m-%d').date()
+                days_since_last = (date.today() - last_dt).days
+                if days_since_last > 60:
+                    is_expired = True
+            except Exception as e:
+                print(f"[WARN] Failed to parse last_participation_date: {e}")
+        else:
+            # 一度も参加したことがない場合は日数計算不能
+            days_since_last = 999 
+
+        # ポイントの最終確定
+        if is_expired:
+            participation_points = 0
+            print(f"[EXPIRED] user={user_id} Last={last_participation_date} Days={days_since_last} -> 0P")
+        else:
+            participation_points = calculated_total
+            print(f"[ACTIVE] user={user_id} Last={last_participation_date} Days={days_since_last} -> {participation_points}P")
+
+        # テンプレートに渡すポイント情報
+        points_info = {
+            "current_points": participation_points,
+            "base_current_points": 0,
+            "snapshot_date": None,
+            "is_expired": is_expired,
+            "days_since_last": days_since_last
+        }
+
+        # 8. 管理者用・スキルスコア・参加日リスト
+        is_admin = bool(getattr(current_user, "administrator", False))
+        bad_users_table = current_app.dynamodb.Table("bad-users")
+        resp = bad_users_table.get_item(Key={"user#user_id": user_id}, ConsistentRead=True)
+        bad_user = resp.get("Item") or {}
+        
+        def _to_float_or_none(v):
+            try: return float(v) if v is not None else None
+            except: return None
+        skill_score = _to_float_or_none(bad_user.get("skill_score"))
+
+        admin_participation_dates = []
         if is_admin:
             try:
-                records = raw_history
                 youbi = ['月', '火', '水', '木', '金', '土', '日']
-
                 formatted = []
-                skipped = 0
-
-                for r in records:
-                    if not isinstance(r, dict):
-                        dt = _parse_ymd10(r)
-                        if not dt:
-                            skipped += 1
-                            continue
-                        formatted.append(f"{dt.strftime('%Y年%m月%d日')}（{youbi[dt.weekday()]}）")
-                        continue
-
-                    st = (r.get("status") or "").lower().strip()
-                    if not st:
-                        act = (r.get("action") or "").lower().strip()
-                        if act in ("tara_join", "join", "register", "registered"):
-                            st = "registered"
-                        elif act in ("tara_cancel", "cancel", "cancelled", "canceled"):
-                            st = "cancelled"
-
-                    if st != "registered":
-                        skipped += 1
-                        continue
-
+                from uguu.users import _parse_ymd10 as _parse_ymd10
+                for r in raw_history:
+                    if not isinstance(r, dict) or not _is_registered(r): continue
                     date_raw = r.get("date") or r.get("event_date") or r.get("eventDay")
-                    dt = _parse_ymd10(date_raw)
-                    if not dt:
-                        skipped += 1
-                        continue
-
-                    formatted.append(f"{dt.strftime('%Y年%m月%d日')}（{youbi[dt.weekday()]}）")
-
-                admin_participation_dates = sorted(formatted)
-                print(f"[DEBUG] admin_participation_dates: total_records={len(records)}, kept={len(admin_participation_dates)}, skipped={skipped}")
-
+                    dt = datetime.strptime(str(date_raw)[:10], '%Y-%m-%d') if date_raw else None
+                    if dt:
+                        formatted.append(f"{dt.strftime('%Y年%m月%d日')}（{youbi[dt.weekday()]}）")
+                admin_participation_dates = sorted(list(set(formatted)))
             except Exception as e:
                 print(f"[WARN] failed to build admin_participation_dates: {e}")
-                admin_participation_dates = []
-
-        points_info = get_current_points_hybrid(
-            dynamodb=current_app.dynamodb,
-            user_id=user.get("user#user_id", "")
-        )
-
-        participation_points = int(points_info.get("current_points", 0))
-
-        print(
-            f"[USER_POINTS] user={user.get('user#user_id', '')} "
-            f"base={points_info.get('base_current_points')} "
-            f"earn={points_info.get('earned_after_cutoff')} "
-            f"spend={points_info.get('spent_after_cutoff')} "
-            f"adjust={points_info.get('adjusted_after_cutoff')} "
-            f"current={points_info.get('current_points')}"
-        )
 
         plain_user_id = user.get('user#user_id', '').replace('user#', '')
 
@@ -246,18 +205,14 @@ def user_profile(user_id):
             plain_user_id=plain_user_id,
             posts=user_posts,
             posts_count=len(user_posts) if user_posts else 0,
-
-            # ★ここを修正：practice_count ではなく official_count を表示
             past_participation_count=int(official_count),
-
             participation_points=participation_points,
-
             followers_count=0,
             following_count=0,
             is_admin=is_admin,
             admin_participation_dates=admin_participation_dates,
-            days_until_reset=user_stats.get('days_until_reset'),
-            upcoming_schedules=upcoming_schedules,
+            days_until_reset=60 - days_since_last if not is_expired else 0, # 残り日数表示用
+            upcoming_schedules=db.get_upcoming_schedules(),
             point_spends=point_spends,
             point_total_spent_recent=point_total_spent_recent,
             skill_score=skill_score,

@@ -388,9 +388,12 @@ def calc_user_snapshot(user_info, all_schedules):
     print(f"[DEBUG] filtered_schedules_count={len(filtered_schedules)}")
 
     rules = PointRules()
-
-    last_reset_index, is_reset = calc_reset_index(records_all, rules.reset_days)
-    print(f"[DEBUG] user_id={user_id} last_reset_index={last_reset_index} is_reset={is_reset}")
+    
+    # スナップショット作成時は、過去の全履歴を合算するためリセットを無効化する
+    last_reset_index = 0 
+    is_reset = False
+    
+    print(f"[DEBUG] user_id={user_id} FORCED reset_index=0 (Total history mode)")
 
     records_for_points = slice_records_for_points(records_all, last_reset_index)
     print(f"[DEBUG] user_id={user_id} records_for_points_count={len(records_for_points)}")
@@ -490,16 +493,10 @@ def sum_admin_earn(history_items):
     total_earn = 0
 
     for h in history_items:
-        marker = str(
-            h.get("joined_at")
-            or h.get("history_id")
-            or h.get("sk")
-            or h.get("created_at")
-            or ""
-        )
-
+        # 既存のポイント取得ロジックなどはそのまま利用
         kind = str(h.get("kind") or "").lower()
         source = str(h.get("source") or "").lower()
+        action = str(h.get("action") or "").lower() # actionを追加で見る
 
         raw_points = (
             h.get("points_earned")
@@ -511,16 +508,15 @@ def sum_admin_earn(history_items):
         )
 
         try:
-            points = int(raw_points)
+            points = abs(int(float(raw_points)))
         except Exception:
-            try:
-                points = int(float(raw_points))
-            except Exception:
-                points = 0
+            points = 0
 
-        # 管理者手動付与だけを合計
-        if kind == "earn" and source == "admin_manual":
-            total_earn += abs(points)
+        # 【修正ポイント】
+        # 参加ポイント(calc_legacy_participation_points)以外で、
+        # 明示的に「獲得(earn)」として記録されているものはすべて合計する
+        if kind == "earn" or action in ("earn", "point_earn", "admin_add", "admin_grant", "grant"):
+            total_earn += points
 
     return total_earn
 
@@ -566,7 +562,7 @@ def get_one_user(user_id: str):
 # def main():
 #     all_schedules = get_all_schedules()
 
-#     test_user_id = "52b9d36e-1413-49c3-8362-9130016df2d4"
+#     test_user_id = "97b8d89b-92a3-46a5-836a-34974a5466cc"
 #     user_info = get_one_user(test_user_id)
 
 #     if not user_info:

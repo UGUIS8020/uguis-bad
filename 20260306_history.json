@@ -1,0 +1,347 @@
+{
+    "Items": [
+        {
+            "match_id": {
+                "S": "20260306_193828"
+            },
+            "courts": {
+                "L": [
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト02"
+                                            },
+                                            "user_id": {
+                                                "S": "ab2937bb-b3a3-475e-a500-ac1da6c17c79"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト03"
+                                            },
+                                            "user_id": {
+                                                "S": "c50c38e2-6357-49a9-a009-a0491c62ab78"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "3"
+                            },
+                            "winner": {
+                                "S": "A"
+                            },
+                            "team1_score": {
+                                "S": "21"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト12"
+                                            },
+                                            "user_id": {
+                                                "S": "5d90800b-bbbb-43cb-a9b9-4b000abe6681"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト07"
+                                            },
+                                            "user_id": {
+                                                "S": "1b7a5fbb-a097-4b7c-9b0c-07ff08637d8d"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "team2_score": {
+                                "S": "20"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト01"
+                                            },
+                                            "user_id": {
+                                                "S": "0fb83458-2fce-4d92-918e-81f9c81d0659"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト09"
+                                            },
+                                            "user_id": {
+                                                "S": "efe24024-7633-42c1-97c0-1ef209bf5a6a"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "2"
+                            },
+                            "winner": {
+                                "S": "A"
+                            },
+                            "team1_score": {
+                                "S": "21"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト04"
+                                            },
+                                            "user_id": {
+                                                "S": "3f536c82-1156-4ff5-b0fe-b2cccd3fb470"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト05"
+                                            },
+                                            "user_id": {
+                                                "S": "afd8038a-7c63-44a3-8b04-d7c502ec4b61"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "team2_score": {
+                                "S": "20"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト06"
+                                            },
+                                            "user_id": {
+                                                "S": "c14d7ca8-66b1-4fa8-aecc-61b8c529b049"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト11"
+                                            },
+                                            "user_id": {
+                                                "S": "0824772c-0942-455c-987c-05fcd34626bf"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "1"
+                            },
+                            "winner": {
+                                "S": "B"
+                            },
+                            "team1_score": {
+                                "S": "20"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト08"
+                                            },
+                                            "user_id": {
+                                                "S": "f28acb75-4c2b-40b3-9dee-fbd42a3017be"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "テスト10"
+                                            },
+                                            "user_id": {
+                                                "S": "fdcf89eb-4acd-4462-ad99-c3b19fa51dac"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "team2_score": {
+                                "S": "21"
+                            }
+                        }
+                    }
+                ]
+            },
+            "player_count": {
+                "S": "12"
+            },
+            "date": {
+                "S": "2026-03-06T19:41:19.103602+09:00"
+            },
+            "court_count": {
+                "S": "3"
+            },
+            "mode": {
+                "S": "ai"
+            },
+            "waiting": {
+                "L": []
+            },
+            "skill_snapshot": {
+                "M": {
+                    "efe24024-7633-42c1-97c0-1ef209bf5a6a": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7741"
+                            },
+                            "skill_score": {
+                                "S": "41.1082"
+                            }
+                        }
+                    },
+                    "0824772c-0942-455c-987c-05fcd34626bf": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7449"
+                            },
+                            "skill_score": {
+                                "S": "34.4927"
+                            }
+                        }
+                    },
+                    "1b7a5fbb-a097-4b7c-9b0c-07ff08637d8d": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7641"
+                            },
+                            "skill_score": {
+                                "S": "69.761"
+                            }
+                        }
+                    },
+                    "0fb83458-2fce-4d92-918e-81f9c81d0659": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7741"
+                            },
+                            "skill_score": {
+                                "S": "55.1082"
+                            }
+                        }
+                    },
+                    "afd8038a-7c63-44a3-8b04-d7c502ec4b61": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7741"
+                            },
+                            "skill_score": {
+                                "S": "53.8918"
+                            }
+                        }
+                    },
+                    "c14d7ca8-66b1-4fa8-aecc-61b8c529b049": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7449"
+                            },
+                            "skill_score": {
+                                "S": "37.4927"
+                            }
+                        }
+                    },
+                    "fdcf89eb-4acd-4462-ad99-c3b19fa51dac": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7449"
+                            },
+                            "skill_score": {
+                                "S": "41.5073"
+                            }
+                        }
+                    },
+                    "5d90800b-bbbb-43cb-a9b9-4b000abe6681": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7641"
+                            },
+                            "skill_score": {
+                                "S": "34.761"
+                            }
+                        }
+                    },
+                    "f28acb75-4c2b-40b3-9dee-fbd42a3017be": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7449"
+                            },
+                            "skill_score": {
+                                "S": "41.5073"
+                            }
+                        }
+                    },
+                    "ab2937bb-b3a3-475e-a500-ac1da6c17c79": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7641"
+                            },
+                            "skill_score": {
+                                "S": "51.239"
+                            }
+                        }
+                    },
+                    "c50c38e2-6357-49a9-a009-a0491c62ab78": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7641"
+                            },
+                            "skill_score": {
+                                "S": "65.239"
+                            }
+                        }
+                    },
+                    "3f536c82-1156-4ff5-b0fe-b2cccd3fb470": {
+                        "M": {
+                            "skill_sigma": {
+                                "S": "7.7741"
+                            },
+                            "skill_score": {
+                                "S": "29.8918"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "Count": 1,
+    "ScannedCount": 26,
+    "ConsumedCapacity": null
+}

@@ -632,69 +632,69 @@ class DynamoDB:
         
     
         
-    def get_user_participation_history(self, user_id: str):
-        """
-        bad-users-history からユーザーの参加日を昇順で返す
-        PK=user_id, SK=date (YYYY-MM-DD) を想定
-        キャンセルされた参加は除外
-        """
-        from datetime import datetime
-        table = self.part_history
-        items = []
+    # def get_user_participation_history(self, user_id: str):
+    #     """
+    #     bad-users-history からユーザーの参加日を昇順で返す
+    #     PK=user_id, SK=date (YYYY-MM-DD) を想定
+    #     キャンセルされた参加は除外
+    #     """
+    #     from datetime import datetime
+    #     table = self.part_history
+    #     items = []
 
-        # user_id に対する全件取得
-        resp = table.query(
-            KeyConditionExpression=Key("user_id").eq(user_id),
-            ProjectionExpression="#d, #s",  # dateとstatusを取得
-            ExpressionAttributeNames={
-                "#d": "date", 
-                "#s": "status"  # statusも取得するように追加
-            },
-            ScanIndexForward=True
-        )
-        items.extend(resp.get("Items", []))
+    #     # user_id に対する全件取得
+    #     resp = table.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id),
+    #         ProjectionExpression="#d, #s",  # dateとstatusを取得
+    #         ExpressionAttributeNames={
+    #             "#d": "date", 
+    #             "#s": "status"  # statusも取得するように追加
+    #         },
+    #         ScanIndexForward=True
+    #     )
+    #     items.extend(resp.get("Items", []))
 
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ProjectionExpression="#d, #s",
-                ExpressionAttributeNames={
-                    "#d": "date",
-                    "#s": "status"
-                },
-                ExclusiveStartKey=resp["LastEvaluatedKey"],
-                ScanIndexForward=True
-            )
-            items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = table.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ProjectionExpression="#d, #s",
+    #             ExpressionAttributeNames={
+    #                 "#d": "date",
+    #                 "#s": "status"
+    #             },
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"],
+    #             ScanIndexForward=True
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        # 現在の日付（未来の参加を除外するため）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（未来の参加を除外するため）
+    #     today = datetime.now(JST).date()
         
-        dates = []
-        for it in items:
-            try:
-                # キャンセルされた参加は除外
-                if "status" in it and it["status"] == 'cancelled':
-                    print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
-                    continue
+    #     dates = []
+    #     for it in items:
+    #         try:
+    #             # キャンセルされた参加は除外
+    #             if "status" in it and it["status"] == 'cancelled':
+    #                 print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
+    #                 continue
                     
-                # 日付文字列をdatetimeオブジェクトに変換
-                date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
+    #             # 日付文字列をdatetimeオブジェクトに変換
+    #             date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
                 
-                # 未来の日付は除外
-                if date_obj.date() > today:
-                    print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
-                    continue
+    #             # 未来の日付は除外
+    #             if date_obj.date() > today:
+    #                 print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
+    #                 continue
                     
-                dates.append(date_obj)
-            except Exception as e:
-                print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
-                pass
+    #             dates.append(date_obj)
+    #         except Exception as e:
+    #             print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
+    #             pass
 
-        # 日付順にソート
-        dates.sort()
-        print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
-        return dates
+    #     # 日付順にソート
+    #     dates.sort()
+    #     print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
+    #     return dates
     
     def cancel_participation(self, user_id: str, date: str, schedule_id: str = None):
         """参加をキャンセル - 該当する全レコードを更新"""
@@ -1053,52 +1053,52 @@ class DynamoDB:
                 "schedule_id": schedule_id
             })
 
-    def get_user_participation_history(self, user_id: str):
-        from datetime import datetime
+    # def get_user_participation_history(self, user_id: str):
+    #     from datetime import datetime
 
-        # 現在の日付（JST）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（JST）
+    #     today = datetime.now(JST).date()
 
-        items, resp = [], self.part_history.query(
-            KeyConditionExpression=Key("user_id").eq(user_id)
-        )
-        items.extend(resp.get("Items", []))
-        while "LastEvaluatedKey" in resp:
-            resp = self.part_history.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ExclusiveStartKey=resp["LastEvaluatedKey"]
-            )
-            items.extend(resp.get("Items", []))
+    #     items, resp = [], self.part_history.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id)
+    #     )
+    #     items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = self.part_history.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"]
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        valid_dates = []
-        for it in items:
-            d_str = it.get("date")
-            if not d_str:
-                continue
+    #     valid_dates = []
+    #     for it in items:
+    #         d_str = it.get("date")
+    #         if not d_str:
+    #             continue
 
-            # キャンセル済みは除外
-            if (it.get("status") or "").lower() == "cancelled":
-                print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
-                continue
+    #         # キャンセル済みは除外
+    #         if (it.get("status") or "").lower() == "cancelled":
+    #             print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
+    #             continue
 
-            # 文字列 → date に変換して未来除外
-            try:
-                d = datetime.strptime(d_str, "%Y-%m-%d").date()
-            except ValueError:
-                print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
-                continue
+    #         # 文字列 → date に変換して未来除外
+    #         try:
+    #             d = datetime.strptime(d_str, "%Y-%m-%d").date()
+    #         except ValueError:
+    #             print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
+    #             continue
 
-            if d <= today:
-                valid_dates.append(d_str)
+    #         if d <= today:
+    #             valid_dates.append(d_str)
 
-        # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
-        dates = sorted(set(valid_dates))
+    #     # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
+    #     dates = sorted(set(valid_dates))
 
-        print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
-        for i, date in enumerate(dates):
-            print(f"[DEBUG] 参加日 {i+1}: {date}")
+    #     print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
+    #     for i, date in enumerate(dates):
+    #         print(f"[DEBUG] 参加日 {i+1}: {date}")
 
-        return dates  # 'YYYY-MM-DD' の文字列配列
+    #     return dates  # 'YYYY-MM-DD' の文字列配列
     
     def get_all_past_schedules(self, until_date):
         """

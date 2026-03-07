@@ -505,9 +505,9 @@ def get_point_multiplier(birth_date: date, gender: str) -> float:
     print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
 
     if age < 18:
-        return 1.3
+        return 1.35
     elif gender and gender.lower() == "female":
-        return 1.2
+        return 1.25
     else:
         return 1.0
 
@@ -563,12 +563,16 @@ def get_saved_point_snapshot(dynamodb, user_id: str) -> dict:
     resp = table.get_item(Key={"user_id": user_id})
     item = resp.get("Item") or {}
 
+    # 修正: snapshot_date が None（新規ユーザー）の場合は、
+    # 履歴をすべて拾えるように十分に古い日付を入れる
+    snapshot_date = item.get("snapshot_date") or "2000-01-01"
+
     snapshot_current = item.get("snapshot_current_points", 0)
     total_spent_v1 = item.get("total_spent_v1", 0)
 
     snapshot = {
         "user_id": user_id,
-        "snapshot_date": item.get("snapshot_date"),
+        "snapshot_date": snapshot_date,
         "current_points": to_decimal(snapshot_current),
         "base_points": to_decimal(snapshot_current),
         "used_points": to_decimal(total_spent_v1),
@@ -584,13 +588,15 @@ def get_saved_point_snapshot(dynamodb, user_id: str) -> dict:
     return snapshot
 
 
-def get_current_points_hybrid(dynamodb, user_id: str) -> dict:
-    """
-    保存済みスナップショット + 基準日以降の履歴
-    で現在ポイントを返す新方式
-    """
+def get_current_points_hybrid(dynamodb, user_id: str, participation_points=0) -> dict:
     snapshot = get_saved_point_snapshot(dynamodb=dynamodb, user_id=user_id)
-    delta = sum_history_points_after_cutoff(dynamodb=dynamodb, user_id=user_id)
+    
+    # 【修正】ここでも participation_points を次の関数へバケツリレーする
+    delta = sum_history_points_after_cutoff(
+        dynamodb=dynamodb, 
+        user_id=user_id, 
+        participation_points=participation_points
+    )
 
     base_points = to_decimal(snapshot.get("base_points", 0))
     earned_after = to_decimal(delta.get("earned_after_cutoff", 0))
@@ -624,11 +630,7 @@ def get_current_points_hybrid(dynamodb, user_id: str) -> dict:
     return result
 
 
-def sum_history_points_after_cutoff(dynamodb, user_id: str) -> dict:
-    """
-    基準日以降の履歴だけを集計する
-    bad-users-history を直接読んで集計する版
-    """
+def sum_history_points_after_cutoff(dynamodb, user_id: str, participation_points=0) -> dict:
     cutoff_dt = get_points_cutoff_datetime()
     table = dynamodb.Table("bad-users-history")
 
@@ -644,6 +646,8 @@ def sum_history_points_after_cutoff(dynamodb, user_id: str) -> dict:
         )
         items.extend(resp.get("Items", []) or [])
 
+    print(f"[POINT_DELTA][RAW_ITEMS] user={user_id} count={len(items)}")
+
     earn_items = []
     spend_items = []
     adjust_items = []
@@ -654,6 +658,7 @@ def sum_history_points_after_cutoff(dynamodb, user_id: str) -> dict:
             or item.get("joined_at")
             or item.get("registered_at")
         )
+
         if not created_at or created_at < cutoff_dt:
             continue
 
@@ -668,25 +673,25 @@ def sum_history_points_after_cutoff(dynamodb, user_id: str) -> dict:
             or ""
         )
 
-        raw_points = (
-            item.get("delta_points")
-            or item.get("points")
-            or item.get("points_used")
-            or item.get("amount")
-            or item.get("point")
-            or 0
+        print(
+            f"[POINT_DELTA][ITEM] "
+            f"created_at={created_at} action={action} kind={kind} source={source} "
+            f"history_id={item.get('history_id')} sk={item.get('sk')} "
+            f"delta_points={item.get('delta_points')} points={item.get('points')}"
         )
-        points = to_decimal(raw_points)
 
-        # earn
         if (
             kind == "earn"
             or "points#earn#" in marker
-            or action in ("earn", "point_earn", "admin_add", "admin_grant", "grant")
+            or action in (
+                "earn", "point_earn", "admin_add", "admin_grant", "grant",
+                "participate", "participated", "join", "joined",
+                "register", "registered"
+            )
+            or source in ("participation", "schedule_participation", "event_participation")
         ):
             earn_items.append(item)
 
-        # spend
         elif (
             kind == "spend"
             or "points#spend#" in marker
@@ -694,57 +699,45 @@ def sum_history_points_after_cutoff(dynamodb, user_id: str) -> dict:
         ):
             spend_items.append(item)
 
-        # adjust
         elif (
             action in ("adjust", "point_adjust", "admin_adjust")
             or source == "admin_manual"
         ):
             adjust_items.append(item)
 
-    earned_after_cutoff = sum(
-        (
-            abs(to_decimal(
-                x.get("delta_points")
-                or x.get("points")
-                or x.get("points_used")
-                or x.get("amount")
-                or x.get("point")
-                or 0
-            ))
-            for x in earn_items
-        ),
-        Decimal("0")
-    )
+    applied_join_bonus = False
 
-    spent_after_cutoff = sum(
-        (
-            abs(to_decimal(
-                x.get("delta_points")
-                or x.get("points")
-                or x.get("points_used")
-                or x.get("amount")
-                or x.get("point")
-                or 0
-            ))
-            for x in spend_items
-        ),
-        Decimal("0")
-    )
+    def _read_points(x):
+        val = (
+            x.get("delta_points")
+            or x.get("points")
+            or x.get("points_used")
+            or x.get("amount")
+            or x.get("point")
+        )
+        if val is not None:
+            return to_decimal(val)
+        return Decimal("0")
 
-    adjusted_after_cutoff = sum(
-        (
-            to_decimal(
-                x.get("delta_points")
-                or x.get("points")
-                or x.get("points_used")
-                or x.get("amount")
-                or x.get("point")
-                or 0
-            )
-            for x in adjust_items
-        ),
-        Decimal("0")
-    )
+    # 2. 獲得ポイントの集計（ここで1回だけ加算をコントロール）
+    earned_after_cutoff = Decimal("0")
+    join_bonus_done = False # この関数スコープで1回だけ
+
+    for x in earn_items:
+        p = _read_points(x)
+        
+        # DBが空（0）で、かつ join アクションの場合
+        action = str(x.get("action") or "").lower().strip()
+        if p == 0 and action in ("join", "joined"):
+            if not join_bonus_done:
+                p = to_decimal(participation_points) # 260Pをセット
+                join_bonus_done = True # 以降のjoinは0Pのまま
+        
+        earned_after_cutoff += p
+
+    # 3. 支出と調整の集計（これらはそのまま）
+    spent_after_cutoff = sum((abs(_read_points(x)) for x in spend_items), Decimal("0"))
+    adjusted_after_cutoff = sum((_read_points(x) for x in adjust_items), Decimal("0"))
 
     print(
         f"[POINT_DELTA] user={user_id} "
