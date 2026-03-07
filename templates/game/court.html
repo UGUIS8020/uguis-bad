@@ -413,11 +413,8 @@
 
 
 
-
-
-
-        
-        <div class="card-body px-4">
+        {% if current_user.administrator or not has_ongoing_matches %}
+        <div class="card-body px-4 pt-2">
             <!-- 参加待ちプレイヤー -->
             {% if pending_players %}
             <div class="row gx-3 gy-2">
@@ -483,9 +480,9 @@
                 <strong>休憩中プレイヤーはいません</strong><br>                
             </div>
             {% endif %}
-        </div>          
-
+        </div>  
         
+        {% endif %}        
                        
         {% set user_court = namespace(found=false) %}
 
