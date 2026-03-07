@@ -1,14 +1,17 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
+from uguu.point import get_point_multiplier
 from typing import Any, Dict, List, Optional, Tuple, Set
 import json, base64
 from decimal import Decimal
 from botocore.exceptions import ClientError
 import re
 from utils.timezone import JST
+from flask import current_app
+
 
 from uguu.point import (
     PointRules,
@@ -23,7 +26,7 @@ from uguu.point import (
     classify,
     better,
     calc_streak_points,
-    _is_junior_high_or_below
+    get_point_multiplier,
 )
 
 load_dotenv()
@@ -104,21 +107,34 @@ def _decode_cursor(cursor: Optional[str]) -> Optional[Dict[str, Any]]:
 class DynamoDB:
     ALLOWED_EARN_TYPES = {"manual"}
 
+    # init は空でOK（import時に重い処理をしない）
     def __init__(self):
-        self.dynamodb = boto3.resource(
-            'dynamodb',
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION")
-        )
-        self.posts_table    = self.dynamodb.Table('uguu_post')
-        self.users_table    = self.dynamodb.Table('bad-users')
-        self.schedule_table = self.dynamodb.Table('bad_schedules')
-        self.part_history   = self.dynamodb.Table("bad-users-history")
-        
-        self.replies_table  = self.dynamodb.Table("post-replies")
+        pass
 
-        print("DynamoDB tables initialized")
+    # app.py の create_app() で作った current_app.dynamodb を使う
+    @property
+    def dynamodb(self):
+        return current_app.dynamodb
+
+    @property
+    def posts_table(self):
+        return self.dynamodb.Table("uguu_post")
+
+    @property
+    def users_table(self):
+        return self.dynamodb.Table("bad-users")
+
+    @property
+    def schedule_table(self):
+        return self.dynamodb.Table("bad_schedules")
+
+    @property
+    def part_history(self):
+        return self.dynamodb.Table("bad-users-history")
+
+    @property
+    def replies_table(self):
+        return self.dynamodb.Table("post-replies")
 
     def get_posts_page(
         self,
@@ -259,7 +275,7 @@ class DynamoDB:
             names["#content"] = "content"
             values[":content"] = content
 
-            # ✅ content編集したらフィード順も更新（上に上げる）
+            # content編集したらフィード順も更新（上に上げる）
             updates.append("#updated_at = :now")
             updates.append("#feed_ts = :now")
             names["#updated_at"] = "updated_at"
@@ -322,7 +338,7 @@ class DynamoDB:
             with self.replies_table.batch_writer() as batch:
                 while True:
                     kwargs = {
-                        # ✅ replies は post_id / sk がキー
+                        # replies は post_id / sk がキー
                         "KeyConditionExpression": Key("post_id").eq(str(post_id)) & Key("sk").begins_with("REPLY#"),
                         "ProjectionExpression": "post_id, sk",
                     }
@@ -502,15 +518,17 @@ class DynamoDB:
             return False
     
     def get_user_by_id(self, user_id: str) -> dict | None:
-        """ユーザー情報を取得（表示用に最低限整形）"""
         try:
-            if not user_id:
-                return None
+            if not user_id: return None
 
-            res = self.users_table.get_item(Key={"user#user_id": user_id})
+            # 余計なプレフィックス付与をせず、そのままのIDで検索
+            res = self.users_table.get_item(
+                Key={"user#user_id": user_id},
+                ConsistentRead=True
+            )
             u = res.get("Item")
-            if not u:
-                return None
+            
+            if not u: return None
 
             # 表示名のフォールバック
             display_name = (u.get("display_name") or "").strip() or "不明"
@@ -614,69 +632,69 @@ class DynamoDB:
         
     
         
-    def get_user_participation_history(self, user_id: str):
-        """
-        bad-users-history からユーザーの参加日を昇順で返す
-        PK=user_id, SK=date (YYYY-MM-DD) を想定
-        キャンセルされた参加は除外
-        """
-        from datetime import datetime
-        table = self.part_history
-        items = []
+    # def get_user_participation_history(self, user_id: str):
+    #     """
+    #     bad-users-history からユーザーの参加日を昇順で返す
+    #     PK=user_id, SK=date (YYYY-MM-DD) を想定
+    #     キャンセルされた参加は除外
+    #     """
+    #     from datetime import datetime
+    #     table = self.part_history
+    #     items = []
 
-        # user_id に対する全件取得
-        resp = table.query(
-            KeyConditionExpression=Key("user_id").eq(user_id),
-            ProjectionExpression="#d, #s",  # dateとstatusを取得
-            ExpressionAttributeNames={
-                "#d": "date", 
-                "#s": "status"  # statusも取得するように追加
-            },
-            ScanIndexForward=True
-        )
-        items.extend(resp.get("Items", []))
+    #     # user_id に対する全件取得
+    #     resp = table.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id),
+    #         ProjectionExpression="#d, #s",  # dateとstatusを取得
+    #         ExpressionAttributeNames={
+    #             "#d": "date", 
+    #             "#s": "status"  # statusも取得するように追加
+    #         },
+    #         ScanIndexForward=True
+    #     )
+    #     items.extend(resp.get("Items", []))
 
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ProjectionExpression="#d, #s",
-                ExpressionAttributeNames={
-                    "#d": "date",
-                    "#s": "status"
-                },
-                ExclusiveStartKey=resp["LastEvaluatedKey"],
-                ScanIndexForward=True
-            )
-            items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = table.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ProjectionExpression="#d, #s",
+    #             ExpressionAttributeNames={
+    #                 "#d": "date",
+    #                 "#s": "status"
+    #             },
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"],
+    #             ScanIndexForward=True
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        # 現在の日付（未来の参加を除外するため）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（未来の参加を除外するため）
+    #     today = datetime.now(JST).date()
         
-        dates = []
-        for it in items:
-            try:
-                # キャンセルされた参加は除外
-                if "status" in it and it["status"] == 'cancelled':
-                    print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
-                    continue
+    #     dates = []
+    #     for it in items:
+    #         try:
+    #             # キャンセルされた参加は除外
+    #             if "status" in it and it["status"] == 'cancelled':
+    #                 print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
+    #                 continue
                     
-                # 日付文字列をdatetimeオブジェクトに変換
-                date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
+    #             # 日付文字列をdatetimeオブジェクトに変換
+    #             date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
                 
-                # 未来の日付は除外
-                if date_obj.date() > today:
-                    print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
-                    continue
+    #             # 未来の日付は除外
+    #             if date_obj.date() > today:
+    #                 print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
+    #                 continue
                     
-                dates.append(date_obj)
-            except Exception as e:
-                print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
-                pass
+    #             dates.append(date_obj)
+    #         except Exception as e:
+    #             print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
+    #             pass
 
-        # 日付順にソート
-        dates.sort()
-        print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
-        return dates
+    #     # 日付順にソート
+    #     dates.sort()
+    #     print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
+    #     return dates
     
     def cancel_participation(self, user_id: str, date: str, schedule_id: str = None):
         """参加をキャンセル - 該当する全レコードを更新"""
@@ -779,6 +797,12 @@ class DynamoDB:
         def better_local(new: dict, old: dict) -> bool:
             cn, co = classify_local(new), classify_local(old)
 
+            # --- 追加: official 保護ロジック ---
+            # すでに official (参加) があるなら、後から来た cancelled や tara に上書きさせない
+            if co == "official" and cn in ["cancelled", "tara"]:
+                return False
+            # -------------------------------
+
             # other は参加履歴の採用対象外
             if cn == "other" and co != "other":
                 return False
@@ -791,7 +815,7 @@ class DynamoDB:
             if cn == "tara" and co == "official":
                 return False
 
-            # それ以外は時刻で比較
+            # それ以外（同じ種別同士など）は時刻で比較
             tn = new.get("registered_at_dt")
             to = old.get("registered_at_dt")
             if tn and to:
@@ -1035,52 +1059,52 @@ class DynamoDB:
                 "schedule_id": schedule_id
             })
 
-    def get_user_participation_history(self, user_id: str):
-        from datetime import datetime
+    # def get_user_participation_history(self, user_id: str):
+    #     from datetime import datetime
 
-        # 現在の日付（JST）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（JST）
+    #     today = datetime.now(JST).date()
 
-        items, resp = [], self.part_history.query(
-            KeyConditionExpression=Key("user_id").eq(user_id)
-        )
-        items.extend(resp.get("Items", []))
-        while "LastEvaluatedKey" in resp:
-            resp = self.part_history.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ExclusiveStartKey=resp["LastEvaluatedKey"]
-            )
-            items.extend(resp.get("Items", []))
+    #     items, resp = [], self.part_history.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id)
+    #     )
+    #     items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = self.part_history.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"]
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        valid_dates = []
-        for it in items:
-            d_str = it.get("date")
-            if not d_str:
-                continue
+    #     valid_dates = []
+    #     for it in items:
+    #         d_str = it.get("date")
+    #         if not d_str:
+    #             continue
 
-            # キャンセル済みは除外
-            if (it.get("status") or "").lower() == "cancelled":
-                print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
-                continue
+    #         # キャンセル済みは除外
+    #         if (it.get("status") or "").lower() == "cancelled":
+    #             print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
+    #             continue
 
-            # 文字列 → date に変換して未来除外
-            try:
-                d = datetime.strptime(d_str, "%Y-%m-%d").date()
-            except ValueError:
-                print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
-                continue
+    #         # 文字列 → date に変換して未来除外
+    #         try:
+    #             d = datetime.strptime(d_str, "%Y-%m-%d").date()
+    #         except ValueError:
+    #             print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
+    #             continue
 
-            if d <= today:
-                valid_dates.append(d_str)
+    #         if d <= today:
+    #             valid_dates.append(d_str)
 
-        # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
-        dates = sorted(set(valid_dates))
+    #     # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
+    #     dates = sorted(set(valid_dates))
 
-        print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
-        for i, date in enumerate(dates):
-            print(f"[DEBUG] 参加日 {i+1}: {date}")
+    #     print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
+    #     for i, date in enumerate(dates):
+    #         print(f"[DEBUG] 参加日 {i+1}: {date}")
 
-        return dates  # 'YYYY-MM-DD' の文字列配列
+    #     return dates  # 'YYYY-MM-DD' の文字列配列
     
     def get_all_past_schedules(self, until_date):
         """
@@ -1150,7 +1174,8 @@ class DynamoDB:
                 'user_id': user_id,
                 'birth_date': birth_date,
                 'display_name': item.get('display_name', ''),
-                'skill_score': item.get('skill_score', 0)
+                'skill_score': item.get('skill_score', 0),
+                'gender': item.get('gender', 'male'),
             }
             
             print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
@@ -1368,162 +1393,8 @@ class DynamoDB:
         except Exception as e:
             print(f"[ERROR] 支払い記録エラー: {e}")
             import traceback; traceback.print_exc()
-            return False
-        
-    # def get_point_transactions(self, user_id: str, limit: int = 50, transaction_type: str = None):
-    #     try:
-    #         prefix = 'points#spend#' if (transaction_type in (None, 'payment', 'spend')) else 'points#'
-    #         resp = self.part_history.query(
-    #             KeyConditionExpression=Key('user_id').eq(user_id) & Key('joined_at').begins_with(prefix),
-    #             ScanIndexForward=False,
-    #             Limit=limit,
-    #             ConsistentRead=True,  # 直前の書き込みを確実に拾う
-    #         )
-
-    #         txs = []
-    #         for it in resp.get('Items', []):
-    #             if not it.get('joined_at','').startswith('points#spend#'):
-    #                 continue
-    #             used = int(it.get('points_used') or -int(it.get('delta_points', 0)) or 0)
-    #             txs.append({
-    #                 'date': it.get('created_at'),        # 支払日時
-    #                 'type': 'payment',
-    #                 'points_used': used,                  # ← 集計はこのキーに寄せる
-    #                 'points': used,                       # 互換のため残す（UIで使用可）
-    #                 'delta_points': int(it.get('delta_points', 0)),  # -800 など
-    #                 'description': it.get('reason', ''),
-    #                 'event_date': it.get('event_date'),
-    #                 'payment_type': it.get('payment_type'),
-    #                 'tx_id': it.get('tx_id'),
-    #             })
-
-    #         print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type=payment")
-    #         return txs
-
-    #     except Exception as e:
-    #         print(f"[ERROR] 取引履歴取得エラー: {e}")
-    #         import traceback; traceback.print_exc()
-    #         return []
-        
-    
-    # def get_point_transactions(
-    #     self,
-    #     user_id: str,
-    #     limit: int = 50,
-    #     transaction_type: Optional[str] = None,
-    # ) -> List[Dict[str, Any]]:
-    #     """
-    #     bad-users-history からポイント取引履歴を取得して整形して返す。
-
-    #     transaction_type:
-    #     - None / "all"      : earn, spend, adjust を全部返す
-    #     - "spend" / "payment": spend だけ返す
-    #     - "earn"            : earn だけ返す
-    #     - "adjust"          : adjust だけ返す
-    #     """
-    #     try:
-    #         # ---- type 正規化 ----
-    #         t = (transaction_type or "spend").strip().lower()
-    #         if t in ("payment", "spend"):
-    #             kind_filter = {"spend"}
-    #             prefix = "points#spend#"
-    #         elif t == "earn":
-    #             kind_filter = {"earn"}
-    #             prefix = "points#earn#"
-    #         elif t == "adjust":
-    #             kind_filter = {"adjust"}
-    #             prefix = "points#adjust#"
-    #         elif t in ("all", "*"):
-    #             kind_filter = {"earn", "spend", "adjust"}
-    #             prefix = "points#"  # まとめて取得して kind で絞る
-    #         else:
-    #             # 想定外は安全に spend 扱い
-    #             kind_filter = {"spend"}
-    #             prefix = "points#spend#"
-
-    #         # ---- DynamoDB Query（ページネーション込み）----
-    #         txs: List[Dict[str, Any]] = []
-    #         last_evaluated_key = None
-
-    #         while len(txs) < limit:
-    #             q_kwargs = dict(
-    #                 KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with(prefix),
-    #                 ScanIndexForward=False,   # 新しい順
-    #                 ConsistentRead=True,
-    #                 Limit=min(100, limit - len(txs)),  # 余裕を持って取得
-    #             )
-    #             if last_evaluated_key:
-    #                 q_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-    #             resp = self.part_history.query(**q_kwargs)
-    #             items = resp.get("Items", [])
-    #             last_evaluated_key = resp.get("LastEvaluatedKey")
-
-    #             for it in items:
-    #                 joined_at = str(it.get("joined_at") or "")
-    #                 kind = str(it.get("kind") or "")
-
-    #                 # prefix="points#" のとき等に備えて joined_at/ kind 両方で絞る
-    #                 if not joined_at.startswith("points#"):
-    #                     continue
-    #                 if kind not in kind_filter:
-    #                     continue
-
-    #                 # ---- 数値の取り扱いを安全に（Decimal -> int 等）----
-    #                 def to_int(v, default=0) -> int:
-    #                     try:
-    #                         if v is None:
-    #                             return default
-    #                         if isinstance(v, Decimal):
-    #                             return int(v)
-    #                         return int(v)
-    #                     except Exception:
-    #                         return default
-
-    #                 delta_points = to_int(it.get("delta_points"), 0)
-
-    #                 # points_used は 0 を正しく扱う（or にしない）
-    #                 pu_raw = it.get("points_used")
-    #                 if pu_raw is not None:
-    #                     points_used = to_int(pu_raw, 0)
-    #                 else:
-    #                     # spend の場合は delta_points が負なので反転して正に
-    #                     points_used = -delta_points if kind == "spend" else 0
-
-    #                 # 表示用 type
-    #                 ui_type = "payment" if kind == "spend" else kind
-
-    #                 txs.append({
-    #                     "date": it.get("created_at") or it.get("transaction_date") or it.get("paid_at"),
-    #                     "type": ui_type,
-    #                     "kind": kind,  # 内部的に区別したい場合に便利
-    #                     "points_used": points_used,        # 支払い(消費)は常に正
-    #                     "points": points_used,             # 互換
-    #                     "delta_points": delta_points,      # +/-
-    #                     "description": it.get("reason", "") or "",
-    #                     "event_date": it.get("event_date"),
-    #                     "payment_type": it.get("payment_type"),
-    #                     "tx_id": it.get("tx_id"),
-    #                     "source": it.get("source"),
-    #                     "schedule_id": it.get("schedule_id"),
-    #                     "created_by": it.get("created_by"),
-    #                 })
-
-    #                 if len(txs) >= limit:
-    #                     break
-
-    #             if not last_evaluated_key:
-    #                 break
-
-    #         print(f"[DEBUG] 取引履歴取得 - user_id: {user_id}, 件数: {len(txs)}, type={t}")
-    #         return txs
-
-    #     except Exception as e:
-    #         print(f"[ERROR] 取引履歴取得エラー: {e}")
-    #         import traceback; traceback.print_exc()
-    #         return []
-
-    
+            return False        
+ 
         
     def get_point_transactions(
         self,
@@ -1774,40 +1645,8 @@ class DynamoDB:
                 pass
 
         print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
-        return total
-    
-    # def list_point_spends(self, user_id: str, limit: int = 20):
-    #     """
-    #     bad-users-history から支払(消費)の直近履歴を返す。
-    #     必ず list を返す（例外・0件時は []）。
-    #     返す要素: {event_date, amount, reason, created_at, tx_id, joined_at}
-    #     """
-    #     try:
-    #         resp = self.part_history.query(
-    #             KeyConditionExpression=Key("user_id").eq(user_id) & Key("joined_at").begins_with("points#spend#"),
-    #             ScanIndexForward=False,  # 新しい順
-    #             Limit=limit
-    #         )
-    #         items = resp.get("Items", [])
-    #         out = []
-    #         for it in items:
-    #             # amount は points_used 優先、なければ delta_points (負数) を反転して正数に
-    #             amt = it.get("points_used")
-    #             if amt is None:
-    #                 dp = int(it.get("delta_points", 0))
-    #                 amt = -dp if dp < 0 else 0
-    #             out.append({
-    #                 "event_date": it.get("event_date"),
-    #                 "amount": int(amt or 0),
-    #                 "reason": it.get("reason", "参加費"),
-    #                 "created_at": it.get("created_at"),
-    #                 "tx_id": it.get("tx_id"),
-    #                 "joined_at": it.get("joined_at"),
-    #             })
-    #         return out
-    #     except Exception as e:
-    #         print(f"[WARN] list_point_spends failed: {e}")
-    #         return []
+        return total    
+  
         
     def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -1935,14 +1774,24 @@ class DynamoDB:
 
         manual_points = self.get_manual_points(user_id)
 
-        # 中学生以下の倍率（1.0なら割引なし、0.7なら30%割引）
-        JUNIOR_HIGH_MULTIPLIER = 0.7
-
         user_info = self.get_user_info(user_id)
-        is_junior_high = _is_junior_high_or_below(user_info)
+        print(f"[DBG] user_info={user_info}")
 
-        # 中学生以下なら指定倍率、それ以外は通常料金
-        point_multiplier = JUNIOR_HIGH_MULTIPLIER if is_junior_high else 1.0
+        birth_date_str = user_info.get("birth_date")  # ← .birth_date ではなく .get("date_of_birth")
+        gender = user_info.get("gender", "male")
+
+        if birth_date_str:
+            birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date()
+            print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
+            try:
+                point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
+            except Exception as e:
+                print(f"[DBG] get_point_multiplier ERROR: {e}")
+                point_multiplier = 1.0
+        else:
+            point_multiplier = 1.0
+
+        print(f"[DBG] point_multiplier={point_multiplier}")
 
         # ★ raw_history が渡ってきたらそれを使う
         if raw_history is None:
@@ -1968,7 +1817,7 @@ class DynamoDB:
                 'direct_registration_count': 0,
                 'all_time_early_registration_count': 0,
                 'all_time_direct_registration_count': 0,
-                'is_junior_high': is_junior_high,
+                'is_junior_high': point_multiplier > 1.0,
                 'is_reset': False,
                 'days_until_reset': None,
                 'manual_points': manual_points,
@@ -2004,8 +1853,7 @@ class DynamoDB:
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
 
-        # 連続ポイント
-        from datetime import datetime
+        # 連続ポイント        
         today = datetime.now(JST).date()
 
         if all_schedules is None:
@@ -2116,10 +1964,11 @@ class DynamoDB:
             'current_streak_count': current_streak_count,
             'cumulative_count': cumulative_count,
             'monthly_bonuses': monthly_bonuses,
-            'is_junior_high': is_junior_high,
+            'is_junior_high': point_multiplier > 1.0,
             'is_reset': is_reset,
             'days_until_reset': days_until_reset,
             'manual_points': manual_points,
+            'point_multiplier': point_multiplier,
         }
         
     def calc_total_points_spent(self, user_id: str, since: str | None = None) -> int:
@@ -2170,7 +2019,7 @@ class DynamoDB:
         """ユーザーのポイントを失効させる"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': True}
             )
@@ -2184,7 +2033,7 @@ class DynamoDB:
         """ユーザーのポイント失効を解除"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': False}
             )

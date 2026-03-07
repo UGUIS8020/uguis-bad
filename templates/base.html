@@ -86,6 +86,8 @@
 
     <!-- 追加のメタタグ（ページ固有の設定） -->
     {% block extra_meta %}{% endblock %}
+
+    <meta name="csrf-token" content="{{ csrf_token() }}">
       
 </head>
 
@@ -271,17 +273,18 @@ body {
 
           <li class="nav-item ms-2">
             <a class="nav-link fw-bold text-warning d-flex align-items-center fs-6"
-            href="{{ url_for('users.user_profile', user_id=current_user.id) }}">
-            <span class="avatar-ig" style="--size:35px;--ring:3px;--gap:2px;">
+              {# participant ではなく current_user の ID を使うように修正 #}
+              href="{{ url_for('users.user_profile', user_id=current_user.user_id or current_user.id) }}">
+              <span class="avatar-ig" style="--size:35px;--ring:3px;--gap:2px;">
                 <img
-                src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-                alt="プロフィール画像"
-                loading="lazy" decoding="async"
-                onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-            </span>
-            <span class="ms-1 fs-6">{{ current_user.display_name | truncate(10) }}</span>
+                  src="{{ current_user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                  alt="プロフィール画像"
+                  loading="lazy" decoding="async"
+                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+              </span>
+              <span class="ms-1 fs-6">{{ (current_user.display_name or current_user.user_name or "ユーザー") | truncate(10) }}</span>
             </a>
-            </li>
+          </li>
         {% else %}
           <li class="nav-item ms-4">
             <a class="nav-link" href="{{ url_for('login') }}">ログイン</a>
@@ -292,79 +295,82 @@ body {
   </nav>
 </footer>
   
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.navbar').forEach(function (navbar) {
-        const toggler = navbar.querySelector('.navbar-toggler');
-        if (!toggler) return;
+<!-- 1) alert を閉じる（これはそのままでOK） -->
+<script>
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest('[data-bs-dismiss="alert"]');
+  if (!btn) return;
 
-        const targetSelector = toggler.getAttribute('data-bs-target') || ('#' + (toggler.getAttribute('aria-controls') || ''));
-        const menu = targetSelector ? document.querySelector(targetSelector) : null;
-        if (!menu) return;
+  const alertEl = btn.closest('.alert');
+  if (!alertEl) return;
 
-        const MQ_WIDTH = 992;
-        const mq = window.matchMedia('(min-width: ' + MQ_WIDTH + 'px)');
+  // 二重実行防止
+  if (alertEl.dataset.dismissing === '1') return;
+  alertEl.dataset.dismissing = '1';
 
-        function syncByWidth(e) {
-        if (e.matches) {
-            menu.classList.add('show');            // デスクトップ：常時展開
-            toggler.setAttribute('aria-expanded', 'true');
-        } else {
-            menu.classList.remove('show');         // モバイル：閉
-            toggler.setAttribute('aria-expanded', 'false');
-        }
-        }
-        (mq.addEventListener || mq.addListener).call(mq, 'change', syncByWidth);
-        syncByWidth(mq);
+  e.preventDefault();
+  e.stopPropagation();
 
-        toggler.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        const isOpen = menu.classList.toggle('show');
-        toggler.setAttribute('aria-expanded', String(isOpen));
-        });
+  alertEl.classList.remove('show');
 
-        // モバイル時：リンククリックで閉じる
-        menu.addEventListener('click', function (e) {
-        if (window.innerWidth >= MQ_WIDTH) return;
-        if (e.target.closest('.nav-link')) {
-            menu.classList.remove('show');
-            toggler.setAttribute('aria-expanded', 'false');
-        }
-        });
+  const style = window.getComputedStyle(alertEl);
+  const dur = parseFloat(style.transitionDuration) || 0;
+  const delay = parseFloat(style.transitionDelay) || 0;
+  const ms = (dur + delay) * 1000;
 
-        // モバイル時：外側クリックで閉じる（このナビの外のみ）
-        document.addEventListener('click', function (e) {
-        if (window.innerWidth >= MQ_WIDTH) return;
-        const insideThisNavbar = e.target.closest('.navbar') === navbar;
-        if (!insideThisNavbar && menu.classList.contains('show')) {
-            menu.classList.remove('show');
-            toggler.setAttribute('aria-expanded', 'false');
-        }
-        });
+  const removeNow = () => {
+    if (alertEl && alertEl.parentNode) alertEl.parentNode.removeChild(alertEl);
+  };
 
-        // モバイル時：Escキーで閉じる
-        document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && window.innerWidth < MQ_WIDTH && menu.classList.contains('show')) {
-            menu.classList.remove('show');
-            toggler.setAttribute('aria-expanded', 'false');
-        }
-        });
+  if (ms > 0) {
+    alertEl.addEventListener('transitionend', (ev) => {
+      if (ev.target !== alertEl) return;
+      removeNow();
+    }, { once: true });
+
+    setTimeout(removeNow, ms + 50);
+  } else {
+    removeNow();
+  }
+});
+</script>
+
+<!-- 2) navbar：Bootstrap Collapse に統一して「閉じやすく」する -->
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const nav = document.getElementById("navbarNav");           // collapse 対象
+  const toggler = document.querySelector(".navbar-toggler"); // 三本線ボタン
+  if (!nav || !toggler || !window.bootstrap) return;
+
+  const collapse = bootstrap.Collapse.getOrCreateInstance(nav, { toggle: false });
+  const MQ_WIDTH = 992;
+
+  // モバイル：リンク押下で閉じる
+  nav.querySelectorAll("a.nav-link").forEach(a => {
+    a.addEventListener("click", () => {
+      if (window.innerWidth < MQ_WIDTH && nav.classList.contains("show")) {
+        collapse.hide();
+      }
     });
-    });
-    </script>
-    <script>
-    document.addEventListener('click', function(e){
-    const btn = e.target.closest('[data-bs-dismiss="alert"]');
-    if (!btn) return;
-    const alert = btn.closest('.alert');
-    if (alert) {
-        alert.classList.remove('show'); // フェード用クラスを外す（任意）
-        alert.addEventListener('transitionend', () => alert.remove(), {once:true});
-        // フェードが無い場合は即 remove でも可
-        if (getComputedStyle(alert).transitionDuration === '0s') alert.remove();
+  });
+
+  // モバイル：外側クリックで閉じる
+  document.addEventListener("click", (e) => {
+    if (window.innerWidth >= MQ_WIDTH) return;
+    const clickedInside = nav.contains(e.target) || toggler.contains(e.target);
+    if (!clickedInside && nav.classList.contains("show")) {
+      collapse.hide();
     }
-    });
-    </script>
+  });
+
+  // モバイル：Escで閉じる
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && window.innerWidth < MQ_WIDTH && nav.classList.contains("show")) {
+      collapse.hide();
+    }
+  });
+});
+</script>
 
 </body>
 </html>

@@ -26,7 +26,7 @@ def show_timeline():
                 try:
                     post_user_id = post.get('user_id')
 
-                    # ✅ 編集可否（本人だけ true）
+                    # 編集可否（本人だけ true）
                     post['can_edit'] = bool(viewer_id and post_user_id and viewer_id == post_user_id)
 
                     if post_user_id:
@@ -45,13 +45,13 @@ def show_timeline():
                     post.setdefault('replies', [])
                     post.setdefault('replies_count', 0)
 
-                    # ✅ 管理者判定（属性名は必要なら後で合わせます）
+                    # 管理者判定（属性名は必要なら後で合わせます）
                     is_admin = bool(
                         getattr(current_user, "administrator", False)
                         or getattr(current_user, "is_admin", False)
                     )
 
-                    # ✅ 返信ごとの削除可否（返信者本人 or 管理者）
+                    # 返信ごとの削除可否（返信者本人 or 管理者）
                     for r in post.get("replies", []):
                         r_user_id = (r.get("user_id") or "").strip()
                         r["can_delete"] = bool(viewer_id and (viewer_id == r_user_id or is_admin))
@@ -68,7 +68,7 @@ def show_timeline():
                     post['replies'] = []
                     post['replies_count'] = 0
                     post['is_liked_by_user'] = False
-                    post['can_edit'] = False  # ✅ 念のため
+                    post['can_edit'] = False  # 念のため
 
             posts = sorted(posts, key=lambda x: x.get('updated_at', x.get('created_at', '')), reverse=True)
 

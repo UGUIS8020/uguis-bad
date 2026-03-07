@@ -139,7 +139,7 @@
 
 <!-- プロフィール画像（本人はクリックで編集ページへ） -->
 <div class="profile-avatar-container text-center">
-  {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+  {% if current_user.is_authenticated and current_user.id == plain_user_id %}
     <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}"
        class="profile-avatar-link" aria-label="プロフィール画像を変更">
       <span class="profile-avatar">
@@ -298,7 +298,7 @@
 
                 
                 <!-- 本人の場合：編集ボタン -->
-                {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+                {% if current_user.is_authenticated and current_user.id == plain_user_id %}
                 <div class="text-center">
                     <div class="profile-actions">
                         <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
@@ -324,7 +324,7 @@
             <p class="card-text mt-3 text-center">
           <strong class="d-block mb-2">戦闘力</strong>
 
-          {% set is_me = (current_user.is_authenticated and current_user.id == user['user#user_id']) %}
+          {% set is_me = (current_user.is_authenticated and current_user.id == plain_user_id) %}
 
           <span id="skill-badge-profile"
                 class="badge {% if skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge fs-4 fw-bold d-inline-block"
@@ -516,7 +516,7 @@
 </div>          
 
                 <!-- ▼ 2. うぐポイントで参加ボタン（行180付近） -->
-                {% if current_user.is_authenticated and current_user.id == user['user#user_id'] %}
+                {% if current_user.is_authenticated and current_user.id == plain_user_id %}
                 <div class="mt-3 text-center">
                     {# ポイント失効対応 #}
                     {% set display_points = 0 if user.get('points_disabled', False) else participation_points|default(0) %}
@@ -639,7 +639,7 @@
         <div style="grid-column: 1 / -1; text-align: center; padding: 4rem 1rem; color: #6c757d;">
             <i class="fas fa-camera" style="font-size: 4rem; opacity: 0.3; margin-bottom: 1rem;"></i>
             <p class="mb-0">まだ投稿がありません</p>
-            {% if current_user.is_authenticated and current_user.id == user.user_id %}
+            {% if current_user.is_authenticated and current_user.id == plain_user_id %}
             <a href="{{ url_for('post.create_post') }}" class="btn btn-primary mt-3">
                 <i class="fas fa-plus me-1"></i>最初の投稿を作成
             </a>
@@ -656,6 +656,8 @@
   </div>
   <div class="card-body">
     <form action="{{ url_for('users.add_point', user_id=user['user#user_id']) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      
       <div class="row g-3">
         <!-- ポイント数 -->
         <div class="col-md-4">
@@ -770,6 +772,7 @@
                         <!-- hidden で schedule_id / event_date を埋め込む -->
                         <input type="hidden" id="event-schedule-id" value="{{ s.schedule_id }}">
                         <input type="hidden" id="event-date" value="{{ s.date }}">
+                        <input type="hidden" id="csrf-token" value="{{ csrf_token() }}">
                     {% else %}
                         <div class="alert alert-secondary mb-0">
                         予約できる練習日は現在ありません。
@@ -786,7 +789,7 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
                 <button type="button" class="btn btn-success" id="confirmPointParticipation"
                         {% if not upcoming_schedules %}disabled{% endif %}>
-                <span id="confirm-button-text">600P</span>で参加する
+                <span id="confirm-button-text"></span>ポイントで参加する
                 </button>
             </div>
         </div>
@@ -848,11 +851,14 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>処理中...';
 
   try {
+    const csrfToken = document.getElementById('csrf-token').value;
     const response = await fetch('/uguu/point-participation', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json',
+                 'X-CSRFToken': csrfToken   
+       },
       body: JSON.stringify({
-        user_id: '{{ user["user#user_id"] }}',
+        user_id: '{{ plain_user_id }}',
         schedule_id: scheduleId,
         event_date: eventDate,
         points_cost: pointsCost
@@ -879,18 +885,6 @@ document.getElementById('confirmPointParticipation')?.addEventListener('click', 
   }
 });
 
-</script>
-
-<script>
-fetch("{{ url_for('users.point_participation') }}", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    user_id: "{{ current_user.id }}",
-    event_date: selectedDate, // "2025-11-03"
-    points_cost: 600
-  })
-});
 </script>
 
 {% endblock %}

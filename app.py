@@ -56,100 +56,116 @@ from utils.db import (
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
 from uguu.dynamo import DynamoDB
+from flask_wtf.csrf import CSRFProtect
 
-# DynamoDBインスタンスを作成（グローバルに1つ）
-uguu_db = DynamoDB()
-
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.WARNING)
-logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
 
-# Flask-Login用
 login_manager = LoginManager()
-
 cache = Cache()
+csrf = CSRFProtect()
+
 
 def create_app():
-    """アプリケーションの初期化と設定"""
-    try:
-        load_dotenv()
-        app = Flask(__name__)
+    """アプリケーションの初期化と設定（唯一の create_app）"""
+    load_dotenv()
+    app = Flask(__name__)
 
-        # --- 環境判定 ---
-        APP_ENV = os.getenv("APP_ENV", "development").lower()
-        IS_PROD = APP_ENV in ("production", "prod")
-        IS_LOCAL_HTTP = not IS_PROD  # ローカルはHTTP前提に
+    # --- 環境判定 ---
+    APP_ENV = os.getenv("APP_ENV", "development").lower()
+    IS_PROD = APP_ENV in ("production", "prod")
+    IS_LOCAL_HTTP = not IS_PROD
 
-        # --- Secret Key（本番は必須。未設定なら起動失敗にする） ---
-        secret_key = os.getenv("SECRET_KEY")
-        if IS_PROD and not secret_key:
-            raise RuntimeError("SECRET_KEY is required in production")
-        app.config["SECRET_KEY"] = secret_key or "dev-only-insecure-key"  # 開発用の固定キー
+    # --- Secret Key ---
+    secret_key = os.getenv("SECRET_KEY")
+    if IS_PROD and not secret_key:
+        raise RuntimeError("SECRET_KEY is required in production")
+    app.config["SECRET_KEY"] = secret_key or "dev-only-insecure-key"
 
-        # --- セッション設定（環境で切り替え） ---
-        app.config.update(
-            PERMANENT_SESSION_LIFETIME=timedelta(days=30),
-            SESSION_PERMANENT=True,
-            # Flask-Session を使わないなら SESSION_TYPE は不要。使うなら 'filesystem' と Session(app) を有効化。
-            # SESSION_TYPE='filesystem',
-            SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,   # ← ローカルHTTPでは False、本番HTTPSで True
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE="Lax",             # サブドメイン跨ぎや外部POSTが必要なら 'None' + Secure=True
-            # 必要に応じてサブドメイン運用時:
-            # SESSION_COOKIE_DOMAIN=".shibuya8020.com" if IS_PROD else None,
-        )
+    # --- セッション設定 ---
+    app.config.update(
+        PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+        SESSION_PERMANENT=True,
+        SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+    )
 
-        # --- Flask-Session を使う場合（任意） ---
-        # from flask_session import Session
-        # Session(app)
+    # --- Cache ---
+    app.config["CACHE_TYPE"] = "SimpleCache"
+    app.config["CACHE_DEFAULT_TIMEOUT"] = 600
+    app.config["CACHE_THRESHOLD"] = 900
+    app.config["CACHE_KEY_PREFIX"] = "uguis_"
+    cache.init_app(app)
 
-        # --- Cache 設定 ---
-        app.config['CACHE_TYPE'] = 'SimpleCache'
-        app.config['CACHE_DEFAULT_TIMEOUT'] = 600
-        app.config['CACHE_THRESHOLD'] = 900
-        app.config['CACHE_KEY_PREFIX'] = 'uguis_'
-        cache.init_app(app)
+    # --- CSRF（★ここが今回の核心） ---
+    csrf.init_app(app)
 
-        # --- AWS 認証 ---
-        aws_credentials = {
-            'aws_access_key_id': os.getenv("AWS_ACCESS_KEY_ID"),
-            'aws_secret_access_key': os.getenv("AWS_SECRET_ACCESS_KEY"),
-            'region_name': os.getenv("AWS_REGION", "ap-northeast-1"),
-        }
-        required_env_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET", "TABLE_NAME_USER", "TABLE_NAME_SCHEDULE"]
-        missing = [v for v in required_env_vars if not os.getenv(v)]
-        if IS_PROD and missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    app.config["TABLE_NAME_USER"] = os.getenv("TABLE_NAME_USER")
+    app.config["TABLE_NAME_SCHEDULE"] = os.getenv("TABLE_NAME_SCHEDULE")
 
-        app.config["S3_BUCKET"] = os.getenv("S3_BUCKET", "default-bucket-name")
-        app.config["AWS_REGION"] = os.getenv("AWS_REGION", "ap-northeast-1")
-        app.config['S3_LOCATION'] = f"https://{app.config['S3_BUCKET']}.s3.{app.config['AWS_REGION']}.amazonaws.com/"
+    # --- AWS ---
+    aws_credentials = {
+        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+        "region_name": os.getenv("AWS_REGION", "ap-northeast-1"),
+    }
+    required_env_vars = [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "S3_BUCKET",
+        "TABLE_NAME_USER",
+        "TABLE_NAME_SCHEDULE",
+    ]
+    missing = [v for v in required_env_vars if not os.getenv(v)]
+    if IS_PROD and missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-        app.s3 = boto3.client('s3', **aws_credentials)
-        app.dynamodb = boto3.resource('dynamodb', **aws_credentials)
-        app.table_name = os.getenv("TABLE_NAME_USER")
-        app.table_name_users = os.getenv("TABLE_NAME_USER")
-        app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
-        app.table = app.dynamodb.Table(app.table_name)
-        app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
-        app.bad_table_name = os.getenv("BAD_TABLE_NAME", "bad_items")
-        app.bad_table = app.dynamodb.Table(app.bad_table_name)
+    app.config["S3_BUCKET"] = os.getenv("S3_BUCKET", "default-bucket-name")
+    app.config["AWS_REGION"] = os.getenv("AWS_REGION", "ap-northeast-1")
+    app.config["S3_LOCATION"] = f"https://{app.config['S3_BUCKET']}.s3.{app.config['AWS_REGION']}.amazonaws.com/"
 
-        # --- Flask-Login ---
-        login_manager.init_app(app)
-        login_manager.session_protection = "strong"
-        # ブループリント使用時は 'auth.login' など正しい endpoint 名に直す
-        login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "auth.login")
-        login_manager.login_message = 'このページにアクセスするにはログインが必要です。'
+    app.s3 = boto3.client("s3", **aws_credentials)
+    app.dynamodb = boto3.resource("dynamodb", **aws_credentials)
 
-        return app
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {str(e)}")
-        raise
+    app.table_name_users = os.getenv("TABLE_NAME_USER")
+    app.table_name_schedule = os.getenv("TABLE_NAME_SCHEDULE")
 
-# アプリケーションの初期化
+    app.table_name = app.table_name_users
+
+    app.table = app.dynamodb.Table(app.table_name_users)
+    app.table_schedule = app.dynamodb.Table(app.table_name_schedule)
+
+    app.bad_table_name = os.getenv("BAD_TABLE_NAME", "bad_items")
+    app.bad_table = app.dynamodb.Table(app.bad_table_name)
+
+    # --- Flask-Login ---
+    login_manager.init_app(app)
+    login_manager.session_protection = "strong"
+    login_manager.login_view = os.getenv("LOGIN_VIEW_ENDPOINT", "login")
+    login_manager.login_message = "このページにアクセスするにはログインが必要です。"
+
+    app.uguu_db = DynamoDB()
+
+    log_level = logging.INFO 
+    
+    logging.basicConfig(
+        level=log_level,  # 変数を使って INFO (または logging.INFO) に固定
+        format='[%(levelname)s] %(name)s: %(message)s',
+        force=True
+    )
+    
+    app.logger.setLevel(log_level)   
+
+    return app
+
 app = create_app()
+
+from flask_wtf.csrf import CSRFError
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    current_app.logger.error(f"[CSRFError] {e.description}")
+    return e.description, 400
 
 def tokyo_time():
     return datetime.now(JST)
@@ -157,39 +173,29 @@ def tokyo_time():
 
 @login_manager.user_loader
 def load_user(user_id):
-    # デバッグログを削除
-    # app.logger.debug(f"Loading user with ID: {user_id}")
-
     if not user_id:
-        # 警告ログは残す（重要な警告なので）
-        app.logger.warning("No user_id provided to load_user")
+        current_app.logger.warning("No user_id provided to load_user")
         return None
 
     try:
-        # DynamoDBリソースでテーブルを取得
-        table = app.dynamodb.Table(app.table_name)  # テーブル名を取得
-        response = table.get_item(
-            Key={
-                "user#user_id": user_id,   # パーティションキーをそのまま指定
-            }
-        )        
-
-        if 'Item' in response:
-            user_data = response['Item']
-            user = User.from_dynamodb_item(user_data)
-            # ユーザーデータのログ出力を削除（機密情報を含むため）
-            # app.logger.info(f"DynamoDB user data: {user_data}")
-            return user
-        else:
-            # このログも削除可能ですが、デバッグに役立つので残すか検討
-            app.logger.info(f"No user found for ID: {user_id}")
+        table_name = current_app.config.get("TABLE_NAME_USER")
+        if not table_name:
+            current_app.logger.error("TABLE_NAME_USER is not configured")
             return None
 
-    except Exception as e:
-        # エラーログは残す（問題診断に重要）
-        app.logger.error(f"Error loading user with ID: {user_id}: {str(e)}", exc_info=True)
-        return None
+        table = current_app.dynamodb.Table(table_name)
 
+        resp = table.get_item(Key={"user#user_id": user_id})
+        item = resp.get("Item")
+        if not item:
+            current_app.logger.info("No user found for ID: %s", user_id)
+            return None
+
+        return User.from_dynamodb_item(item)
+
+    except Exception as e:
+        current_app.logger.error("Error loading user %s: %s", user_id, e, exc_info=True)
+        return None
 
 
 class RegistrationForm(FlaskForm):
@@ -232,25 +238,22 @@ class RegistrationForm(FlaskForm):
 
     def validate_email(self, field):
         try:
-            # Flaskアプリケーションコンテキスト内のDynamoDBテーブル取得
-            table = current_app.dynamodb.Table(current_app.table_name)
-            current_app.logger.debug(f"Querying email-index for email: {field.data}")
+            table = current_app.table
+            email = (field.data or "").strip().lower()
 
             response = table.query(
-                IndexName='email-index',
-                KeyConditionExpression=Key('email').eq(field.data)
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            current_app.logger.debug(f"Query response: {response}")
 
-            if response.get('Items'):
-                raise ValidationError('入力されたメールアドレスは既に登録されています。')
+            if response.get("Items"):
+                raise ValidationError("入力されたメールアドレスは既に登録されています。")
 
         except ValidationError:
-            raise  # 明示的に通す
-
+            raise
         except Exception as e:
             current_app.logger.error(f"Error validating email: {str(e)}", exc_info=True)
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
                     
         
 class UpdateUserForm(FlaskForm):
@@ -311,33 +314,27 @@ class UpdateUserForm(FlaskForm):
             
 
     def validate_email(self, field):
-        # メールアドレスが変更されていない場合はバリデーションをスキップ
         if self.email_readonly or not field.data:
             return
 
         try:
-            # DynamoDBにクエリを投げて重複チェックを実行
+            email = (field.data or "").strip().lower()
+
             response = self.table.query(
-                IndexName='email-index',
-                KeyConditionExpression='email = :email',
-                ExpressionAttributeValues={
-                    ':email': field.data
-                }
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
 
-            app.logger.debug(f"Query response: {response}")
+            for item in response.get("Items", []):
+                user_id = item.get("user#user_id") or item.get("user_id")
+                if user_id and user_id != self.id:
+                    raise ValidationError("このメールアドレスは既に使用されています。")
 
-            if response.get('Items'):
-                for item in response['Items']:
-                    user_id = item.get('user#user_id') or item.get('user_id')
-                    if user_id and user_id != self.id:
-                        raise ValidationError('このメールアドレスは既に使用されています。他のメールアドレスをお試しください。')
-        except ClientError as e:
-            app.logger.error(f"Error querying DynamoDB: {e}")
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。管理者にお問い合わせください。')
+        except ValidationError:
+            raise
         except Exception as e:
-            app.logger.error(f"Unexpected error querying DynamoDB: {e}")
-            raise ValidationError('予期しないエラーが発生しました。管理者にお問い合わせください。')
+            current_app.logger.error(f"Unexpected error querying DynamoDB: {e}", exc_info=True)
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
 
 
 class TempRegistrationForm(FlaskForm):
@@ -403,13 +400,22 @@ class TempRegistrationForm(FlaskForm):
         ]
     )
     
-     # メールアドレス
+    # メールアドレス
     email = StringField(
         'メールアドレス', 
         validators=[
             DataRequired(message='メールアドレスを入力してください'),
             Email(message='正しいメールアドレスを入力してください')
-        ]
+        ],
+        # HTML属性をPython側で一括管理
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email",
+            "autocapitalize": "none",
+            "autocorrect": "off",
+            "spellcheck": "false"
+        }
     )
 
     # メールアドレス確認
@@ -419,7 +425,16 @@ class TempRegistrationForm(FlaskForm):
             DataRequired(message='確認用メールアドレスを入力してください'),
             Email(message='正しいメールアドレスを入力してください'),
             EqualTo('email', message='メールアドレスが一致しません')
-        ]
+        ],
+        # emailと同じ設定を適用（コピペの手間を減らすなら共通変数にしてもOK）
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email",
+            "autocapitalize": "none",
+            "autocorrect": "off",
+            "spellcheck": "false"
+        }
     )
     
     # パスワード
@@ -445,66 +460,79 @@ class TempRegistrationForm(FlaskForm):
 
     def validate_email(self, field):
         try:
-            # DynamoDB テーブル取得
-            table = app.dynamodb.Table(app.table_name)
-            current_app.logger.debug(f"Querying email-index for email: {field.data}")
+            table = current_app.table  # create_app() で app.table を作っている前提
+            email = (field.data or "").strip().lower()
 
-            # email-indexを使用してクエリ
+            current_app.logger.debug(f"Querying email-index for email: {email}")
+
             response = table.query(
-                IndexName='email-index',
-                KeyConditionExpression=Key('email').eq(field.data)  # 修正済み
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            current_app.logger.debug(f"Query response: {response}")
 
-            # 登録済みのメールアドレスが見つかった場合
-            if response.get('Items'):
-                raise ValidationError('このメールアドレスは既に使用されています。他のメールアドレスをお試しください。')
+            if response.get("Items"):
+                raise ValidationError("このメールアドレスは既に使用されています。他のメールアドレスをお試しください。")
 
-        except ValidationError as ve:
-            # ValidationErrorはそのままスロー
-            raise ve
-
+        except ValidationError:
+            raise
         except Exception as e:
-            # その他の例外をキャッチしてログに出力
-            current_app.logger.error(f"Error validating email: {str(e)}")
-            raise ValidationError('メールアドレスの確認中にエラーが発生しました。')
+            current_app.logger.error(f"Error validating email: {e}", exc_info=True)
+            raise ValidationError("メールアドレスの確認中にエラーが発生しました。")
 
 
 class LoginForm(FlaskForm):
-    email = StringField('メールアドレス', validators=[DataRequired(message='メールアドレスを入力してください'), Email(message='正しいメールアドレスの形式で入力してください')])
-    password = PasswordField('パスワード', validators=[DataRequired(message='パスワードを入力してください')])
-    remember = BooleanField('ログイン状態を保持する')    
+    email = StringField(
+        'メールアドレス',
+        validators=[
+            DataRequired(message='メールアドレスを入力してください'),
+            Email(message='正しいメールアドレスの形式で入力してください')
+        ],
+        # ↓↓↓ 入力モードと自動補完の設定を追加 ↓↓↓
+        render_kw={
+            "type": "email",
+            "inputmode": "email",
+            "autocomplete": "email"
+        }
+    )
+    password = PasswordField(
+        'パスワード', 
+        validators=[DataRequired(message='パスワードを入力してください')],
+        # ↓↓↓ 半角英数字入力を促し、マネージャーとの連携を強化 ↓↓↓
+        render_kw={
+            "inputmode": "verbatim",
+            "autocomplete": "current-password"
+        }
+    )
+    remember = BooleanField('ログイン状態を保持する')
     submit = SubmitField('ログイン')
 
     def __init__(self, *args, **kwargs):
         super(LoginForm, self).__init__(*args, **kwargs)
-        self.user = None  # self.userを初期化
+        self.user = None
 
     def validate_email(self, field):
         """メールアドレスの存在確認"""
         try:
-            # メールアドレスでユーザーを検索
-            response = app.table.query(
-                IndexName='email-index',
-                KeyConditionExpression='email = :email',
-                ExpressionAttributeValues={
-                    ':email': field.data
-                }
+            table = current_app.table  # create_appで app.table を作ってる前提
+            email = (field.data or "").strip().lower()
+
+            response = table.query(
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email)
             )
-            
-            items = response.get('Items', [])
+
+            items = response.get("Items", [])
             if not items:
-                raise ValidationError('このメールアドレスは登録されていません')            
-            
-            # ユーザー情報を保存（パスワード検証で使用）
+                raise ValidationError("このメールアドレスは登録されていません")
+
             self.user = items[0]
-            # ユーザーをロード
-            app.logger.debug(f"User found for email: {field.data}")       
-           
-        
+            current_app.logger.debug(f"User found for email: {email}")
+
+        except ValidationError:
+            raise
         except Exception as e:
-            app.logger.error(f"Login error: {e}")
-            raise ValidationError('ログイン処理中にエラーが発生しました')
+            current_app.logger.error(f"Login error: {e}", exc_info=True)
+            raise ValidationError("ログイン処理中にエラーが発生しました")
 
     def validate_password(self, field):
         """パスワードの検証"""
@@ -562,9 +590,12 @@ class User(UserMixin):
     def from_dynamodb_item(item):
         def get_value(field, default=None):
             return item.get(field, default)
+        
+        # user# プレフィックスを除去してUIDだけにする
+        user_id = get_value('user#user_id') or ""
 
         return User(
-            user_id=get_value('user#user_id'),
+            user_id=user_id,
             display_name=get_value('display_name'),
             user_name=get_value('user_name'),
             furigana=get_value('furigana'),
@@ -666,7 +697,7 @@ class User(UserMixin):
 #                         else:
 #                             skill_score = None
 
-#                         # ✅ 参加回数（practice_count）を取得
+#                         # 参加回数（practice_count）を取得
 #                         raw_practice = user.get('practice_count')
 #                         join_count = int(raw_practice) if isinstance(raw_practice, (Decimal, int, float)) else None
 
@@ -686,11 +717,11 @@ class User(UserMixin):
 
 #     return participants_info
 
-@cache.memoize(timeout=600)
+
 def get_participants_info(schedule):
     participants_info = []
     try:
-        table_name = current_app.table_name
+        table_name = current_app.config.get("TABLE_NAME_USER")
         dynamodb = current_app.dynamodb
 
         raw = schedule.get("participants") or []
@@ -708,16 +739,16 @@ def get_participants_info(schedule):
         if not ids:
             return participants_info
 
-        request = {
+        batch_request = {
             table_name: {
-                "Keys": [{"user#user_id": uid} for uid in ids],
+                "Keys": [{"user#user_id": id} for id in ids],
                 "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
-                "ExpressionAttributeNames": {"#uid": "user#user_id"},
+                "ExpressionAttributeNames": {"#uid": "user#user_id"}
             }
         }
 
         responses = []
-        unprocessed = request
+        unprocessed = batch_request
 
         client = dynamodb.meta.client if hasattr(dynamodb, "meta") else dynamodb
 
@@ -731,8 +762,10 @@ def get_participants_info(schedule):
 
         by_id = {it["user#user_id"]: it for it in responses}
 
+        # 修正後：1つのループに統合
         for uid in ids:
-            user = by_id.get(uid)
+            pk = uid
+            user = by_id.get(pk)
             if user:
                 raw_score = user.get("skill_score")
                 skill_score = int(raw_score) if isinstance(raw_score, (int, float, Decimal)) else None
@@ -985,318 +1018,309 @@ def get_schedules():
 #         )
 
 
-@app.route("/", methods=['GET'])
-@app.route("/index", methods=['GET'])
+@app.route("/", methods=["GET"])
+@app.route("/index", methods=["GET"])
 def index():
+    start_time = time.time()
+
     try:
-        start_time = time.time()
-        
         schedules = get_schedules_with_formatting()
-        user_table = current_app.dynamodb.Table(app.table_name)
-        
-        # ★ 全スケジュールから参加者IDを集める
+
+        table_name = (
+            current_app.config.get("TABLE_NAME_USER")
+            or getattr(current_app, "table_name", None)
+        )
+        if not table_name:
+            raise RuntimeError("TABLE_NAME_USER is not configured")
+
+        # =========================================================
+        # 1) 全スケジュールから user_id(UUID) を集める
+        # =========================================================
         all_user_ids = set()
+
+        def _extract_uid(item):
+            # DynamoDB low-level形式: {"S": "..."}
+            if isinstance(item, dict) and "S" in item:
+                return item.get("S")
+            # dict形式: {"user_id": "..."}
+            if isinstance(item, dict) and "user_id" in item:
+                return item.get("user_id")
+            # 文字列: "uuid..."
+            if isinstance(item, str):
+                return item
+            return None
+
         for schedule in schedules:
-            # 参加者
-            for item in schedule.get("participants", []):
-                if isinstance(item, dict) and "S" in item:
-                    all_user_ids.add(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    all_user_ids.add(item["user_id"])
-                elif isinstance(item, str):
-                    all_user_ids.add(item)
-            
-            # たら参加者
-            for item in schedule.get("tara_participants", []):
-                if isinstance(item, dict) and "S" in item:
-                    all_user_ids.add(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    all_user_ids.add(item["user_id"])
-                elif isinstance(item, str):
-                    all_user_ids.add(item)
-        
-        logger.info(f"[index] 取得するユーザー数: {len(all_user_ids)}")
-        
-        # ★ バッチで一括取得（最大100件ずつ）
+            for item in schedule.get("participants", []) or []:
+                uid = _extract_uid(item)
+                if uid:
+                    all_user_ids.add(uid)
+
+            for item in schedule.get("tara_participants", []) or []:
+                uid = _extract_uid(item)
+                if uid:
+                    all_user_ids.add(uid)
+
+        current_app.logger.info("[index] 取得するユーザー数: %d", len(all_user_ids))
+
+        # =========================================================
+        # 2) DynamoDB BatchGet（100件ずつ）
+        #    - user# は使わない（UUIDのみ）
+        #    - UnprocessedKeys をリトライして取りこぼし防止
+        # =========================================================
         user_cache = {}
         user_ids_list = list(all_user_ids)
+
+        # current_app.dynamodb が resource / client どちらでも動くようにする
+        dynamo_client = getattr(current_app.dynamodb, "meta", None)
+        dynamo_client = dynamo_client.client if dynamo_client else current_app.dynamodb
+
         batch_count = 0
-        
         batch_start = time.time()
+
+        def _cache_user(user_item: dict):
+            pk = user_item.get("user#user_id")  # この属性名はそのまま（値はUUIDのみ）
+            if pk:
+                user_cache[pk] = user_item
+
         for i in range(0, len(user_ids_list), 100):
-            batch_ids = user_ids_list[i:i+100]
-            keys = [{"user#user_id": uid} for uid in batch_ids]
-            
-            try:
-                response = current_app.dynamodb.batch_get_item(
-                    RequestItems={
-                        app.table_name: {
-                            'Keys': keys
-                        }
-                    }
-                )
-                batch_count += 1
-                
-                for user in response.get('Responses', {}).get(app.table_name, []):
-                    user_id = user.get("user#user_id")
-                    if user_id:
-                        user_cache[user_id] = user
-                        
-            except Exception as e:
-                logger.error(f"バッチ取得エラー: {e}")
-        
+            batch_ids = user_ids_list[i:i + 100]
+            keys = [{"user#user_id": uid} for uid in batch_ids if uid]
+
+            request_items = {table_name: {"Keys": keys}}
+            tries = 0
+
+            while request_items and tries < 5:
+                tries += 1
+                try:
+                    resp = dynamo_client.batch_get_item(RequestItems=request_items)
+                    batch_count += 1
+
+                    for user_item in resp.get("Responses", {}).get(table_name, []):
+                        _cache_user(user_item)
+
+                    # 取りこぼしがある場合は再試行
+                    request_items = resp.get("UnprocessedKeys", {})
+                    if request_items:
+                        time.sleep(min(0.2 * tries, 1.0))
+
+                except Exception as e:
+                    current_app.logger.error("[index] バッチ取得エラー: %s", e, exc_info=True)
+                    break
+
         batch_time = time.time() - batch_start
-        logger.info(f"[index] DynamoDBバッチ取得: {batch_count}回, {batch_time:.3f}秒, キャッシュ件数: {len(user_cache)}")
-        
-        # ★ キャッシュから参加者情報を構築
+        current_app.logger.info(
+            "[index] DynamoDBバッチ取得: %d回, %.3f秒, キャッシュ件数: %d",
+            batch_count, batch_time, len(user_cache)
+        )
+
+        # =========================================================
+        # 3) キャッシュから participants_info を構築
+        # =========================================================
         process_start = time.time()
+
+        def _pick_profile_url(user: dict):
+            url = (
+                user.get("profile_image_url")
+                or user.get("profileImageUrl")
+                or user.get("large_image_url")
+                or ""
+            )
+            url = url.strip() if isinstance(url, str) else ""
+            return url if url and url.lower() != "none" else None
+
+        def _to_int(v, default=0):
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        def _get_user(uid: str):
+            return user_cache.get(uid)
+
         for schedule in schedules:
             # --- 参加者 ---
-            participants_info = []
-            raw_participants = schedule.get("participants", [])
             user_ids = []
-            
-            for item in raw_participants:
-                if isinstance(item, dict) and "S" in item:
-                    user_ids.append(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    user_ids.append(item["user_id"])
-                elif isinstance(item, str):
-                    user_ids.append(item)
-            
+            for item in schedule.get("participants", []) or []:
+                uid = _extract_uid(item)
+                if uid:
+                    user_ids.append(uid)
+
+            participants_info = []
             for uid in user_ids:
-                user = user_cache.get(uid)
+                user = _get_user(uid)
                 if not user:
                     continue
-                
-                url = (user.get("profile_image_url")
-                       or user.get("profileImageUrl")
-                       or user.get("large_image_url")
-                       or "")
-                url = url.strip() if isinstance(url, str) else None
-                
-                raw_practice = user.get("practice_count")
-                try:
-                    join_count = int(raw_practice) if raw_practice is not None else 0
-                except (ValueError, TypeError):
-                    join_count = 0
-                
+
                 participants_info.append({
-                    "user_id": user["user#user_id"],
+                    "user_id": user.get("user#user_id"),  # 値はUUID
                     "display_name": user.get("display_name", "不明"),
-                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
-                    "join_count": join_count,
-                })
-            
+                    "join_count": _to_int(user.get("practice_count"), 0),
+                })           
+
             participants_info.sort(
-                key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
+                key=lambda x: (
+                    not x.get("is_admin", False),
+                    (x.get("join_count") or 0),
+                    x.get("display_name", "")
+                )
             )
             schedule["participants_info"] = participants_info
-            
+            schedule["participants_count"] = len(participants_info)
+
             # --- たら参加者 ---
-            tara_participants_info = []
-            raw_tara = schedule.get("tara_participants", [])
             tara_ids = []
-            
-            for item in raw_tara:
-                if isinstance(item, dict) and "S" in item:
-                    tara_ids.append(item["S"])
-                elif isinstance(item, dict) and "user_id" in item:
-                    tara_ids.append(item["user_id"])
-                elif isinstance(item, str):
-                    tara_ids.append(item)
-            
+            for item in schedule.get("tara_participants", []) or []:
+                uid = _extract_uid(item)
+                if uid:
+                    tara_ids.append(uid)
+
+            tara_participants_info = []
             for uid in tara_ids:
-                user = user_cache.get(uid)
+                user = _get_user(uid)
                 if not user:
                     continue
-                
-                url = (user.get("profile_image_url")
-                       or user.get("profileImageUrl")
-                       or user.get("large_image_url")
-                       or "")
-                url = url.strip() if isinstance(url, str) else None
-                
+
                 tara_participants_info.append({
-                    "user_id": user["user#user_id"],
+                    "user_id": user.get("user#user_id"),
                     "display_name": user.get("display_name", "不明"),
-                    "profile_image_url": url if url and url.lower() != "none" else None,
+                    "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
                 })
-            
+
             tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
             schedule["tara_participants_info"] = tara_participants_info
             schedule["tara_participants"] = tara_ids
             schedule["tara_count"] = len(tara_ids)
-        
+
         process_time = time.time() - process_start
         total_time = time.time() - start_time
-        
-        logger.info(f"[index] 参加者情報処理: {process_time:.3f}秒")
-        logger.info(f"[index] 合計処理時間: {total_time:.3f}秒")
-        
-        image_files = [
-            'images/top001.jpg',
-            'images/top002.jpg',
-            'images/top003.jpg',
-            'images/top004.jpg',
-            'images/top005.jpg'
-        ]
+
+        current_app.logger.info("[index] 参加者情報処理: %.3f秒", process_time)
+        current_app.logger.info("[index] 合計処理時間: %.3f秒", total_time)
+
+        # =========================================================
+        # 4) ランダム背景画像
+        # =========================================================
+        image_files = [f"images/top{i:03d}.jpg" for i in range(1, 9)]
         selected_image = random.choice(image_files)
-        
+
         return render_template(
             "index.html",
             schedules=schedules,
             selected_image=selected_image,
-            canonical=url_for('index', _external=True)
+            canonical=url_for("index", _external=True),
         )
-        
+
     except Exception as e:
-        logger.error(f"[index] スケジュール取得エラー: {e}")
-        flash('スケジュールの取得中にエラーが発生しました', 'error')
+        current_app.logger.error("[index] エラー: %s", e, exc_info=True)
+        # 既存テンプレがあるならエラーページへ。なければ最低限 index に落とすなどでもOK
         return render_template(
             "index.html",
             schedules=[],
-            selected_image='images/default.jpg'
-        )
+            selected_image=None,
+            canonical=url_for("index", _external=True),
+        ), 500
     
     
+# =========================================================
+# schedule_koyomi 関数（BatchGet導入による高速化版）
+# =========================================================
 @app.route("/schedule_koyomi", methods=['GET'])
 @app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
 def schedule_koyomi(year=None, month=None):
     try:
-        # 年月が指定されていない場合は現在の年月を使用
         if year is None or month is None:
             today = date.today()
-            year = today.year
-            month = today.month
+            year, month = today.year, today.month
         
-        # 前月と翌月の計算
-        if month == 1:
-            prev_month = 12
-            prev_year = year - 1
-        else:
-            prev_month = month - 1
-            prev_year = year
+        # 前月・翌月の計算
+        prev_date = date(year, month, 1) - timedelta(days=1)
+        prev_year, prev_month = prev_date.year, prev_date.month
+        next_date = date(year, month, 28) + timedelta(days=5) # 翌月へ確実に飛ばす
+        next_year, next_month = next_date.year, next_date.month
         
-        if month == 12:
-            next_month = 1
-            next_year = year + 1
-        else:
-            next_month = month + 1
-            next_year = year
-        
-        # カレンダー情報の生成 - cal_module を使用 
         calendar.setfirstweekday(calendar.SUNDAY)       
         cal = calendar.monthcalendar(year, month)
         
-        # 軽量なスケジュール情報のみ取得
+        # スケジュール取得
         schedules = get_schedules_with_formatting_all()
+        table_name = current_app.config.get("TABLE_NAME_USER") or "bad-users"
 
-        # 参加者詳細情報の取得を追加
-        user_table = current_app.dynamodb.Table("bad-users")  # 適宜変更
+        # 1) 全参加者の user_id を抽出
+        all_uids = set()
+        for s in schedules:
+            for item in s.get("participants", []):
+                if isinstance(item, dict) and "S" in item: all_uids.add(item["S"])
+                elif isinstance(item, str): all_uids.add(item)
 
+        # 2) 参加者情報を一括取得 (BatchGet)
+        user_cache = {}
+        uid_list = list(all_uids)
+        for i in range(0, len(uid_list), 100):
+            batch = uid_list[i:i+100]
+            keys = [{"user#user_id": uid} for uid in batch]
+            res = current_app.dynamodb.batch_get_item(RequestItems={table_name: {"Keys": keys}})
+            for u in res.get("Responses", {}).get(table_name, []):
+                user_cache[u["user#user_id"]] = u
+
+        # 3) スケジュールに参加者情報を紐付け
         for schedule in schedules:
-            participants_info = []
-            raw_participants = schedule.get("participants", [])
-            user_ids = []
-
-            # [{"S": "uuid"}] 形式にも対応
-            for item in raw_participants:
-                if isinstance(item, dict) and "S" in item:
-                    user_ids.append(item["S"])
-                elif isinstance(item, str):
-                    user_ids.append(item)
-
-            for user_id in user_ids:
-                try:
-                    res = user_table.get_item(Key={"user#user_id": user_id})
-                    user = res.get("Item")
-                    if user:
-                        participants_info.append({
-                            "user_id": user["user#user_id"],
-                            "display_name": user.get("display_name", "不明")
-                        })
-                except Exception:
-                    # ログ出力を削除
-                    pass
-
-            schedule["participants_info"] = participants_info
+            p_info = []
+            raw_p = schedule.get("participants", [])
+            for item in raw_p:
+                uid = item["S"] if isinstance(item, dict) else item
+                user = user_cache.get(uid)
+                if user:
+                    p_info.append({
+                        "user_id": user["user#user_id"],
+                        "display_name": user.get("display_name", "不明")
+                    })
+            schedule["participants_info"] = p_info
         
-        # カレンダーデータの作成（簡易版）
+        # カレンダーデータ構築
         calendar_data = []
-        today_date = date.today()
-        
+        today_obj = date.today()
         for week in cal:
             week_data = []
             for day_num in week:
                 if day_num == 0:
-                    # 月外の日
-                    week_data.append({
-                        'day': 0,
-                        'is_today': False,
-                        'is_other_month': True,
-                        'schedules': []
-                    })
+                    week_data.append({'day': 0, 'is_other_month': True, 'schedules': []})
                 else:
-                    # その月の日
-                    day_date = date(year, month, day_num)
-                    date_str = day_date.strftime('%Y-%m-%d')
-                    
-                    # その日のスケジュール
-                    day_schedules = [s for s in schedules if s.get("date") == date_str]
-                    
+                    d_obj = date(year, month, day_num)
+                    d_str = d_obj.strftime('%Y-%m-%d')
+                    day_schedules = [s for s in schedules if s.get("date") == d_str]
                     week_data.append({
                         'day': day_num,
-                        'is_today': day_date == today_date,
+                        'is_today': d_obj == today_obj,
                         'is_other_month': False,
                         'schedules': day_schedules,
-                        'has_schedule': len(day_schedules) > 0,
-                        'has_full_schedule': any(s.get("participants_count", 0) >= s.get("max_participants", 0) for s in day_schedules)
+                        'has_schedule': len(day_schedules) > 0
                     })
             calendar_data.append(week_data)
 
-        image_files = [
-            'images/top001.jpg',
-            'images/top002.jpg',
-            'images/top003.jpg',
-            'images/top004.jpg',
-            'images/top005.jpg'
-        ]
+        month_name = f"{month}月"
+        selected_image = random.choice([f"images/top{i:03d}.jpg" for i in range(1, 6)])
 
-        selected_image = random.choice(image_files)
-
-        # 月の日本語表記
-        month_name = ["１月", "２月", "３月", "４月", "５月", "６月", 
-                     "７月", "８月", "９月", "１０月", "１１月", "１２月"][month-1]
-
-        # テンプレート名は schedule_koyomi.html
         return render_template("schedule_koyomi.html", 
                                schedules=schedules,
                                selected_image=selected_image,
-                               canonical=url_for('schedule_koyomi', _external=True),
-                               year=year,
-                               month=month,
+                               year=year, month=month,
                                month_name=month_name,
-                               prev_year=prev_year,
-                               prev_month=prev_month,
-                               next_year=next_year,
-                               next_month=next_month,
+                               prev_year=prev_year, prev_month=prev_month,
+                               next_year=next_year, next_month=next_month,
                                calendar_data=calendar_data)
         
     except Exception as e:
-        # 重要なエラーのみログ出力を残す
-        logger.error(f"[schedule_koyomi] スケジュール取得エラー: {e}")
-        flash('スケジュールの取得中にエラーが発生しました', 'error')
-        return render_template("schedule_koyomi.html", 
-                               schedules=[], 
-                               selected_image='images/default.jpg',
-                               year=date.today().year,
-                               month=date.today().month)
+        current_app.logger.error(f"[schedule_koyomi] エラー: {e}", exc_info=True)
+        flash('カレンダーの取得中にエラーが発生しました', 'error')
+        return render_template("schedule_koyomi.html", schedules=[], year=year, month=month)
     
     
 @app.route("/day_of_participants", methods=["GET"])
+@login_required
 def day_of_participants():
     try:
         date = request.args.get("date")
@@ -1471,11 +1495,14 @@ def update_last_participation(users_table, user_id: str, event_date: str):
     bad-users の最終参加日を更新（registered のときに呼ぶ）
     user_id: "uuid..."
     event_date: "YYYY-MM-DD"
+    
+    ★変更点: recent_sk を固定化（日付を含めない）
+    → 1ユーザー1GSIエントリになり、重複が発生しない
     """
     now_utc_iso = datetime.now(timezone.utc).isoformat()
 
     users_table.update_item(
-        Key={"user#user_id": f"user#{user_id}"},  # ★ここが重要（画像で確定）
+        Key={"user#user_id": user_id},  # user#プレフィックスなし
         UpdateExpression=(
             "SET last_participation_date = :d, "
             "recent_pk = :pk, "
@@ -1485,7 +1512,7 @@ def update_last_participation(users_table, user_id: str, event_date: str):
         ExpressionAttributeValues={
             ":d": event_date,
             ":pk": "recent",            
-            ":sk": f"1#{event_date}#{user_id}",
+            ":sk": user_id,
             ":u": now_utc_iso,
         },
     )
@@ -1594,17 +1621,30 @@ def previously_joined(schedule_id, user_id):
     )
     return bool(response.get('Items'))
 
+def _user_pk(user_id: str) -> dict:
+    return {"user#user_id": user_id}
+
 def increment_practice_count(user_id):
     user_table = app.dynamodb.Table(app.table_name_users)
 
-    user_table.update_item(
-        Key={'user#user_id': user_id},
-        UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
-        ExpressionAttributeValues={
-            ':start': Decimal(0),
-            ':inc': Decimal(1)
-        }
-    )
+    try:
+        user_table.update_item(
+            Key=_user_pk(user_id),
+            UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
+            ExpressionAttributeValues={
+                ":start": Decimal(0),
+                ":inc": Decimal(1),
+            },
+            ConditionExpression="attribute_exists(#pk)",
+            ExpressionAttributeNames={"#pk": "user#user_id"},
+        )
+    except ClientError as e:
+        # キー間違い/ユーザー未作成ならここに来る
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            app.logger.warning("[increment_practice_count] user not found: %s", user_id)
+            return False
+        raise
+    return True
 
 @app.route('/participants/by_date/<schedule_id>')
 @login_required
@@ -1687,6 +1727,8 @@ def signup():
         "followers_count": 0,
         "following_count": 0,
         "posts_count": 0,
+        "skill_score": Decimal("50.0"),  # 現在のプレイヤー平均に合わせる
+         "skill_sigma": Decimal("8.333"),  # TrueSkillのデフォルト
     }
 
     try:
@@ -1739,16 +1781,17 @@ def signup():
 
 @app.route('/temp_register', methods=['GET', 'POST'])
 def temp_register():
-    form = TempRegistrationForm()    
+    form = TempRegistrationForm()
 
     if form.validate_on_submit():
-        skill_score = int(request.form.get('skill_score', 0))
+        skill_score = int(request.form.get('skill_score') or 0)
+
         try:
             current_time = datetime.now(timezone.utc).isoformat()
             hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
             user_id = str(uuid.uuid4())
 
-            table = app.dynamodb.Table(app.table_name)
+            table = current_app.table   
 
             temp_data = {
                 "user#user_id": user_id,
@@ -1756,28 +1799,30 @@ def temp_register():
                 "user_name": form.user_name.data,
                 "gender": form.gender.data,
                 "badminton_experience": form.badminton_experience.data,
-                "email": form.email.data.lower(),
+                "email": form.email.data.lower().strip(),
                 "password": hashed_password,
                 "phone": form.phone.data,
                 "organization": "仮登録",
                 "created_at": current_time,
                 "administrator": False,
-                "skill_score": skill_score,
+
+                # DynamoDBのNumberはDecimalが安全
+                "skill_score": Decimal(str(skill_score)),
+                "skill_sigma": Decimal("8.333"),
+
                 "date_of_birth": form.date_of_birth.data.isoformat()
             }
 
-            # DynamoDBに保存
             table.put_item(Item=temp_data)
 
-            # 仮登録成功後、ログインページにリダイレクト
             flash("仮登録が完了しました。ログインしてください。", "success")
             return redirect(url_for('login'))
 
         except Exception as e:
-            logger.error(f"DynamoDBへの登録中にエラーが発生しました: {e}", exc_info=True)
+            current_app.logger.error(f"DynamoDBへの登録中にエラーが発生しました: {e}", exc_info=True)
             flash(f"登録中にエラーが発生しました: {str(e)}", 'danger')
 
-    return render_template('temp_register.html', form=form)       
+    return render_template('temp_register.html', form=form) 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -1874,67 +1919,6 @@ def is_safe_url(target):
 def logout():
     logout_user()
     return redirect("/")
-
-
-# @app.route("/user_maintenance", methods=["GET", "POST"])
-# @login_required
-# def user_maintenance():
-#     try:
-#         # ソートパラメータを取得
-#         sort_by = request.args.get('sort_by', 'created_at')  # デフォルトは作成日
-#         order = request.args.get('order', 'desc')  # デフォルトは降順
-        
-#         # テーブルからすべてのユーザーを取得
-#         response = app.table.scan()
-        
-#         # ユーザーデータを処理
-#         users = response.get('Items', [])        
-#         for user in users:
-#             if 'user#user_id' in user:
-#                 user['user_id'] = user.pop('user#user_id').replace('user#', '')
-            
-#             # ポイント情報を取得
-#             try:
-#                 user_stats = uguu_db.get_user_stats(user['user_id'])
-#                 user['points'] = user_stats.get('uguu_points', 0)
-#                 user['total_participation'] = user_stats.get('total_participation', 0)
-                
-#                 # デバッグ出力（最初のユーザーのみ）
-#                 if users.index(user) == 0:
-#                     print(f"[DEBUG] First user - user_id: {user['user_id']}")
-#                     print(f"[DEBUG] uguu_points: {user['points']}")
-#                     print(f"[DEBUG] total_participation: {user['total_participation']}")
-#             except Exception as e:
-#                 print(f"[ERROR] Failed to get stats for user {user.get('user_id', 'unknown')}: {e}")
-#                 user['points'] = 0
-#                 user['total_participation'] = 0
-        
-#         # ソート処理
-#         reverse = (order == 'desc')
-        
-#         if sort_by == 'points':
-#             sorted_users = sorted(users, key=lambda x: x.get('points', 0), reverse=reverse)
-#         elif sort_by == 'total_participation':
-#             sorted_users = sorted(users, key=lambda x: x.get('total_participation', 0), reverse=reverse)
-#         elif sort_by == 'user_name':
-#             sorted_users = sorted(users, key=lambda x: x.get('user_name', ''), reverse=reverse)
-#         elif sort_by == 'created_at':
-#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=reverse)
-#         else:
-#             sorted_users = sorted(users, key=lambda x: x.get('created_at', ''), reverse=True)
-        
-#         return render_template("user_maintenance.html", 
-#                              users=sorted_users, 
-#                              page=1, 
-#                              has_next=False,
-#                              sort_by=sort_by,
-#                              order=order)
-#     except Exception as e:
-#         print(f"[ERROR] Error in user_maintenance: {str(e)}")
-#         import traceback
-#         traceback.print_exc()
-#         flash('ユーザー一覧の読み込み中にエラーが発生しました。', 'error')
-#         return redirect(url_for('index'))
     
 
 # ポイントと参加回数を無効化したバージョン：
@@ -1946,62 +1930,239 @@ def _decode_lek(token: str) -> dict:
     raw = base64.urlsafe_b64decode(token.encode("utf-8"))
     return json.loads(raw.decode("utf-8"))
 
+
 @app.route("/user_maintenance", methods=["GET"])
 @login_required
 def user_maintenance():
     try:
-        # 1ページ件数
-        limit = int(request.args.get("limit", 30))
-        limit = max(1, min(limit, 100))
-
-        # 次ページ用トークン（LastEvaluatedKey）
-        next_token_in = request.args.get("next")
-
-        query_kwargs = {
-            "IndexName": "gsi_recent_users",
-            "KeyConditionExpression": Key("recent_pk").eq("recent"),
-            "ScanIndexForward": False,  # ★新しい順（降順）
-            "Limit": limit,
-        }
-
-        if next_token_in:
-            try:
-                query_kwargs["ExclusiveStartKey"] = _decode_lek(next_token_in)
-            except Exception:
-                query_kwargs.pop("ExclusiveStartKey", None)
-
-        # ★ scan ではなく query にする
-        response = app.table.query(**query_kwargs)
-        users = response.get("Items", [])
-
-        # user_id 正規化 & statsは無効
-        for user in users:
-            # bad-users のPKは user#user_id
-            if "user#user_id" in user:
-                user["user_id"] = user["user#user_id"].replace("user#", "")
+        sort_by = request.args.get("sort_by", "last_participation")
+        order = request.args.get("order", "desc")
+        
+        from utils.timezone import JST
+        today = datetime.now(JST).date().isoformat()
+        
+        current_app.logger.info(f"[user_maintenance] 今日の日付: {today}")
+        
+        # 過去のスケジュールを全件取得
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        schedules = []
+        last_evaluated_key = None
+        
+        while True:
+            if last_evaluated_key:
+                schedule_response = schedule_table.scan(
+                    FilterExpression=Attr("date").lt(today),
+                    ExclusiveStartKey=last_evaluated_key
+                )
+            else:
+                schedule_response = schedule_table.scan(
+                    FilterExpression=Attr("date").lt(today)
+                )
+            
+            schedules.extend(schedule_response.get("Items", []))
+            last_evaluated_key = schedule_response.get("LastEvaluatedKey")
+            
+            if not last_evaluated_key:
+                break
+        
+        current_app.logger.info(f"[user_maintenance] 過去のスケジュール: {len(schedules)}件")
+        
+        # ★デバッグ：最初のスケジュールの参加者を確認
+        if schedules:
+            sample = schedules[0]
+            current_app.logger.info(f"[user_maintenance] サンプルスケジュール: date={sample.get('date')}")
+            current_app.logger.info(f"[user_maintenance] participants形式: {type(sample.get('participants'))}")
+            current_app.logger.info(f"[user_maintenance] participants最初の3件: {sample.get('participants', [])[:3]}")
+        
+        # ユーザーごとの最終参加日を集計
+        user_last_dates = {}
+        for schedule in schedules:
+            event_date = schedule.get("date")
+            participants = schedule.get("participants", [])
+            
+            # ★デバッグ：各スケジュールの参加者数
+            if participants:
+                current_app.logger.debug(f"[user_maintenance] {event_date}: {len(participants)}人")
+            
+            for participant in participants:
+                if isinstance(participant, dict):
+                    user_id = participant.get("user_id") or participant.get("user#user_id") or participant.get("S")
+                elif isinstance(participant, str):
+                    user_id = participant
+                else:
+                    current_app.logger.warning(f"[user_maintenance] 不明な形式: {type(participant)} - {participant}")
+                    continue
+                
+                # ★削除：user#プレフィックス除去（移行済みのため不要）
+                if user_id and isinstance(user_id, str):
+                    if user_id not in user_last_dates or event_date > user_last_dates[user_id]:
+                        user_last_dates[user_id] = event_date
+        
+        current_app.logger.info(f"[user_maintenance] 参加ユーザー数: {len(user_last_dates)}人")
+        
+        # ユーザー情報を取得
+        user_ids = list(user_last_dates.keys())
+        
+        users_data = {}
+        if user_ids:
+            users_table = app.dynamodb.Table(app.table_name_users)
+            
+            # バッチ取得（100件ずつ）+ 未処理キーの再取得
+            for i in range(0, len(user_ids), 100):
+                batch_ids = user_ids[i:i + 100]
+                keys = [{"user#user_id": uid} for uid in batch_ids]
+                
+                request_items = {app.table_name_users: {"Keys": keys}}
+                
+                try:
+                    # ★未処理キーがなくなるまで繰り返し
+                    while request_items:
+                        batch_response = app.dynamodb.batch_get_item(RequestItems=request_items)
+                        
+                        for user in batch_response.get("Responses", {}).get(app.table_name_users, []):
+                            uid = user.get("user#user_id", "")  
+                            users_data[uid] = user
+                        
+                        # 未処理キーを確認
+                        unprocessed = batch_response.get("UnprocessedKeys", {})
+                        if unprocessed:
+                            current_app.logger.warning(f"[user_maintenance] 未処理キー: {len(unprocessed.get(app.table_name_users, {}).get('Keys', []))}件")
+                            request_items = unprocessed
+                        else:
+                            request_items = None
+                        
+                except Exception as e:
+                    current_app.logger.error(f"[user_maintenance] バッチ取得エラー: {e}")
+        
+        current_app.logger.info(f"[user_maintenance] ユーザー情報取得: {len(users_data)}人")
+        
+        # 結果を整形
+        unique_users = []
+        for user_id, last_date in user_last_dates.items():
+            user = users_data.get(user_id, {})
+            user["user_id"] = user_id
+            user["last_participation_date"] = last_date
             user["points"] = None
             user["total_participation"] = None
-
-        # 次ページがあるか判定
-        lek = response.get("LastEvaluatedKey")
-        next_token_out = _encode_lek(lek) if lek else None
-
+            user["phone"] = user.get("phone") or ""
+            user["emergency_phone"] = user.get("emergency_phone") or ""
+            user["user_name"] = user.get("user_name") or ""
+            user["email"] = user.get("email") or ""
+            user["display_name"] = user.get("display_name") or ""
+            unique_users.append(user)
+        
+        # ソート
+        if sort_by == "last_participation":
+            unique_users.sort(
+                key=lambda u: u.get("last_participation_date", ""),
+                reverse=(order == "desc")
+            )
+        elif sort_by == "user_name":
+            unique_users.sort(
+                key=lambda u: (u.get("user_name") or "").lower(),
+                reverse=(order == "desc")
+            )
+        
+        current_app.logger.info(f"[user_maintenance] 最終件数: {len(unique_users)}件（過去の実参加）")
+        
         return render_template(
             "user_maintenance.html",
-            users=users,
-            sort_by="last_participation",
-            order="desc",
-            limit=limit,
-            next_token=next_token_out,
+            users=unique_users,
+            sort_by=sort_by,
+            order=order,
+            limit=len(unique_users),
+            next_token=None,
             stats_disabled=True,
         )
 
     except Exception as e:
-        print(f"[ERROR] Error in user_maintenance: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        current_app.logger.error(f"[user_maintenance] エラー: {e}", exc_info=True)
         flash("ユーザー一覧の読み込み中にエラーが発生しました。", "error")
         return redirect(url_for("index"))
+    
+    
+# USERチェックアクセス方法: http://127.0.0.1:5000/check_user_data/4c7f822d-ff39-4797-9b7b-8ebc205490f5
+@app.route("/check_user_data/<user_id>", methods=["GET"])
+@login_required
+def check_user_data(user_id):
+    """特定ユーザーのデータを直接確認"""
+    try:
+        # ★user#プレフィックスを付けずにそのまま使う
+        response = app.table.get_item(
+            Key={"user#user_id": user_id}  # ← 修正
+        )
+        
+        user = response.get("Item")
+        if user:
+            return jsonify({
+                "status": "ok",
+                "user_id": user_id,
+                "display_name": user.get("display_name"),
+                "user_name": user.get("user_name"),
+                "email": user.get("email"),
+                "phone": user.get("phone"),
+                "created_at": str(user.get("created_at")),
+                "last_participation_date": user.get("last_participation_date"),
+                "exists_in_main_table": True,
+                "full_data": {k: str(v) for k, v in user.items() if k != "password"}
+            })
+        else:
+            return jsonify({
+                "status": "not_found", 
+                "user_id": user_id,
+                "message": "メインテーブルにデータが見つかりません"
+            })
+            
+    except Exception as e:
+        current_app.logger.error(f"[check_user_data] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
+
+@app.route("/check_table_structure", methods=["GET"])
+@login_required
+def check_table_structure():
+    """テーブル構造を確認"""
+    try:
+        # テーブルのメタデータを取得
+        table_description = app.table.meta.client.describe_table(
+            TableName=app.table_name_users
+        )
+        
+        table_info = table_description["Table"]
+        
+        return jsonify({
+            "status": "ok",
+            "table_name": table_info["TableName"],
+            "key_schema": table_info["KeySchema"],
+            "attribute_definitions": table_info["AttributeDefinitions"],
+            "global_secondary_indexes": table_info.get("GlobalSecondaryIndexes", []),
+            "item_count": table_info.get("ItemCount"),
+        })
+            
+    except Exception as e:
+        current_app.logger.error(f"[check_table_structure] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
+
+@app.route("/sample_records", methods=["GET"])
+@login_required  
+def sample_records():
+    """テーブルの最初の10件を取得"""
+    try:
+        response = app.table.scan(Limit=10)
+        
+        items = response.get("Items", [])
+        
+        return jsonify({
+            "status": "ok",
+            "count": len(items),
+            "records": [{k: str(v)[:100] if k != "password" else "***" for k, v in item.items()} for item in items]
+        })
+            
+    except Exception as e:
+        current_app.logger.error(f"[sample_records] エラー: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)})
+    
 
 @app.route("/table_info")
 def get_table_info():
@@ -2019,13 +2180,18 @@ def get_table_info():
     except Exception as e:
         return f'Error: {str(e)}'    
     
+    
+def _user_key(user_id: str) -> dict:
+    uid = str(user_id)
+    return {"user#user_id": uid}
+
 
 @app.route('/account/<string:user_id>', methods=['GET', 'POST'])
 def account(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
         # 更新直後でも最新を読む
-        response = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        response = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
         user = response.get('Item')
         if not user:
             abort(404)
@@ -2130,9 +2296,11 @@ def account(user_id):
                 if update_expression_parts:
                     update_expression = "SET " + ", ".join(update_expression_parts)
                     table.update_item(
-                        Key={'user#user_id': user_id},
+                        Key=_user_key(user_id),
                         UpdateExpression=update_expression,
                         ExpressionAttributeValues=expression_values,
+                        ConditionExpression="attribute_exists(#pk)",
+                        ExpressionAttributeNames={"#pk": "user#user_id"},
                         ReturnValues="ALL_NEW"
                     )
                     flash('プロフィールが更新されました。', 'success')
@@ -2166,43 +2334,42 @@ def is_image_accessible(url):
         return False                
 
 @app.route("/delete_user/<string:user_id>")
+@login_required
 def delete_user(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(
-            TableName=app.table_name,
-            Key={
-                'user#user_id': user_id
-            }
-        )
-        user = response.get('Item')
-        
+        key = _user_key(user_id)
+
+        response = table.get_item(Key=key, ConsistentRead=True)
+        user = response.get("Item")
+
         if not user:
-            flash('ユーザーが見つかりません。', 'error')
-            return redirect(url_for('user_maintenance'))
-            
-          # 削除権限を確認（本人または管理者のみ許可）
-        if current_user.id != user_id and not current_user.administrator:
-            app.logger.warning(f"Unauthorized delete attempt by user {current_user.id} for user {user_id}.")
-            abort(403)  # 権限がない場合は403エラー
-        
-        # ここで実際の削除処理を実行
-        table = app.dynamodb.Table(app.table_name)
-        table.delete_item(Key={'user#user_id': user_id})
+            flash("ユーザーが見つかりません。", "error")
+            return redirect(url_for("user_maintenance"))
 
-         # ログイン中のユーザーが削除対象の場合はログアウト
-        if current_user.id == user_id:
+        # 権限チェック：current_user.id が uuid なら uuid に揃えて比較
+        uid_no_prefix = key["user#user_id"]
+        if current_user.id != uid_no_prefix and not getattr(current_user, "administrator", False):
+            app.logger.warning(
+                "Unauthorized delete attempt by user %s for user %s",
+                current_user.id, uid_no_prefix
+            )
+            abort(403)
+
+        table.delete_item(Key=key)
+
+        if current_user.id == uid_no_prefix:
             logout_user()
-            flash('アカウントが削除されました。再度ログインしてください。', 'info')
-            return redirect(url_for('login'))
+            flash("アカウントが削除されました。再度ログインしてください。", "info")
+            return redirect(url_for("login"))
 
-        flash('ユーザーアカウントが削除されました', 'success')
-        return redirect(url_for('user_maintenance'))
+        flash("ユーザーアカウントが削除されました", "success")
+        return redirect(url_for("user_maintenance"))
 
     except ClientError as e:
-        app.logger.error(f"DynamoDB error: {str(e)}")
-        flash('データベースエラーが発生しました。', 'error')
-        return redirect(url_for('user_maintenance'))
+        app.logger.error("DynamoDB error: %s", str(e), exc_info=True)
+        flash("データベースエラーが発生しました。", "error")
+        return redirect(url_for("user_maintenance"))
     
 
 @app.route("/gallery", methods=["GET", "POST"])
@@ -2416,74 +2583,70 @@ def api_chat_logs():
     result = get_badminton_chat_logs(cache_filter, limit)
     return jsonify(result)
 
+
 @app.route('/update_skill_score', methods=['POST'])
+@login_required
 def update_skill_score():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         user_id = data.get("user_id")
         new_score = data.get("skill_score")
 
         if not user_id or new_score is None:
             return jsonify({"success": False, "error": "Missing parameters"}), 400
 
-        # DynamoDB テーブルを取得
         table = app.dynamodb.Table(app.table_name)
 
-        # データ更新
-        table.update_item(
-            Key={'user#user_id': user_id},
+        resp = table.update_item(
+            Key=_user_key(user_id),
             UpdateExpression='SET skill_score = :score',
-            ExpressionAttributeValues={':score': Decimal(str(new_score))}
+            ExpressionAttributeValues={':score': Decimal(str(new_score))},
+            ReturnValues="UPDATED_NEW"
         )
 
         return jsonify({
             "success": True,
             "message": "Skill score updated",
-            "updated_score": new_score
+            "updated_score": new_score,
+            "ddb": resp.get("Attributes", {})
         }), 200
 
     except Exception as e:
-        app.logger.error(f"[update_skill_score] 更新エラー: {e}")
-        return jsonify({
-            "success": False,
-            "error": "更新に失敗しました"
-        }), 500
+        app.logger.error("[update_skill_score] 更新エラー: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "更新に失敗しました"}), 500
     
-@app.route('/api/user_info/<user_id>')
-def get_user_info(self, user_id: str):
-    """
-    ユーザー情報を取得（生年月日を含む）
-    """
+    
+@app.route('/api/user_info/<string:user_id>')
+@login_required
+def api_user_info(user_id):
     try:
-        response = self.table.get_item(
-            Key={'user#user_id': user_id}
+        table = current_app.dynamodb.Table(current_app.table_name)  # usersテーブル想定
+
+        resp = table.get_item(
+            Key=_user_key(user_id),
+            ConsistentRead=True
         )
-        
-        if 'Item' not in response:
-            print(f"[WARN] ユーザー情報が見つかりません - user_id: {user_id}")
-            return None
-        
-        item = response['Item']
-        
-        # 生年月日を取得（date_of_birthフィールド）
-        birth_date = item.get('date_of_birth', None)
-        
-        user_info = {
-            'user_id': user_id,
-            'birth_date': birth_date,
-            'display_name': item.get('display_name', ''),
-            'skill_score': item.get('skill_score', 0)
-        }
-        
-        print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
-        
-        return user_info
-        
+
+        item = resp.get("Item")
+        if not item:
+            current_app.logger.warning("[api_user_info] not found user_id=%s", user_id)
+            return jsonify({"success": False, "error": "not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "birth_date": item.get("date_of_birth"),
+            "display_name": item.get("display_name", ""),
+            "skill_score": item.get("skill_score", 0),
+        }), 200
+
+    except ClientError as e:
+        current_app.logger.error("[api_user_info] ddb error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "ddb error"}), 500
     except Exception as e:
-        print(f"[ERROR] ユーザー情報取得エラー: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+        current_app.logger.error("[api_user_info] error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "server error"}), 500
+    
     
 @app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
 @login_required
@@ -2491,17 +2654,22 @@ def profile_image_edit(user_id):
     """プロフィール画像編集ページ"""
     try:
         table = app.dynamodb.Table(app.table_name)
-        resp = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        resp = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
+
+        table.update_item(
+            Key=_user_key(user_id),
+            UpdateExpression="SET profile_image_url = :p, large_image_url = :l, updated_at = :u",
+            ExpressionAttributeValues={...},
+        )
         user = resp.get('Item')
         if not user:
             flash('ユーザーが見つかりません。', 'error')
             return redirect(url_for('index'))
 
         # 内部表記を統一
-        user['user_id'] = user.get('user#user_id', user_id)
-
-        # 権限チェック
-        if session.get('_user_id') != user_id:
+        user["user_id"] = user.get("user#user_id", user_id)
+        me = current_user.get_id()
+        if me != user_id:
             flash('アクセス権限がありません。', 'error')
             return redirect(url_for('index'))
 
@@ -2540,11 +2708,7 @@ def profile_image_edit(user_id):
             # 座標（クライアントで計算したクロップ位置が来ていれば使用）
             sx  = request.form.get('crop_sx',   type=float)
             sy  = request.form.get('crop_sy',   type=float)
-            ssz = request.form.get('crop_side', type=float)
-
-            # ★ここに追加★
-            print(f"Debug received: sx={sx}, sy={sy}, ssz={ssz}")
-            print(f"Debug orig_file exists: {orig_file is not None}")
+            ssz = request.form.get('crop_side', type=float)            
 
             # large と サーバ側プロフィール生成用に元画像のバイト列を確保
             source_for_large = orig_file or profile_file

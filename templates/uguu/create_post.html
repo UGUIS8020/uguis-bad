@@ -11,6 +11,8 @@
                 
                 <div class="card-body">
                     <form method="POST" action="{{ url_for('post.create_post') }}" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
                         <div class="mb-3">
                             <label for="content" class="form-label">投稿内容</label>
                             <textarea 

@@ -172,7 +172,7 @@ def find_invalid_status_records(db, date_participants_map):
                 print(f"   ... 他 {len(records) - 5}件")
             print()
     else:
-        print("✅ 修正が必要なレコードは見つかりませんでした")
+        print("修正が必要なレコードは見つかりませんでした")
     
     return invalid_records, stats
 
@@ -248,7 +248,7 @@ def fix_status(db, invalid_records, batch_size=50):
     
     # 最終レポート
     print(f"\n\n{'='*80}")
-    print(f"🏁 修正完了")
+    print(f"修正完了")
     print(f"{'='*80}")
     print(f"処理レコード数: {i}件")
     print(f"更新成功: {updated_count}件")
@@ -284,7 +284,7 @@ def export_to_csv(invalid_records, filename='invalid_status_report.csv'):
                 'Set to cancelled'
             ])
     
-    print(f"\n✅ レポートを {filename} に出力しました")
+    print(f"\nレポートを {filename} に出力しました")
 
 
 def main():
@@ -320,7 +320,7 @@ def main():
     # DynamoDB接続
     try:
         db = DynamoDB()
-        print("\n✅ DynamoDBに接続しました\n")
+        print("\nDynamoDBに接続しました\n")
     except Exception as e:
         print(f"❌ DynamoDB接続エラー: {e}")
         return

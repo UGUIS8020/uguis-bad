@@ -67,7 +67,7 @@
                             </div>
 
                             <div class="mb-3">
-                                {{ form.date_of_birth.label(class="form-label") }}
+                                <label class="form-label">生年月日 <span class="badge bg-warning text-dark">必須</span></label>
                                 {{ render_field(form.date_of_birth, class="form-control form-control-lg", type="date", required=True) }}
                                 {% if form.date_of_birth.errors %}
                                     <div class="text-danger">
@@ -81,19 +81,32 @@
                             <!-- バドミントン歴 -->
 
                             <!-- 電話番号 -->
+                            <!-- 電話番号 -->
                             <div class="mb-3">
-                                <label class="form-label">電話番号<span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.phone, placeholder="電話番号(ハイフン無しで)", class="form-control form-control-lg", required=true) }}
-                                {% if form.phone.errors %}
-                                    <p class="text-danger">{{ form.phone.errors[0] }}</p>
-                                {% endif %}
+                            <label class="form-label">電話番号<span class="badge bg-warning text-dark">必須</span></label>
+                            {{ render_field(
+                                form.phone,
+                                placeholder="電話番号(ハイフン無しで)",
+                                class="form-control form-control-lg",
+                                type="tel",
+                                inputmode="numeric",
+                                autocomplete="tel",
+                                autocorrect="off",
+                                autocapitalize="none",
+                                spellcheck="false",
+                                pattern="[0-9]*",
+                                required=true
+                            ) }}
+                            {% if form.phone.errors %}
+                                <p class="text-danger">{{ form.phone.errors[0] }}</p>
+                            {% endif %}
                             </div>
                          
 
                             <!-- メールアドレス -->
                             <div class="mb-3">
                                 <label class="form-label">メールアドレス <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg", required=true) }}
+                                {{ render_field(form.email, placeholder="メールアドレス", class="form-control form-control-lg") }}
                                 {% if form.email.errors %}
                                     <p class="text-danger">{{ form.email.errors[0] }}</p>
                                 {% endif %}
@@ -102,12 +115,11 @@
                             <!-- メールアドレス確認 -->
                             <div class="mb-3">
                                 <label class="form-label">メールアドレス（確認） <span class="badge bg-warning text-dark">必須</span></label>
-                                {{ render_field(form.confirm_email, placeholder="確認のため再入力", class="form-control form-control-lg", required=true) }}
+                                {{ render_field(form.confirm_email, placeholder="確認のため再入力", class="form-control form-control-lg") }}
                                 {% if form.confirm_email.errors %}
                                     <p class="text-danger">{{ form.confirm_email.errors[0] }}</p>
                                 {% endif %}
                             </div>
-
                             <!-- パスワード -->
                             <div class="mb-3">
                                 <label class="form-label">パスワード <span class="badge bg-warning text-dark">必須</span></label>
@@ -242,7 +254,7 @@
                                         scoreText.textContent = `${totalScore}点`;
                         
                                         if (totalScore >= 30) {
-                                            eligibilityText.innerHTML = '<span class="text-success">✅ ゲーム参加OK！</span>';
+                                            eligibilityText.innerHTML = '<span class="text-success">ゲーム参加OK！</span>';
                                             scoreDisplay.className = 'alert alert-success';
                                         } else {
                                             eligibilityText.innerHTML = '<span class="text-warning">⚠️ 基本練習からスタートになります</span>';
@@ -258,7 +270,7 @@
                                 });
                                 calculateAssessmentScore();
                             
-                                // ✅ form送信前にログ取得（今は空処理）
+                                // form送信前にログ取得（今は空処理）
                                 const form = document.querySelector('form');
                                 if (form) {
                                     form.addEventListener('submit', function(e) {

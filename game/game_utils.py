@@ -1,442 +1,209 @@
 from flask import current_app
-from flask_caching import logger
-from trueskill import TrueSkill, Rating, rate
-from decimal import Decimal
+from trueskill import TrueSkill
 import random
-import itertools
-import boto3
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
-
+from zoneinfo import ZoneInfo
+import logging
+from botocore.exceptions import ClientError
+from typing import Optional
+from decimal import Decimal
+from trueskill import Rating, rate
+from typing import Optional, List
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
 
-# def update_trueskill_for_players(result_item):
-#     """
-#     TrueSkill を使って各プレイヤーのスキルスコアを更新
-#     result_item = {
-#         "team_a": [{"user_id": ..., "display_name": ...}, ...],
-#         "team_b": [{"user_id": ..., "display_name": ...}, ...],
-#         "winner": "A" または "B"
-#     }
-#     """
-#     user_table = current_app.dynamodb.Table("bad-users")
+JST = ZoneInfo("Asia/Tokyo")
 
-#     def get_team_ratings(team):
-#         """チームのTrueSkill Ratingを取得する"""
-#         ratings = []
-#         for player in team:
-#             user_id = player.get("user_id")
-#             user_data = get_user_data(user_id, user_table)  # ← ここ！
-#             if user_data:
-#                 current_score = float(user_data.get("skill_score", 50))
-#                 rating = Rating(mu=current_score, sigma=3)
-#                 ratings.append((user_id, rating, current_score))
-#         return ratings
+META_PK = "meta#current"
 
-#     ratings_a = get_team_ratings(result_item["team_a"])
-#     ratings_b = get_team_ratings(result_item["team_b"])
-#     winner = result_item.get("winner", "A")
+def _now_jst_iso():
+    return datetime.now(JST).isoformat()
 
-#     if not ratings_a or not ratings_b:
-#         current_app.logger.warning("⚠️ チームが空です。TrueSkill評価をスキップ")
-#         return
+def get_current_match_meta():
+    table = current_app.dynamodb.Table("bad-game-matches")
+    resp = table.get_item(Key={"match_id": META_PK}, ConsistentRead=True)
+    return resp.get("Item")
 
-#     if winner.upper() == "A":
-#         new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
-#     else:
-#         new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
-#         new_ratings = new_ratings[::-1]
 
-#     new_ratings_a, new_ratings_b = new_ratings
+def get_current_match_id():
+    meta = get_current_match_meta()
+    if not meta:
+        return None
+    if meta.get("status") != "playing":
+        return None
+    return meta.get("current_match_id")
 
-#     def save(team_ratings, new_ratings, label):
-#         for (user_id, old_rating, name), new_rating in zip(team_ratings, new_ratings):
-#             new_score = round(new_rating.mu, 2)
-#             delta = round(new_rating.mu - old_rating.mu, 2)
-#             user_table.update_item(
-#                 Key={"user#user_id": user_id},
-#                 UpdateExpression="SET skill_score = :s",
-#                 ExpressionAttributeValues={":s": Decimal(str(new_score))}
-#             )
-#             current_app.logger.info(f"[{label}] {name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
+def start_match_meta(new_match_id: str, court_count: int):
+    table = current_app.dynamodb.Table("bad-game-matches")
+    now = _now_jst_iso()
 
-#     save(ratings_a, new_ratings_a, "Team A")
-#     save(ratings_b, new_ratings_b, "Team B")
+    # 「今 playing じゃないときだけ開始OK」にする
+    try:
+        table.update_item(
+            Key={"match_id": META_PK},
+            UpdateExpression=(
+                "SET entity_type=:e, "
+                "current_match_id=:m, "
+                "#st=:playing, "
+                "court_count=:c, "
+                "created_at=if_not_exists(created_at, :now), "
+                "updated_at=:now, "
+                "version=if_not_exists(version, :zero) + :one"
+            ),
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":e": "meta",
+                ":m": new_match_id,
+                ":playing": "playing",
+                ":c": int(court_count),
+                ":now": now,
+                ":zero": 0,
+                ":one": 1,
+            },
+            ConditionExpression=(
+                "attribute_not_exists(#st) OR #st <> :playing"
+            ),
+        )
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            current_app.logger.warning("[meta] start blocked: already playing")
+            return False
+        raise
 
-# def update_trueskill_for_players(result_item):
-#     """
-#     TrueSkill を使って各プレイヤーのスキルスコアを更新
-#     result_item = {
-#         "team_a": [{"user_id": ..., "display_name": ...}, ...],
-#         "team_b": [{"user_id": ..., "display_name": ...}, ...],
-#         "winner": "A" または "B"
-#     }
-#     """
-#     user_table = current_app.dynamodb.Table("bad-users")
+def finish_match_meta(match_id: str):
+    table = current_app.dynamodb.Table("bad-game-matches")
+    now = _now_jst_iso()
+    try:
+        table.update_item(
+            Key={"match_id": META_PK},
+            UpdateExpression=(
+                "SET #st=:finished, "
+                "updated_at=:now, "
+                "version=if_not_exists(version, :zero) + :one"
+            ),
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":finished": "finished",
+                ":now": now,
+                ":zero": 0,
+                ":one": 1,
+                ":m": match_id,
+            },
+            # 「current_match_id が一致している」ことを保証
+            ConditionExpression="current_match_id = :m",
+        )
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            current_app.logger.warning("[meta] finish blocked: current_match_id mismatch")
+            return False
+        raise
 
-#     def get_team_ratings(team):
-#         """チームのTrueSkill Ratingを取得する"""
-#         ratings = []
-#         for player in team:
-#             user_id = player.get("user_id")
-#             if not user_id:
-#                 current_app.logger.warning(f"ユーザーIDが空です: {player}")
-#                 continue
-                
-#             # DynamoDBから直接ユーザーデータを取得する
-#             try:
-#                 current_app.logger.info(f"ユーザー {user_id} の取得を試みます（キー: user#user_id）")
-#                 response = user_table.get_item(Key={"user#user_id": user_id})
-                
-#                 # DynamoDBのレスポンス全体をログに出力
-#                 current_app.logger.debug(f"DynamoDB応答: {response}")
-                
-#                 user_data = response.get("Item")
-                
-#                 if user_data:
-#                     current_app.logger.info(f"✅ ユーザー {user_id} のデータ取得成功: {user_data}")
-#                     current_score = float(user_data.get("skill_score", 50))
-#                     rating = Rating(mu=current_score, sigma=3)
-#                     display_name = player.get("display_name", user_data.get("display_name", "不明"))
-#                     ratings.append((user_id, rating, display_name))
-#                     current_app.logger.info(f"ユーザー {user_id} ({display_name}) のスキルスコア: {current_score}")
-#                 else:
-#                     current_app.logger.warning(f"ユーザーが見つかりません: {user_id}")
-                    
-#                     # テーブル内容のサンプルをスキャンして確認（最初の失敗時のみ）
-#                     if not hasattr(current_app, 'already_scanned'):
-#                         try:
-#                             current_app.logger.info("テーブル診断: サンプルデータをスキャン中...")
-#                             scan_response = user_table.scan(Limit=3)
-#                             items = scan_response.get('Items', [])
-#                             if items:
-#                                 current_app.logger.info(f"テーブル内の既存データサンプル: {items}")
-#                                 # 最初のアイテムのキー構造を確認
-#                                 if items[0]:
-#                                     current_app.logger.info(f"サンプルアイテムのキー: {list(items[0].keys())}")
-#                             else:
-#                                 current_app.logger.warning("テーブルにデータが存在しません")
-                            
-#                             current_app.already_scanned = True  # 1度だけスキャンするためのフラグ
-#                         except Exception as e:
-#                             current_app.logger.error(f"テーブルスキャンエラー: {str(e)}")
-#             except Exception as e:
-#                 current_app.logger.error(f"ユーザーデータ取得エラー: {str(e)}")
-#                 current_app.logger.error(f"エラー詳細: {type(e).__name__}, {str(e)}")
-#                 import traceback
-#                 current_app.logger.error(f"スタックトレース: {traceback.format_exc()}")
-                
-#             return ratings
-
-#     ratings_a = get_team_ratings(result_item["team_a"])
-#     ratings_b = get_team_ratings(result_item["team_b"])
-#     winner = result_item.get("winner", "A")
-
-#     if not ratings_a or not ratings_b:
-#         current_app.logger.warning("⚠️ チームが空です。TrueSkill評価をスキップ")
-#         return
-
-#     if winner.upper() == "A":
-#         new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
-#     else:
-#         new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
-#         new_ratings = new_ratings[::-1]
-
-#     new_ratings_a, new_ratings_b = new_ratings
-
-#     def save(team_ratings, new_ratings, label):
-#         for (user_id, old_rating, display_name), new_rating in zip(team_ratings, new_ratings):
-#             new_score = round(new_rating.mu, 2)
-#             delta = round(new_rating.mu - old_rating.mu, 2)
-#             try:
-#                 user_table.update_item(
-#                     Key={"user#user_id": user_id},
-#                     UpdateExpression="SET skill_score = :s",
-#                     ExpressionAttributeValues={":s": Decimal(str(new_score))}
-#                 )
-#                 current_app.logger.info(f"[{label}] {display_name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
-#             except Exception as e:
-#                 current_app.logger.error(f"スコア更新エラー: {user_id} {str(e)}")
-
-#     save(ratings_a, new_ratings_a, "Team A")
-#     save(ratings_b, new_ratings_b, "Team B")
-
-# def update_trueskill_for_players(result_item):
-#     """
-#     TrueSkill を使って各プレイヤーのスキルスコアを更新
-#     result_item = {
-#         "team_a": [{"user_id": ..., "display_name": ...}, ...],
-#         "team_b": [{"user_id": ..., "display_name": ...}, ...],
-#         "winner": "A" または "B"
-#     }
-#     """
-#     from trueskill import Rating, rate
-#     from decimal import Decimal
-#     import traceback
-    
-#     user_table = current_app.dynamodb.Table("bad-users")
-#     current_app.logger.info(f"スキル更新処理開始: match_id={result_item.get('match_id')}")
-
-#     def get_team_ratings(team, team_label):
-#         """チームのTrueSkill Ratingを取得する"""
-#         ratings = []
-#         current_app.logger.info(f"{team_label}の処理開始: {len(team)}人")
-        
-#         for i, player in enumerate(team):
-#             user_id = player.get("user_id")
-#             if not user_id:
-#                 current_app.logger.warning(f"ユーザーIDが空です: {player}")
-#                 continue
-                
-#             # DynamoDBから直接ユーザーデータを取得する
-#             try:
-#                 current_app.logger.info(f"ユーザー {user_id} の取得を試みます（キー: user#user_id）")
-#                 response = user_table.get_item(Key={"user#user_id": user_id})
-                
-#                 user_data = response.get("Item")
-                
-#                 if user_data:
-#                     current_app.logger.info(f"✅ ユーザー {user_id} のデータ取得成功")
-#                     current_score = float(user_data.get("skill_score", 50))
-#                     rating = Rating(mu=current_score, sigma=3)
-#                     display_name = player.get("display_name", user_data.get("display_name", "不明"))
-#                     ratings.append((user_id, rating, display_name))
-#                     current_app.logger.info(f"ユーザー {user_id} ({display_name}) のスキルスコア: {current_score}")
-#                 else:
-#                     current_app.logger.warning(f"ユーザーが見つかりません: {user_id}")
-#             except Exception as e:
-#                 current_app.logger.error(f"ユーザーデータ取得エラー: {user_id} {str(e)}")
-        
-#         current_app.logger.info(f"{team_label}の処理完了: {len(ratings)}/{len(team)}人のデータを取得")
-#         return ratings
-
-#     # チームごとにプレイヤーデータを取得
-#     ratings_a = get_team_ratings(result_item["team_a"], "Team A")
-#     ratings_b = get_team_ratings(result_item["team_b"], "Team B")
-#     winner = result_item.get("winner", "A")
-
-#     # 両方のチームが空の場合はスキップ
-#     if not ratings_a and not ratings_b:
-#         current_app.logger.warning("⚠️ 両チームが空です。TrueSkill評価をスキップ")
-#         return
-    
-#     # いずれかのチームが空の場合は警告を出すが処理は続行
-#     if not ratings_a:
-#         current_app.logger.warning("⚠️ Team Aが空です。部分的な評価を実行します。")
-#         ratings_a = [(None, Rating(mu=50), "不明")]  # ダミーデータ
-    
-#     if not ratings_b:
-#         current_app.logger.warning("⚠️ Team Bが空です。部分的な評価を実行します。")
-#         ratings_b = [(None, Rating(mu=50), "不明")]  # ダミーデータ
-
-#     try:
-#         current_app.logger.info(f"TrueSkill評価実行: Team A({len(ratings_a)}人) vs Team B({len(ratings_b)}人), 勝者: Team {winner}")
-        
-#         if winner.upper() == "A":
-#             new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
-#         else:
-#             new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
-#             new_ratings = new_ratings[::-1]
-
-#         new_ratings_a, new_ratings_b = new_ratings
-#     except Exception as e:
-#         current_app.logger.error(f"TrueSkill計算エラー: {str(e)}")
-#         current_app.logger.error(traceback.format_exc())
-#         return
-
-#     def save(team_ratings, new_ratings, label):
-#         update_count = 0
-#         for i, ((user_id, old_rating, display_name), new_rating) in enumerate(zip(team_ratings, new_ratings)):
-#             if user_id is None:  # ダミーデータはスキップ
-#                 continue
-                
-#             new_score = round(new_rating.mu, 2)
-#             delta = round(new_rating.mu - old_rating.mu, 2)
-#             try:
-#                 user_table.update_item(
-#                     Key={"user#user_id": user_id},
-#                     UpdateExpression="SET skill_score = :s, updated_at = :t",
-#                     ExpressionAttributeValues={
-#                         ":s": Decimal(str(new_score)),
-#                         ":t": datetime.now().isoformat()
-#                     }
-#                 )
-#                 current_app.logger.info(f"[{label}] {display_name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
-#                 update_count += 1
-#             except Exception as e:
-#                 current_app.logger.error(f"スコア更新エラー: {user_id} {str(e)}")
-        
-#         return update_count
-
-#     # スコア更新を実行
-#     updates_a = save(ratings_a, new_ratings_a, "Team A")
-#     updates_b = save(ratings_b, new_ratings_b, "Team B")
-    
-#     current_app.logger.info(f"スキル更新処理完了: Team A({updates_a}人), Team B({updates_b}人)")
+def normalize_user_pk(uid: str) -> str:
+    if uid is None:
+        raise ValueError("uid is None")
+    s = str(uid).strip()
+    if not s:
+        raise ValueError("uid is empty")
+    return s if s.startswith("user#") else f"user#{s}"
 
 def update_trueskill_for_players_and_return_updates(result_item):
     """
-    TrueSkill を使って各プレイヤーのスキルスコアを更新し、更新結果を返す
+    result_item から team_a/team_b のプレイヤーを取り出して TrueSkill 更新し、
+    updated_skills = {user_id: {skill_score: float, skill_sigma: float}} を返す。
+    同時に bad-users にも永続化する（test_ は除外）。
     """
-    from decimal import Decimal
-    from datetime import datetime
-    from trueskill import Rating, rate
-    
-    updated_skills = {}  # 更新されたスキルスコアを格納する辞書
     user_table = current_app.dynamodb.Table("bad-users")
 
-    def get_team_ratings(team):
-        """チームのTrueSkill Ratingを取得する"""
-        ratings = []
-        for player in team:
-            user_id = player.get("user_id")
-            if not user_id:
-                current_app.logger.warning(f"ユーザーIDが空です: {player}")
-                continue
-                
-            # DynamoDBから直接ユーザーデータを取得する
-            try:
-                current_app.logger.info(f"ユーザー {user_id} の取得を試みます（キー: user#user_id）")
-                response = user_table.get_item(Key={"user#user_id": user_id})
-                user_data = response.get("Item")
-                
-                if user_data:
-                    current_app.logger.info(f"✅ ユーザー {user_id} のデータ取得成功")
-                    current_score = float(user_data.get("skill_score", 50))
-                    rating = Rating(mu=current_score, sigma=3)
-                    display_name = player.get("display_name", user_data.get("display_name", "不明"))
-                    ratings.append((user_id, rating, display_name))
-                    current_app.logger.info(f"ユーザー {user_id} ({display_name}) のスキルスコア: {current_score}")
-                else:
-                    current_app.logger.warning(f"ユーザーが見つかりません: {user_id}")
-            except Exception as e:
-                current_app.logger.error(f"ユーザーデータ取得エラー: {str(e)}")
-        
-        return ratings
+    def safe_get_score(item, keys):
+        for k in keys:
+            val = item.get(k)
+            if val is not None:
+                try:
+                    return int(float(val))
+                except Exception:
+                    continue
+        return 0
 
-    ratings_a = get_team_ratings(result_item["team_a"])
-    ratings_b = get_team_ratings(result_item["team_b"])
-    winner = result_item.get("winner", "A")
+    t1 = safe_get_score(result_item, ["team1_score", "team_a_score", "score1"])
+    t2 = safe_get_score(result_item, ["team2_score", "team_b_score", "score2"])
+    winner = str(result_item.get("winner", "A")).upper()
+    # score_diff は今は未使用なら消してOK（残したいならそのまま）
+    score_diff = (t1 - t2) if winner == "A" else (t2 - t1)
+
+    def get_team_ratings(team):
+        """
+        team: [{user_id, skill_score?, skill_sigma?, ...}, ...]
+        戻り: [(player_uid, Rating), ...]
+        """
+        out = []
+        for player in team or []:
+            player_uid = player.get("user_id")
+            if not player_uid:
+                continue
+
+            mu = player.get("skill_score")
+            sig = player.get("skill_sigma")
+
+            # 足りなければ bad-users から拾う
+            if mu is None or sig is None:
+                try:
+                    res = user_table.get_item(
+                        Key={"user#user_id": player_uid}
+                    )
+                    data = res.get("Item") or {}
+                    mu = data.get("skill_score", 25.0)
+                    sig = data.get("skill_sigma", 8.333)
+                except Exception:
+                    mu, sig = 25.0, 8.333
+
+            try:
+                mu = float(mu)
+            except Exception:
+                mu = 25.0
+            try:
+                sig = float(sig)
+            except Exception:
+                sig = 8.333
+
+            out.append((str(player_uid), Rating(mu=mu, sigma=sig)))
+
+        return out
+
+    ratings_a = get_team_ratings(result_item.get("team_a", []))
+    ratings_b = get_team_ratings(result_item.get("team_b", []))
 
     if not ratings_a or not ratings_b:
-        current_app.logger.warning("⚠️ チームが空です。TrueSkill評価をスキップ")
-        return updated_skills
+        return {}
 
-    try:
-        # スキル差の計算
-        team_a_skill = sum(r.mu for _, r, _ in ratings_a) / len(ratings_a)
-        team_b_skill = sum(r.mu for _, r, _ in ratings_b) / len(ratings_b)
-        skill_diff = team_a_skill - team_b_skill
-        
-        # 期待される勝者を判定
-        expected_winner = "A" if skill_diff > 0 else "B"
-        actual_winner = winner.upper()
-        
-        # 標準のTrueSkill計算
-        if winner.upper() == "A":
-            original_new_ratings = rate([[r for _, r, _ in ratings_a], [r for _, r, _ in ratings_b]])
-        else:
-            original_new_ratings = rate([[r for _, r, _ in ratings_b], [r for _, r, _ in ratings_a]])
-            original_new_ratings = original_new_ratings[::-1]
-        
-        # スキル差と勝敗の整合性を正しく計算
-        if expected_winner == actual_winner:
-            # 予想通りの結果: 正の値（調整を小さく）
-            skill_result_consistency = abs(skill_diff)
-        else:
-            # 番狂わせ: 負の値（調整を大きく）
-            skill_result_consistency = -abs(skill_diff)
+    team_a_uids = [uid for uid, _r in ratings_a]
+    team_b_uids = [uid for uid, _r in ratings_b]
+    team_a_ratings = [_r for _uid, _r in ratings_a]
+    team_b_ratings = [_r for _uid, _r in ratings_b]
 
-        # スコア差の計算
-        team1_score = int(result_item.get("team1_score", 0))
-        team2_score = int(result_item.get("team2_score", 0))
-        if winner.upper() == "A":
-            score_diff = team1_score - team2_score
-        else:
-            score_diff = team2_score - team1_score
-        
-        # 基本調整係数（スコア差だけに基づく）
-        min_factor = 0.8
-        max_factor = 1.5
-        max_diff = 20.0
-        
-        score_adjustment = min_factor + (max_factor - min_factor) * min(abs(score_diff) / max_diff, 1.0)
-        
-        # スキル差と結果の整合性に基づく追加調整
-        # skill_result_consistency が負の値（予想外の結果）なら調整係数を大きく
-        # skill_result_consistency が正の値（予想通りの結果）なら調整係数を小さく
-        max_skill_diff = 15.0  # 想定される最大スキル差
-        consistency_factor = 1.0 - min(max(skill_result_consistency / max_skill_diff, -1.0), 1.0) * 0.3
-        
-        # 最終的な調整係数
-        final_adjustment = score_adjustment * consistency_factor
-        
-        current_app.logger.info(f"スコア差: {score_diff}, チームスキル差: {skill_diff:.2f}, " +
-                            f"結果整合性: {skill_result_consistency:.2f}, " +
-                            f"スコア調整: {score_adjustment:.2f}, " +
-                            f"整合性調整: {consistency_factor:.2f}, " +
-                            f"最終調整係数: {final_adjustment:.2f}")
-        
-        # 調整係数を適用した新しいレーティングを作成
-        new_ratings_a = []
-        new_ratings_b = []
-        
-        for i, rating in enumerate(original_new_ratings[0]):
-            old_mu = ratings_a[i][1].mu
-            delta = rating.mu - old_mu
-            adjusted_delta = delta * final_adjustment
-            new_ratings_a.append(Rating(mu=old_mu + adjusted_delta, sigma=rating.sigma))
-        
-        for i, rating in enumerate(original_new_ratings[1]):
-            old_mu = ratings_b[i][1].mu
-            delta = rating.mu - old_mu
-            adjusted_delta = delta * final_adjustment
-            new_ratings_b.append(Rating(mu=old_mu + adjusted_delta, sigma=rating.sigma))
+    ranks = [0, 1] if winner == "A" else [1, 0]
+    new_team_a, new_team_b = rate([team_a_ratings, team_b_ratings], ranks=ranks)
 
-    except Exception as e:
-        current_app.logger.error(f"TrueSkill計算エラー: {str(e)}")
-        import traceback
-        current_app.logger.error(traceback.format_exc())
-        return updated_skills
+    updated_skills = {}
+    for uid, new_r in zip(team_a_uids, new_team_a):
+        updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
+    for uid, new_r in zip(team_b_uids, new_team_b):
+        updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
 
-    def save(team_ratings, new_ratings, team_players, label):
-        for i, ((user_id, old_rating, display_name), new_rating) in enumerate(zip(team_ratings, new_ratings)):
-            new_score = round(new_rating.mu, 2)
-            delta = round(new_rating.mu - old_rating.mu, 2)
-            try:
-                # bad-usersテーブルを更新
-                user_table.update_item(
-                    Key={"user#user_id": user_id},
-                    UpdateExpression="SET skill_score = :s, updated_at = :t",
-                    ExpressionAttributeValues={
-                        ":s": Decimal(str(new_score)),
-                        ":t": datetime.now().isoformat()
-                    }
-                )
-                current_app.logger.info(f"[{label}] {display_name}: {old_rating.mu:.2f} → {new_score:.2f}（Δ{delta:+.2f}）")
-                
-                # 更新されたスキルスコアを記録
-                # チームプレイヤーからentry_idを検索
-                for player in team_players:
-                    if player.get("user_id") == user_id:
-                        entry_id = player.get("entry_id")
-                        updated_skills[user_id] = {
-                            "skill_score": new_score,
-                            "display_name": display_name,
-                            "entry_id": entry_id
-                        }
-                        break
-                
-            except Exception as e:
-                current_app.logger.error(f"スコア更新エラー: {user_id} {str(e)}")
+    current_app.logger.debug(
+        "[ts-after-rate] match=%s court=%s | updated=%d sample=%s",
+        result_item.get("match_id"),
+        result_item.get("court_number"),
+        len(updated_skills),
+        next(iter(updated_skills.items()), None),
+    )    
 
-    save(ratings_a, new_ratings_a, result_item["team_a"], "Team A")
-    save(ratings_b, new_ratings_b, result_item["team_b"], "Team B")
-    
     return updated_skills
+
 
 def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     """
@@ -446,50 +213,82 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     
     match_table = current_app.dynamodb.Table("bad-game-match_entries")
     sync_count = 0
+    total_count = len(updated_skills)
     
     try:
-        current_app.logger.info(f"🔄 エントリーテーブル同期開始: {len(updated_skills)}件のスキルスコア更新")
+        # 同期開始のサマリー
+        current_app.logger.debug(f"エントリー同期開始: 対象 {total_count} 件")
         
         for user_id, data in updated_skills.items():
             entry_id = data.get("entry_id") or entry_mapping.get(user_id)
             
             if not entry_id:
-                current_app.logger.warning(f"⚠️ ユーザー {user_id} のエントリーIDが見つかりません")
+                # 警告ログは重要なので残すが、簡潔に
+                current_app.logger.warning(f"エントリーID未発見: user_id={user_id}")
                 continue
                 
             try:
-                # エントリーテーブルのスキルスコアを更新
                 match_table.update_item(
                     Key={"entry_id": entry_id},
-                    UpdateExpression="SET skill_score = :s",
+                    UpdateExpression="SET skill_score = :mu, skill_sigma = :sigma",
                     ExpressionAttributeValues={
-                        ":s": Decimal(str(data["skill_score"]))
+                        ":mu": Decimal(str(data["skill_score"])),
+                        ":sigma": Decimal(str(data["skill_sigma"]))
                     }
                 )
                 sync_count += 1
-                current_app.logger.debug(f"✅ エントリー更新: {entry_id}, ユーザー: {data.get('display_name')}, スキル: {data['skill_score']}")
+                
+                # 【削除】1件ずとの詳細な DEBUG ログは削除しました
+                
             except Exception as e:
-                current_app.logger.error(f"⚠️ エントリー更新エラー: {entry_id} - {str(e)}")
+                # 失敗時は原因を特定したいので詳細を出す
+                current_app.logger.error(f"更新失敗 entry_id={entry_id}: {str(e)}")
+        
+        # 完了報告を 1 行で出力
+        current_app.logger.info(f"同期完了: {sync_count}/{total_count} 件のスキルを反映しました")
     
     except Exception as e:
-        current_app.logger.error(f"⚠️ エントリー同期エラー: {str(e)}")
+        current_app.logger.error(f"同期プロセス異常終了: {str(e)}")
     
     return sync_count
 
-def parse_players(team):
-    """文字列 or 辞書が混在しているチームデータを統一フォーマットに変換"""
-    parsed = []
-    for p in team:
-        if isinstance(p, str):
-            # 古い形式：user_id のみ
-            parsed.append({"user_id": p, "display_name": "", "skill_score": 50})
-        elif isinstance(p, dict):
-            parsed.append({
-                "user_id": p.get("user_id"),
-                "display_name": p.get("display_name", ""),
-                "skill_score": int(p.get("skill_score", 50))
-            })
-    return parsed
+
+def parse_players(val):
+    """
+    team_a/team_b を list[dict] に正規化して返す
+    - val が list ならそのまま
+    - val が JSON文字列なら loads
+    - それ以外は []
+    """
+    if val is None:
+        return []
+
+    # すでに list で来ている（DynamoDBからの復元でよくある）
+    if isinstance(val, list):
+        out = []
+        for x in val:
+            if isinstance(x, dict):
+                # user_id を str に寄せる（後段のキー一致のため）
+                if "user_id" in x:
+                    x["user_id"] = str(x["user_id"])
+                out.append(x)
+        return out
+
+    # 文字列（JSON）
+    if isinstance(val, str):
+        try:
+            obj = json.loads(val)
+            return parse_players(obj)  # 再帰でlist処理へ
+        except Exception:
+            return []
+
+    # その他（dict単体など）も一応吸う
+    if isinstance(val, dict):
+        if "user_id" in val:
+            val["user_id"] = str(val["user_id"])
+        return [val]
+
+    return []
 
 def get_user_data(user_id, user_table):
     try:
@@ -498,19 +297,25 @@ def get_user_data(user_id, user_table):
     except Exception as e:
         current_app.logger.warning(f"[get_user_data ERROR] user_id={user_id}: {e}")
         return None
-    
-
-
 
 
 @dataclass
 class Player:
     name: str
-    level: int  # 30-100
+    level: float  # 保守的スキル（μ - 3σ）で計算される
     gender: str  # 'M' または 'F'
+    skill_score: Optional[float] = None  # μ（平均スキル）
+    skill_sigma: Optional[float] = None  # σ（不確実性）
     
     def __str__(self):
-        return f"{self.name}({self.level}点/{self.gender})"
+        return f"{self.name}({self.level:.1f}点/{self.gender})"
+    
+    @property
+    def conservative_skill(self) -> float:
+        """保守的スキル推定値（ペアリング用）"""
+        if self.skill_score is not None and self.skill_sigma is not None:
+            return self.skill_score - 3 * self.skill_sigma
+        return self.level
 
 
 def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) -> Tuple[
@@ -533,58 +338,355 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 
     return pairs, matches, waiting_players
 
-def generate_random_pairs(players: List[Player]) -> Tuple[List[Tuple[Player, Player]], List[Player]]:
+
+def _names_sample(players: List["Player"], n: int = 12) -> str:
+    """ログ用：先頭n人だけ名前を出す（多い時は ... を付ける）"""
+    names = [p.name for p in players]
+    if len(names) <= n:
+        return ", ".join(names)
+    return ", ".join(names[:n]) + f", ... (+{len(names)-n})"
+
+def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player", "Player"]], List["Player"]]:
     """
     プレイヤーリストから完全ランダムでペアを作成する。
     奇数の場合は最後のプレイヤーを待機リストに入れる。
+    ※元の players は変更しない
     """
-    import logging
     logger = logging.getLogger("generate_random_pairs")
 
-    # 🔀 シャッフル前のプレイヤー
-    logger.info(f"[START] プレイヤー数: {len(players)}")
-    logger.info("▶ シャッフル前: " + ", ".join([p.name for p in players]))   
+    # INFO: 要約だけ（普段の運用）
+    logger.info("[pairs] start n=%d", len(players))
 
-    # 🤝 ペア作成
-    pairs = []
-    for i in range(0, len(players) - 1, 2):
-        if i + 1 < len(players):  # インデックス範囲チェック
-            pairs.append((players[i], players[i + 1]))
-    logger.info(f"▶ 作成ペア数: {len(pairs)}")
+    shuffled = players.copy()
+    random.shuffle(shuffled)
 
-    # 🙋 余った人数（奇数の場合）
-    waiting_players = []
-    if len(players) % 2 == 1:
-        waiting_players.append(players[-1])
-        logger.info(f"▶ 奇数のため余った1人: {players[-1].name}")
+    # DEBUG: 詳細（必要な時だけ）
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("[pairs] input  : %s", _names_sample(players, n=16))
+        logger.debug("[pairs] shuffled: %s", _names_sample(shuffled, n=16))
 
-    logger.info("[END]")
+    pairs: List[Tuple["Player", "Player"]] = []
+    for i in range(0, len(shuffled) - 1, 2):
+        pairs.append((shuffled[i], shuffled[i + 1]))
+
+    waiting_players: List["Player"] = []
+    if len(shuffled) % 2 == 1:
+        waiting_players.append(shuffled[-1])
+
+    # INFO: 結果要約
+    if waiting_players:
+        logger.info("[pairs] made=%d waiting=1 (%s)", len(pairs), waiting_players[0].name)
+    else:
+        logger.info("[pairs] made=%d waiting=0", len(pairs))
+
     return pairs, waiting_players
 
-def generate_matches_by_pair_skill_balance(pairs: List[Tuple[Player, Player]], max_courts: int) -> Tuple[List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]], List[Tuple[Player, Player]]]:
-    """
-    ペア同士のスキル合計が近いように、試合を組む（1試合=2ペア）。
-    余ったペアは試合に使わない（→待機として返す）。
-    """
-    # 各ペアのスキル合計を算出
-    scored_pairs = [(pair, pair[0].level + pair[1].level) for pair in pairs]
 
-    # スキル順に並べて、近いもの同士をペア化
-    scored_pairs.sort(key=lambda x: x[1])
+# def generate_matches_by_pair_skill_balance(
+#     pairs: List[Tuple[Player, Player]],
+#     max_courts: int
+# ):
+#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+#     scored.sort(key=lambda x: x[1])
 
-    max_matches = min(len(scored_pairs) // 2, max_courts)
+#     max_matches = min(len(scored) // 2, max_courts)
+#     matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
+#     used = [False] * len(scored)
+
+#     for _ in range(max_matches):
+#         # まだ使ってない最小のペアを探す
+#         i = next((k for k, u in enumerate(used) if not u), None)
+#         if i is None:
+#             break
+#         used[i] = True
+
+#         # i と最も差が小さい未使用ペアを探す
+#         best_j = None
+#         best_diff = float("inf")
+#         for j in range(i + 1, len(scored)):
+#             if used[j]:
+#                 continue
+#             diff = abs(scored[i][1] - scored[j][1])
+#             if diff < best_diff:
+#                 best_diff = diff
+#                 best_j = j
+#                 if best_diff == 0:
+#                     break
+
+#         if best_j is None:
+#             # 相手が見つからないなら戻す
+#             used[i] = False
+#             break
+
+#         used[best_j] = True
+#         matches.append((scored[i][0], scored[best_j][0]))
+
+#     unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
+#     return matches, unused_pairs
+
+
+def generate_matches_by_pair_skill_balance(pairs, max_courts):
+    # スキル合計でソート
+    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+    scored.sort(key=lambda x: x[1])
+
     matches = []
-    used_indices = set()
+    # シンプルに、実力が近い隣り合わせのペア同士で試合を組む
+    # こうすることで、極端に強いペアは、次に強いペアと当たりやすくなる
+    for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+        matches.append((scored[i][0], scored[i+1][0]))
 
-    i = 0
-    while len(matches) < max_matches and i + 1 < len(scored_pairs):
-        pair1 = scored_pairs[i][0]
-        pair2 = scored_pairs[i + 1][0]
-        matches.append((pair1, pair2))
-        used_indices.update([i, i + 1])
-        i += 2
-
-    # 使用されなかったペアは待機として返す
-    unused_pairs = [scored_pairs[i][0] for i in range(len(scored_pairs)) if i not in used_indices]
-
+    # 余ったペアを待機リストへ
+    used_count = len(matches) * 2
+    unused_pairs = [p[0] for p in scored[used_count:]]
+    
     return matches, unused_pairs
+
+
+def pair_strength(p1: Player, p2: Player) -> float:
+    c1 = getattr(p1, "conservative", None)
+    c2 = getattr(p2, "conservative", None)
+    if c1 is not None and c2 is not None:
+        return float(c1) + float(c2)
+
+    s1 = getattr(p1, "skill_score", None)
+    s2 = getattr(p2, "skill_score", None)
+    if s1 is not None and s2 is not None:
+        return float(s1) + float(s2)
+
+    return float(getattr(p1, "level", 0)) + float(getattr(p2, "level", 0))
+
+
+def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
+    """
+    シミュレーションを行い、全コートのスキルバランスが最も均等な組み合わせを返す。
+    """
+    # 試合に必要な人数（4の倍数）
+    num_active = len(active_players)
+    required_players_count = (num_active // 4) * 4
+    num_courts = min(max_courts, required_players_count // 4)
+
+    if num_courts == 0:
+        return [], active_players
+
+    best_matches = []
+    best_waiting = []
+    min_total_penalty = float('inf')
+
+    for i in range(iterations):
+        # 1) シャッフルして仮の組分けを作る
+        temp_players = active_players[:]
+        random.shuffle(temp_players)
+        
+        current_active = temp_players[:num_courts * 4]
+        current_waiting = temp_players[num_courts * 4:]
+        
+        current_matches = []
+        total_penalty = 0
+        
+        # 2) 4人ずつコートに割り振り、スキル差を計算
+        for c in range(num_courts):
+            # 4人抽出
+            p1, p2, p3, p4 = current_active[c*4 : (c+1)*4]
+            
+            # チーム分けの全3パターンを試して、そのコート内でのベストを探す
+            # (p1,p2 vs p3,p4), (p1,p3 vs p2,p4), (p1,p4 vs p2,p3)
+            possible_teams = [
+                ((p1, p2), (p3, p4)),
+                ((p1, p3), (p2, p4)),
+                ((p1, p4), (p2, p3))
+            ]
+            
+            best_court_diff = float('inf')
+            best_court_pair = None
+            
+            for t1, t2 in possible_teams:
+                # 平均スキルの差（conservativeスキルを使用）
+                avg1 = (t1[0].conservative + t1[1].conservative) / 2
+                avg2 = (t2[0].conservative + t2[1].conservative) / 2
+                diff = abs(avg1 - avg2)
+                
+                if diff < best_court_diff:
+                    best_court_diff = diff
+                    best_court_pair = (t1, t2)
+            
+            current_matches.append(best_court_pair)
+            # 二乗ペナルティ：大きな実力差があるコートをより厳しく評価
+            total_penalty += (best_court_diff ** 2)
+
+        # 3) 全体評価が過去最高なら更新
+        if total_penalty < min_total_penalty:
+            min_total_penalty = total_penalty
+            best_matches = current_matches
+            best_waiting = current_waiting
+
+    return best_matches, best_waiting
+
+
+# =========================================================
+# Rest queue (queue 방식 + late joiners at tail)
+# =========================================================
+from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime, timezone
+import random
+
+from botocore.exceptions import ClientError
+from flask import current_app
+
+
+def _parse_iso_dt(s: Optional[str]) -> Optional[datetime]:
+    """ISO8601文字列をUTC datetimeへ。失敗したらNone。"""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _rest_queue_pk(queue_key: str) -> str:
+    return f"meta#{queue_key}"
+
+
+def _load_rest_queue(meta_table, *, queue_key: str = "rest_queue") -> Dict[str, Any]:
+    """
+    Returns dict:
+      queue: List[str]
+      generation: int
+      version: int
+      cycle_started_at: Optional[str]
+    """
+    pk = _rest_queue_pk(queue_key)
+    try:
+        resp = meta_table.get_item(Key={"match_id": pk}, ConsistentRead=True)
+        item = resp.get("Item") or {}
+
+        q = item.get("queue", [])
+        if not isinstance(q, list):
+            q = []
+
+        return {
+            "queue": q,
+            "generation": int(item.get("generation", 1) or 1),
+            "version": int(item.get("version", 0) or 0),
+            "cycle_started_at": item.get("cycle_started_at"),
+        }
+    except ClientError as e:
+        current_app.logger.error("[rest_queue][LOAD_ERR] %s", e)
+        return {"queue": [], "generation": 1, "version": 0, "cycle_started_at": None}
+
+
+# def _save_rest_queue_optimistic(
+#     meta_table,
+#     *,
+#     queue_key: str,
+#     queue: List[str],
+#     generation: int,
+#     prev_version: int,
+#     cycle_started_at: Optional[str] = None,
+# ) -> bool:
+#     """
+#     楽観ロックで rest_queue を保存する
+#     - match_id = meta#<queue_key>
+#     - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
+#     - cycle_started_at は指定された場合のみ更新
+#     """
+#     pk = _rest_queue_pk(queue_key)
+#     new_version = int(prev_version) + 1
+
+#     expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
+#     expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
+
+#     if cycle_started_at is not None:
+#         expr_names["#cs"] = "cycle_started_at"
+#         expr_vals[":cs"] = cycle_started_at
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
+#     else:
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv"
+
+#     try:
+#         meta_table.update_item(
+#             Key={"match_id": pk},
+#             UpdateExpression=update_expr,
+#             ExpressionAttributeNames=expr_names,
+#             ExpressionAttributeValues=expr_vals,
+#             ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
+#         )
+#         return True
+#     except ClientError as e:
+#         code = e.response.get("Error", {}).get("Code")
+#         if code == "ConditionalCheckFailedException":
+#             return False
+#         current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
+#         return False
+
+
+# def _weighted_sample_from_queue(
+#     *,
+#     queue: List[str],
+#     waiting_count: int,
+#     by_id: Dict[str, Dict[str, Any]],
+#     skill_key: str = "skill_score",
+#     bottom_n: int = 2,
+#     boost: float = 1.2,
+# ) -> Tuple[List[str], List[str]]:
+#     """
+#     queue から waiting_count 人を重み付きで非復元抽出。
+#     戻り値: (picked_uids, remaining_queue)
+#     ※ remaining_queue は picked を除いた queue（元の順序保持）
+#     """
+#     if waiting_count <= 0 or not queue:
+#         return [], list(queue)
+
+#     cand = list(queue)
+
+#     def get_skill(uid: str) -> float:
+#         v = by_id.get(uid, {}).get(skill_key, 50)
+#         try:
+#             return float(v)
+#         except Exception:
+#             return 50.0
+
+#     skills = {uid: get_skill(uid) for uid in cand}
+#     low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
+#     weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
+
+#     picked: List[str] = []
+#     remaining = list(cand)
+
+#     for _ in range(min(waiting_count, len(remaining))):
+#         total = sum(weights[uid] for uid in remaining)
+#         r = random.random() * total
+#         acc = 0.0
+#         chosen = remaining[-1]
+#         for uid in remaining:
+#             acc += weights[uid]
+#             if acc >= r:
+#                 chosen = uid
+#                 break
+#         picked.append(chosen)
+#         remaining = [u for u in remaining if u != chosen]
+
+#     picked_set = set(picked)
+#     remaining_queue = [uid for uid in queue if uid not in picked_set]
+#     return picked, remaining_queue
+
+
+# def _safe_float(v: Any, default: float) -> float:
+#     if v is None:
+#         return default
+#     try:
+#         if isinstance(v, Decimal):
+#             return float(v)
+#         return float(v)
+#     except Exception:
+#         return default

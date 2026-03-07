@@ -1,70 +1,63 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, g
+
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user, login_required
 from .dynamo import db
 from utils.s3 import upload_image_to_s3
 from uuid import uuid4
 from datetime import datetime, timezone
+from flask_wtf.csrf import generate_csrf
+
 
 
 
 post = Blueprint('post', __name__)
 
 @post.route('/post', methods=['GET', 'POST'])
-@login_required 
+@login_required
 def create_post():
-    if request.method == 'POST':       
+    if request.method == 'POST':
+        # ここは「ルートに入れた時だけ」出ます
+        current_app.logger.info(f"csrf_token(form)={request.form.get('csrf_token')}")
+        current_app.logger.info(f"form_keys={list(request.form.keys())}")
+
         content = request.form.get('content', '').strip()
-        youtube_url = request.form.get('youtube_url', '').strip()  # YouTube URL取得
+        youtube_url = request.form.get('youtube_url', '').strip()
         image = request.files.get('image')
-        print(f"投稿内容: {repr(content)}")      
-        
-        # バリデーションを追加
+
         if not content:
             flash('投稿内容を入力してください', 'warning')
             return render_template('uguu/create_post.html')
-        
+
         if len(content) > 1000:
             flash('投稿内容は1000文字以内で入力してください', 'warning')
             return render_template('uguu/create_post.html')
-        
+
         try:
-            # 画像がアップロードされた場合、S3にアップロード
             image_url = None
             if image and image.filename:
-                # 画像ファイル形式チェック
                 allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
                 file_ext = image.filename.lower().split('.')[-1]
-                
                 if file_ext not in allowed_extensions:
                     flash('サポートされていない画像形式です', 'warning')
                     return render_template('uguu/create_post.html')
-                
+
                 image_url = upload_image_to_s3(image)
-                print(f"画像アップロード成功: {image_url}")
-            
-            # YouTube URLを埋め込み形式に変換
+
             embed_url = None
             if youtube_url:
                 embed_url = convert_youtube_url(youtube_url)
                 if not embed_url:
                     flash('有効なYouTube URLを入力してください', 'warning')
                     return render_template('uguu/create_post.html')
-                print(f"YouTube URL変換成功: {embed_url}")
-            
-            # DynamoDBに保存（youtube_urlを追加）
+
             db.create_post(current_user.id, content, image_url, embed_url)
-            print("投稿作成成功")
-            
             flash('投稿が完了しました', 'success')
             return redirect(url_for('uguu.show_timeline'))
-            
-        except Exception as e:
-            print(f"投稿作成エラー: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+
+        except Exception:
             flash('投稿の作成に失敗しました', 'error')
             return render_template('uguu/create_post.html')
-    
+
     return render_template('uguu/create_post.html')
 
 def convert_youtube_url(url):

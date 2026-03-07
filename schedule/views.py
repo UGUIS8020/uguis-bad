@@ -51,16 +51,16 @@ def admin_schedules():
         
         # courtフィールドが存在するかチェック
         if hasattr(form, 'court'):
-            print(f"✅ courtフィールド存在: {form.court}")
-            print(f"✅ courtフィールド値: '{form.court.data}'")
-            print(f"✅ courtフィールド選択肢: {form.court.choices}")
+            print(f"courtフィールド存在: {form.court}")
+            print(f"courtフィールド値: '{form.court.data}'")
+            print(f"courtフィールド選択肢: {form.court.choices}")
         else:
             print("❌ courtフィールドが存在しません！")
         
         print("=" * 60)
 
     if form.validate_on_submit():
-        logger.info("✅ フォームバリデーション成功")
+        logger.info("フォームバリデーション成功")
         try:
             schedule_table = get_schedule_table()
             if not schedule_table:
@@ -96,8 +96,8 @@ def admin_schedules():
             print(f"🗂️ 登録データ: {schedule_data}")  # print でも出力
 
             schedule_table.put_item(Item=schedule_data)
-            logger.info(f"✅ スケジュール登録成功（ID: {schedule_id}）")
-            print(f"✅ スケジュール登録成功（ID: {schedule_id}）")
+            logger.info(f"スケジュール登録成功（ID: {schedule_id}）")
+            print(f"スケジュール登録成功（ID: {schedule_id}）")
             flash('スケジュールが登録されました', 'success')
             return redirect(url_for('schedule.admin_schedules'))
 
@@ -118,7 +118,7 @@ def admin_schedules():
         response = schedule_table.scan()
         all_schedules = response.get('Items', [])
 
-        logger.info(f"📊 スケジュール取得件数: {len(all_schedules)} 件")
+        logger.info(f"スケジュール取得件数: {len(all_schedules)} 件")
 
         schedules = sorted(
             all_schedules,
@@ -228,7 +228,7 @@ def edit_schedule(schedule_id):
                         }
                     )                    
                     
-                    print(f"✅ スケジュール更新成功（ID: {schedule_id}）")
+                    print(f"スケジュール更新成功（ID: {schedule_id}）")
                     flash('スケジュールを更新しました', 'success')
                     return redirect(url_for('index'))
                     
@@ -258,8 +258,7 @@ def edit_schedule(schedule_id):
 
 @bp.route("/delete_schedule/<schedule_id>", methods=['POST'])
 @login_required
-def delete_schedule(schedule_id):
-    # from app import cache の代わりに
+def delete_schedule(schedule_id):    
     from flask import current_app
     
     if not current_user.administrator:

@@ -112,8 +112,26 @@
                 font-size: 2rem !important;
                 padding: 0.6rem 1rem !important;
             }
+        }        
+        .score-stepper{
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
+        .score-step-btn{
+          width: 7rem;
+          height: 4.5rem;
+          font-size: 3rem;
+          font-weight: bold;
+          padding: 0;
+          line-height: 1;    
+          touch-action: manipulation;      
+        }      
+      
     </style>
+
+<!-- <meta name="csrf-token" content="{{ csrf_token() }}"> -->
+
 </head>
 <body class="bg-light">    
 
@@ -138,6 +156,7 @@
                 本日の試合（{{ court_data|length }}面）
             </h3>
             <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="input-group input-group-lg">
                     <label class="input-group-text" for="score_format">試合点数</label>
                     <select class="form-select form-select-lg" name="score_format" id="score_format" onchange="this.form.submit()">
@@ -151,83 +170,114 @@
 
     <!-- コートデータのループ -->
     <div class="row row-cols-1 g-4">
-        {% if match_courts and match_courts|length > 0 %}
-            {% for court_num, court in match_courts.items() %}
-            <div class="col">
-                <div class="card h-100 shadow-lg court-card">
-                    <div class="card-header bg-success text-white text-center">
-                        <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
-                    </div>
-                    <div class="card-body p-4">
-                        <form class="score-form" 
-                            data-court-number="{{ court_num }}"
-                            id="score-form-{{ court_num }}"
-                            action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">                            
-                            
-                            <!-- チームA -->
-                            <div class="score-row">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center">
-                                        <span class="badge bg-danger me-3 team-badge">A</span>
-                                        <span class="team-name">
-                                            {% for player in court.team_a %}
-                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                            {% endfor %}
-                                        </span>
-                                    </div>
-                                    <div style="width: 200px;">                                
-                                        <input type="number" name="team1_score" class="form-control score-input"
-                                            required min="0" placeholder="0"
-                                            inputmode="numeric" pattern="\d*">
-                                    </div>
+    {% if match_courts and match_courts|length > 0 %}
+        {% for court_num, court in match_courts.items() %}
+        <div class="col">
+            <div class="card h-100 shadow-lg court-card">
+                <div class="card-header bg-success text-white text-center">
+                    <h2 class="mb-0">🎾 コート{{ court_num }}</h2>
+                </div>
+                <div class="card-body p-4">
+                    <form class="score-form"
+                          method="POST"
+                          data-court-number="{{ court_num }}"
+                          id="score-form-{{ court_num }}"
+                          action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <div class="score-row mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="d-flex align-items-center flex-grow-1">
+                                    <span class="badge bg-danger me-3 team-badge">A</span>
+                                    <span class="team-name">
+                                        {% for player in court.team_a %}
+                                            {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div>
+                                <div class="score-stepper" style="width: 220px;">
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, -1)">－</button>
+
+                                  <input type="text"
+                                        name="team1_score"
+                                        class="form-control score-input text-center"
+                                        value="21"
+                                        required
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;"
+                                        placeholder="0"
+                                        data-min="0"
+                                        data-max="99"
+                                        data-step="1">
+
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, 1)">＋</button>
                                 </div>
                             </div>
+                        </div>
+                        
 
-                            <!-- VS表示 -->
-                            <div class="text-center my-4">
-                                <span class="vs-display">VS</span>
-                            </div>
+                        <div class="score-row mb-4">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="d-flex align-items-center flex-grow-1">
+                                    <span class="badge bg-primary me-3 team-badge">B</span>
+                                    <span class="team-name">
+                                        {% for player in court.team_b %}
+                                            {{ player.display_name }}{% if not loop.last %} & {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div> 
+                                <div class="score-stepper" style="width: 220px;">
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, -1)">－</button>
 
-                            <!-- チームB -->
-                            <div class="score-row">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center">
-                                        <span class="badge bg-primary me-3 team-badge">B</span>
-                                        <span class="team-name">
-                                            {% for player in court.team_b %}
-                                                {{ player.display_name }}{% if not loop.last %} & {% endif %}
-                                            {% endfor %}
-                                        </span>
-                                    </div>
-                                    <div style="width: 200px;">                                
-                                        <input type="number" name="team2_score" class="form-control score-input"
-                                            required min="0" placeholder="0"
-                                            inputmode="numeric" pattern="\d*">
-                                    </div>                         
+                                  <input type="text"
+                                        name="team2_score"
+                                        class="form-control score-input text-center"
+                                        value="21"
+                                        required
+                                        inputmode="numeric"
+                                        pattern="[0-9]*"
+                                        style="font-size: 2.5rem; height: 4.5rem; font-weight: bold;"
+                                        placeholder="0"
+                                        data-min="0"
+                                        data-max="99"
+                                        data-step="1">
+
+                                  <button type="button"
+                                          class="btn btn-outline-secondary score-step-btn"
+                                          onclick="stepScore(this, 1)">＋</button>
                                 </div>
                             </div>
-                                
-                            <div class="text-center mt-5">
-                                <button type="submit" class="btn btn-orange submit-btn">
-                                    <i class="fas fa-trophy me-2"></i>スコア送信
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+                        </div>
+
+                        <div class="text-center mt-5">
+                            <button type="submit" class="btn btn-orange submit-btn w-100 py-3" style="font-size: 1.25rem; font-weight: bold; border-radius: 10px;">
+                                <i class="fas fa-trophy me-2"></i>スコア送信
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
-            {% endfor %}
-        {% else %}
-            <div class="col-12">
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle"></i> コートデータが設定されていません。管理者に連絡してください。
-                </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12">
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i> コートデータが設定されていません。管理者に連絡してください。
             </div>
-        {% endif %}
-    </div>
+        </div>
+    {% endif %}
+</div>
 
     <!-- 試合終了ボタン -->
     <form method="POST" action="{{ url_for('game.finish_current_match') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="text-center mt-5 mb-5">
             <button id="endMatchButton" type="submit" class="btn btn-danger btn-xl px-5 py-3 fs-2" disabled>
                 <i class="fas fa-flag-checkered me-2"></i>試合終了
@@ -242,147 +292,295 @@
 </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        const forms = document.querySelectorAll(".score-form");
-        const formStatus = {};
-        let submittedCount = 0;
-        const totalForms = forms.length;
-        
-        // データがない場合のメッセージ表示
-        if (totalForms === 0) {
-            document.getElementById("no-data-message").style.display = "block";
-        }
-    
-        // 試合終了ボタンを初期状態で無効に
-        const endButton = document.getElementById("endMatchButton");
-        if (endButton) endButton.disabled = true;
-    
-        // 各スコアフォームの送信処理
-        forms.forEach((form, index) => {
-            const formId = form.getAttribute("id");
-            formStatus[formId] = { submitted: false };
-    
-            form.addEventListener("submit", function (e) {
-                e.preventDefault();
-    
-                const formData = new FormData(form);
-                const actionUrl = form.getAttribute("action");
-                
-                // 同点チェック
-                const team1Score = parseInt(formData.get("team1_score"));
-                const team2Score = parseInt(formData.get("team2_score"));
-                
-                if (team1Score === team2Score) {
-                    alert("スコアが同点です。勝者を決めてください。");
-                    return;
-                }
-    
-                fetch(actionUrl, {
-                    method: "POST",
-                    body: formData,
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            throw new Error(text || "送信エラー");
-                        });
-                    }
-                    return response;
-                })
-                .then(() => {
-                    const submitBtn = form.querySelector("button[type='submit']");
-                    if (submitBtn) {
-                        submitBtn.disabled = true;
-                        submitBtn.innerHTML = '<i class="fas fa-check me-2"></i>送信済み';
-                        submitBtn.classList.remove("btn-orange");
-                        submitBtn.classList.add("submitted-btn");
-                    }
-    
-                    formStatus[formId].submitted = true;
-                    submittedCount++;
-    
-                    if (submittedCount === totalForms && endButton) {
-                        console.log("✅ 全スコア送信完了 → 試合終了ボタン有効化");
-                        endButton.disabled = false;
-                    }
-                })
-                .catch(error => {
-                    alert(error.message || "スコア送信に失敗しました");
-                    console.error(error);
-                });
-            });
-        });
-    
-        // ✅ 試合終了ボタンのクリック処理を追加
-        if (endButton) {
-            endButton.addEventListener("click", function (e) {
-                e.preventDefault();
-                
-                // ボタンを即座に無効化（重複クリック防止）
-                endButton.disabled = true;
-                endButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+document.addEventListener("DOMContentLoaded", function () {
+  const forms = document.querySelectorAll(".score-form");
+  const totalForms = forms.length;
 
-                fetch("/game/finish_current_match", {
-                    method: "POST",
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'  // Ajax判定用ヘッダー
-                    }
-                })
-                .then(res => res.json())  // JSONレスポンスを期待
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = "/game/court";
-                    } else {
-                        throw new Error(data.error || "処理に失敗しました");
-                    }
-                })
-                .catch(error => {
-                    // エラー時はボタンを再度有効化
-                    endButton.disabled = false;
-                    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
-                    alert(error.message || "通信エラーが発生しました");
-                    console.error(error);
-                });
-            });
-        }
+  // データがない場合のメッセージ表示
+  if (totalForms === 0) {
+    const msg = document.getElementById("no-data-message");
+    if (msg) msg.style.display = "block";
+  }
 
-        // デバッグボタンの設定
-        const debugButton = document.getElementById("debugButton");
-        if (debugButton) {
-            debugButton.addEventListener("click", function() {
-                // サーバーからデータを取得
-                fetch("/game/debug_data")
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById("debug-data").textContent = JSON.stringify(data, null, 2);
-                    document.getElementById("debug-info").style.display = "block";
-                })
-                .catch(error => {
-                    console.error("デバッグデータの取得に失敗:", error);
-                    document.getElementById("debug-data").textContent = "データ取得エラー: " + error.message;
-                    document.getElementById("debug-info").style.display = "block";
-                });
-            });
-        }
+  // CSRFトークン取得（meta優先、無ければフォームhiddenから拾う）
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.getAttribute("content")) return meta.getAttribute("content");
 
-        // スコア入力フィールドにフォーカス時のアニメーション効果
-        document.querySelectorAll('.score-input').forEach(input => {
-            input.addEventListener('focus', function() {
-                this.style.transform = 'scale(1.05)';
-                this.style.transition = 'transform 0.2s ease';
-            });
-            
-            input.addEventListener('blur', function() {
-                this.style.transform = 'scale(1)';
-            });
+    // 保険：最初のフォーム内 hidden を探す
+    const hidden = document.querySelector('input[name="csrf_token"]');
+    if (hidden && hidden.value) return hidden.value;
+
+    return "";
+  }
+  const CSRF_TOKEN = getCsrfToken();
+
+  // 試合終了ボタン
+  const endButton = document.getElementById("endMatchButton");
+  if (endButton) endButton.disabled = true;
+
+  // 送信済み管理（フォームID単位）
+  const formStatus = {};
+  let submittedCount = 0;
+
+  // 自動finish（二重実行防止）
+  let finishTriggered = false;
+  let finishInFlight = false;
+
+  function setEndButtonProcessing() {
+    if (!endButton) return;
+    endButton.disabled = true;
+    endButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+  }
+
+  function restoreEndButton() {
+    if (!endButton) return;
+    endButton.disabled = false;
+    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+  }
+
+  function disableEndButton() {
+    if (!endButton) return;
+    endButton.disabled = true;
+    endButton.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+  }
+
+  // ★ CSRF付きでPOSTする共通関数（FormData/JSONどちらも対応）
+  function postWithCsrf(url, { formData = null, jsonBody = null, extraHeaders = {} } = {}) {
+    const headers = Object.assign({}, extraHeaders);
+
+    // Flask-WTF(CSRFProtect)はこのヘッダ名を見ます
+    if (CSRF_TOKEN) headers["X-CSRFToken"] = CSRF_TOKEN;
+    headers["X-Requested-With"] = headers["X-Requested-With"] || "XMLHttpRequest";
+
+    const options = { method: "POST", headers };
+
+    if (formData) {
+      // FormData に csrf_token が無ければ付与（サーバ側がフォームから検証する場合に備える）
+      if (CSRF_TOKEN && !formData.has("csrf_token")) {
+        formData.append("csrf_token", CSRF_TOKEN);
+      }
+      options.body = formData;
+      // Content-Type は fetch が自動で multipart/form-data; boundary を付けるので設定しない
+    } else if (jsonBody) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(jsonBody);
+    }
+
+    return fetch(url, options);
+  }
+
+  function finishMatchAjax({ auto = false } = {}) {
+    if (finishInFlight) return;   // ★追加
+    finishInFlight = true;        // ★追加
+
+    if (auto) {
+      if (finishTriggered) { finishInFlight = false; return; }
+      finishTriggered = true;
+    }
+
+    if (window._stopPolling) window._stopPolling();
+
+    setEndButtonProcessing();
+
+    postWithCsrf("/game/finish_current_match")
+      .then(async (res) => {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          if (!res.ok) throw new Error(data.error || "試合終了に失敗しました");
+          return data;
+        } catch {
+          if (!res.ok) throw new Error(text || "試合終了に失敗しました");
+          return { success: true };
+        }
+      })
+      .then((data) => {
+        if (data && data.success) {
+          window.location.href = "/game/court";
+          return;          
+        }
+        finishInFlight = false;
+        if (window._startPolling) window._startPolling();
+        if (auto) finishTriggered = false;
+        restoreEndButton();
+        alert((data && data.error) || "試合終了に失敗しました");
+      })
+      .catch((err) => {
+        finishInFlight = false;  
+        if (window._startPolling) window._startPolling();
+        if (auto) finishTriggered = false;
+        restoreEndButton();
+        alert(err.message || "通信エラーが発生しました");
+        console.error(err);
+      });
+  }
+
+  function onAllSubmitted() {
+    console.log("全スコア送信完了 → 自動で試合終了");
+    finishMatchAjax({ auto: true });
+  }
+
+  // 各スコアフォームの送信処理
+  forms.forEach((form) => {
+    const formId = form.getAttribute("id") || `score-form-${Math.random().toString(36).slice(2)}`;
+    formStatus[formId] = { submitted: false, inFlight: false };
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      if (formStatus[formId].submitted || formStatus[formId].inFlight) return;
+      formStatus[formId].inFlight = true; 
+
+      const formData = new FormData(form);
+      const actionUrl = form.getAttribute("action");
+
+      const team1Score = Number(formData.get("team1_score"));
+      const team2Score = Number(formData.get("team2_score"));
+
+      if (Number.isNaN(team1Score) || Number.isNaN(team2Score)) {
+        formStatus[formId].inFlight = false;   // ←追加
+        alert("スコアを入力してください。");
+        return;
+      }
+      if (team1Score === team2Score) {
+        formStatus[formId].inFlight = false;   // ←追加
+        alert("スコアが同点です。勝者を決めてください。");
+        return;
+      }
+
+      const submitBtn = form.querySelector("button[type='submit']");
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>送信中...';
+      }
+
+      postWithCsrf(actionUrl, { formData })
+        .then(async (response) => {
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || "送信エラー");
+          }
+          return response;
+        })
+        .then(() => {
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-check me-2"></i>送信済み';
+            submitBtn.classList.remove("btn-orange");
+            submitBtn.classList.add("submitted-btn");
+          }
+
+          form.querySelectorAll("input").forEach((inp) => (inp.disabled = true));
+          form.style.pointerEvents = "none";
+          form.style.opacity = "0.9";
+
+          formStatus[formId].submitted = true;
+          formStatus[formId].inFlight = false;
+          submittedCount++;
+
+          if (submittedCount === totalForms) {
+            onAllSubmitted();
+          } else {
+            disableEndButton();
+          }
+        })
+        .catch((error) => {
+          formStatus[formId].inFlight = false;
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-trophy me-2"></i>スコア送信';
+          }
+          alert(error.message || "スコア送信に失敗しました");
+          console.error(error);
         });
     });
+  });
 
-    // デバッグ情報の表示/非表示を切り替える関数
-    function toggleDebug() {
-        const debugInfo = document.getElementById("debug-info");
-        debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
-    }
+  // 手動finish（自動失敗の保険）
+  if (endButton) {
+    endButton.addEventListener("click", function (e) {
+      e.preventDefault();
+
+      if (submittedCount !== totalForms) {
+        alert("未送信のコートがあります。すべて送信してください。");
+        return;
+      }
+      if (finishInFlight) return;
+      finishMatchAjax({ auto: false });
+    });
+  }
+
+  // デバッグボタン（GETなのでCSRF不要）
+  const debugButton = document.getElementById("debugButton");
+  if (debugButton) {
+    debugButton.addEventListener("click", function () {
+      fetch("/game/debug_data")
+        .then((response) => response.json())
+        .then((data) => {
+          document.getElementById("debug-data").textContent = JSON.stringify(data, null, 2);
+          document.getElementById("debug-info").style.display = "block";
+        })
+        .catch((error) => {
+          console.error("デバッグデータの取得に失敗:", error);
+          document.getElementById("debug-data").textContent = "データ取得エラー: " + error.message;
+          document.getElementById("debug-info").style.display = "block";
+        });
+    });
+  }
+
+  // フォーカス時のアニメーション
+  document.querySelectorAll(".score-input").forEach((input) => {
+    input.addEventListener("focus", function () {
+      this.style.transform = "scale(1.05)";
+      this.style.transition = "transform 0.2s ease";
+    });
+    input.addEventListener("blur", function () {
+      this.style.transform = "scale(1)";
+    });
+  });
+});
+
+// デバッグ表示切替
+function toggleDebug() {
+  const debugInfo = document.getElementById("debug-info");
+  debugInfo.style.display = debugInfo.style.display === "none" ? "block" : "none";
+}
+</script>
+
+<script>
+  function stepScore(btn, deltaSign) {
+    // btn の親(.score-stepper)から input を探す
+    const wrapper = btn.closest('.score-stepper');
+    const input = wrapper.querySelector('input.score-input');
+
+    const step = parseInt(input.dataset.step || '1', 10);
+    const min  = parseInt(input.dataset.min  || '0', 10);
+    const max  = parseInt(input.dataset.max  || '999', 10);
+
+    // 現在値（空や不正なら 0）
+    let v = parseInt((input.value || '0').replace(/[^\d]/g, ''), 10);
+    if (Number.isNaN(v)) v = 0;
+
+    // 増減
+    v = v + (deltaSign * step);
+
+    // clamp
+    if (v < min) v = min;
+    if (v > max) v = max;
+
+    input.value = String(v);
+
+    // もし「入力変更イベント」で他処理してるなら発火
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // 手入力でも数字以外を除去（任意）
+  document.addEventListener('input', (e) => {
+    if (!e.target.classList.contains('score-input')) return;
+    e.target.value = e.target.value.replace(/[^\d]/g, '');
+  });
 </script>
 
 </body>
