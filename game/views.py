@@ -69,84 +69,120 @@ def debug_duplicates(entry_table):
 @login_required
 def court():
     logger = current_app.logger
-    # --- 1. 変数の初期化 ---
-    user_id = str(current_user.get_id())  # 文字列として確実に取得
-    is_registered = False
-    is_resting = False
-    is_playing = False
-    skill_score = 50
-    match_count = 0
-    
+
     try:
+        # セッション初期値
         session.setdefault("score_format", "21")
+
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
 
-        # データの取得（フィルタを少し緩め、statusがあれば取得するようにします）
-        filter_expr = Attr("entry_status").is_in(["pending", "resting", "playing"])
-        
-        items = _scan_all(match_table, FilterExpression=filter_expr, ConsistentRead=True)
+        # ★履歴(rest_event)は現役一覧から除外
+        filter_expr = (
+            Attr("entry_status").is_in(["pending", "resting", "playing"])
+            & (Attr("type").not_exists() | Attr("type").ne("rest_event"))
+        )
 
+        items = _scan_all(
+            match_table,
+            FilterExpression=filter_expr,
+            ConsistentRead=True
+        )
+
+        # --- デフォルト値補完（ログ無し） ---
+        for it in items:
+            it["rest_count"]  = it.get("rest_count")  or 0
+            it["match_count"] = it.get("match_count") or 0
+            it["join_count"]  = it.get("join_count")  or 0
+
+        # --- ステータス別に分類 ---
         pending_players = []
         resting_players = []
         playing_players = []
 
         for it in items:
-            it["rest_count"]  = it.get("rest_count")  or 0
-            it["match_count"] = it.get("match_count") or 0
-            it["join_count"]  = it.get("join_count")  or 0
-            
             st = it.get("entry_status")
-            if st == "pending": pending_players.append(it)
-            elif st == "resting": resting_players.append(it)
-            elif st == "playing": playing_players.append(it)
+            if st == "pending":
+                pending_players.append(it)
+            elif st == "resting":
+                resting_players.append(it)
+            elif st == "playing":
+                playing_players.append(it)
 
-        # --- 2. 自分のステータス判定（ID比較を強化） ---
-        # DB上のIDと現在のIDを、接頭辞の有無に関わらず比較
-        def is_same_user(db_uid, my_uid):
-            if not db_uid: return False
-            db_uid_str = str(db_uid)
-            return db_uid_str == my_uid or db_uid_str == f"user#{my_uid}" or my_uid == f"user#{db_uid_str}"
+        # --- ユーザー状態の判定（自分の entry は「最新1件」を採用） ---
+        user_id = current_user.get_id()
 
-        my_entries = [it for it in items if is_same_user(it.get("user_id"), user_id)]
-        
+        is_registered = False
+        is_resting = False
+        is_playing = False
+        skill_score = 50
+        match_count = 0
+
+        def _ts(it):
+            # 文字列ISO前提。無ければ空文字で最小扱い
+            return str(it.get("updated_at") or it.get("joined_at") or it.get("created_at") or "")
+
+        my_entries = [it for it in items if it.get("user_id") == user_id]
+
+        me = None
         if my_entries:
-            def _get_ts(it):
-                # 時刻フィールドが一つもなくてもエラーにならないように
-                return str(it.get("updated_at") or it.get("joined_at") or it.get("created_at") or "0")
-
-            me = max(my_entries, key=_get_ts)
+            me = max(my_entries, key=_ts)  # 最新を採用
             st = me.get("entry_status")
 
             is_registered = (st == "pending")
             is_resting    = (st == "resting")
             is_playing    = (st == "playing")
-            skill_score   = me.get("skill_score", 50)
-            match_count   = me.get("match_count", 0) or 0
-        else:
-            # 自分のデータが見つからない場合、ログを出して原因を特定しやすくする
-            logger.warning(f"[court] My entry not found in {len(items)} items. user_id={user_id}")
 
-        # --- 3. スキルスコアの上書き ---
+            # いったん entry の値（無ければ50）
+            skill_score = me.get("skill_score", 50)
+            match_count = me.get("match_count", 0) or 0
+
+        # =========================================================
+        # ★ 追加：ユーザーテーブルを正として skill_score を上書き ★
+        #   -> 試合後に「スキル永続化」した値(例:63.74)がここで反映される
+        # =========================================================
         try:
-            users_table = current_app.dynamodb.Table("bad-users")
-            # 念のため Key の方も user# 有り無し両方考慮されるように（既存のEC2コードに合わせる）
-            resp_u = users_table.get_item(Key={"user#user_id": user_id}, ConsistentRead=True)
+            # あなたのユーザーテーブル名に合わせて変更
+            users_table = current_app.dynamodb.Table("bad-users")  # 例: "bad-users"
+           
+            resp_u = users_table.get_item(
+                Key={"user#user_id": user_id},
+                ConsistentRead=True
+            )
             u = resp_u.get("Item")
-            if not u: # もし user#user_id で取れなければ通常の user_id で試行
-                 resp_u = users_table.get_item(Key={"user_id": user_id}, ConsistentRead=True)
-                 u = resp_u.get("Item")
-                 
+
             if u and u.get("skill_score") is not None:
-                skill_score = u["skill_score"]
+                skill_score = u["skill_score"]  # DecimalのままでOK
         except Exception:
             logger.exception("[court] user skill_score reload failed")
 
-        # 進行中試合情報の取得
+        # --- 進行中試合関連（INFO最小、詳細はDEBUG） ---
         has_ongoing = has_ongoing_matches()
         completed, total = get_match_progress()
         current_courts = get_current_match_status()
+
         match_id = get_latest_match_id()
-        match_courts = get_organized_match_data(match_id) if match_id else {}
+        if match_id:
+            match_courts = get_organized_match_data(match_id)
+        else:
+            match_courts = {}
+
+        logger.debug(
+            "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
+            len(items), len(pending_players), len(resting_players), len(playing_players),
+            user_id,
+            ("playing" if is_playing else "resting" if is_resting else "pending" if is_registered else "none"),
+            has_ongoing, completed, total, match_id or "-"
+        )
+
+        if logger.isEnabledFor(10):  # DEBUG
+            logger.debug("[court] current_courts=%s", current_courts)
+            if match_id:
+                logger.debug("[court] match_courts keys=%d", len(match_courts))
+            if my_entries and me:
+                logger.debug(
+                    "[court][me] entries=%d picked_ts=%s picked_entry_skill=%s final_skill=%s",
+                    len(my_entries), _ts(me), me.get("skill_score"), skill_score
+                )
 
         return render_template(
             "game/court.html",
