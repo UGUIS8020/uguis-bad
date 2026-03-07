@@ -1,13 +1,16 @@
 from flask import current_app
 from trueskill import TrueSkill
 import random
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
 from botocore.exceptions import ClientError
 from typing import Optional
+from decimal import Decimal
+from trueskill import Rating, rate
+from typing import Optional, List
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -23,6 +26,7 @@ def get_current_match_meta():
     table = current_app.dynamodb.Table("bad-game-matches")
     resp = table.get_item(Key={"match_id": META_PK}, ConsistentRead=True)
     return resp.get("Item")
+
 
 def get_current_match_id():
     meta = get_current_match_meta()
@@ -99,46 +103,59 @@ def finish_match_meta(match_id: str):
             return False
         raise
 
+def normalize_user_pk(uid: str) -> str:
+    if uid is None:
+        raise ValueError("uid is None")
+    s = str(uid).strip()
+    if not s:
+        raise ValueError("uid is empty")
+    return s if s.startswith("user#") else f"user#{s}"
+
 def update_trueskill_for_players_and_return_updates(result_item):
-    from decimal import Decimal
-    from trueskill import Rating, rate
-    
-    updated_skills = {}
+    """
+    result_item から team_a/team_b のプレイヤーを取り出して TrueSkill 更新し、
+    updated_skills = {user_id: {skill_score: float, skill_sigma: float}} を返す。
+    同時に bad-users にも永続化する（test_ は除外）。
+    """
     user_table = current_app.dynamodb.Table("bad-users")
 
     def safe_get_score(item, keys):
         for k in keys:
             val = item.get(k)
             if val is not None:
-                try: return int(float(val))
-                except: continue
+                try:
+                    return int(float(val))
+                except Exception:
+                    continue
         return 0
 
     t1 = safe_get_score(result_item, ["team1_score", "team_a_score", "score1"])
     t2 = safe_get_score(result_item, ["team2_score", "team_b_score", "score2"])
     winner = str(result_item.get("winner", "A")).upper()
+    # score_diff は今は未使用なら消してOK（残したいならそのまま）
     score_diff = (t1 - t2) if winner == "A" else (t2 - t1)
 
-    # 【削除】RawItemのログを削除（中身が巨大なため）
-
-    def normalize_user_pk(uid: str) -> str:
-        uid = str(uid)
-        return uid if uid.startswith("user#") else f"user#{uid}"
-
-    def get_team_ratings(team, user_table):
-        ratings = []
-        for player in team:
-            uid = player.get("user_id")
-            if not uid:
+    def get_team_ratings(team):
+        """
+        team: [{user_id, skill_score?, skill_sigma?, ...}, ...]
+        戻り: [(player_uid, Rating), ...]
+        """
+        out = []
+        for player in team or []:
+            player_uid = player.get("user_id")
+            if not player_uid:
                 continue
 
             mu = player.get("skill_score")
             sig = player.get("skill_sigma")
 
+            # 足りなければ bad-users から拾う
             if mu is None or sig is None:
                 try:
-                    res = user_table.get_item(Key={"user#user_id": normalize_user_pk(uid)})
-                    data = res.get("Item", {}) or {}
+                    res = user_table.get_item(
+                        Key={"user#user_id": player_uid}
+                    )
+                    data = res.get("Item") or {}
                     mu = data.get("skill_score", 25.0)
                     sig = data.get("skill_sigma", 8.333)
                 except Exception:
@@ -153,27 +170,22 @@ def update_trueskill_for_players_and_return_updates(result_item):
             except Exception:
                 sig = 8.333
 
-            ratings.append((str(uid), Rating(mu=mu, sigma=sig)))
+            out.append((str(player_uid), Rating(mu=mu, sigma=sig)))
 
-        return ratings
+        return out
 
-    # --- ここで user_table を用意 ---
-    user_table = current_app.dynamodb.Table("bad-users")
-
-    ratings_a = get_team_ratings(result_item.get("team_a", []), user_table)
-    ratings_b = get_team_ratings(result_item.get("team_b", []), user_table)
+    ratings_a = get_team_ratings(result_item.get("team_a", []))
+    ratings_b = get_team_ratings(result_item.get("team_b", []))
 
     if not ratings_a or not ratings_b:
         return {}
 
-    team_a_uids = [uid for uid, r in ratings_a]
-    team_b_uids = [uid for uid, r in ratings_b]
-    team_a_ratings = [r for uid, r in ratings_a]
-    team_b_ratings = [r for uid, r in ratings_b]
+    team_a_uids = [uid for uid, _r in ratings_a]
+    team_b_uids = [uid for uid, _r in ratings_b]
+    team_a_ratings = [_r for _uid, _r in ratings_a]
+    team_b_ratings = [_r for _uid, _r in ratings_b]
 
-    # 勝敗 → ranks（小さいほど勝ち）
     ranks = [0, 1] if winner == "A" else [1, 0]
-
     new_team_a, new_team_b = rate([team_a_ratings, team_b_ratings], ranks=ranks)
 
     updated_skills = {}
@@ -182,29 +194,13 @@ def update_trueskill_for_players_and_return_updates(result_item):
     for uid, new_r in zip(team_b_uids, new_team_b):
         updated_skills[uid] = {"skill_score": float(new_r.mu), "skill_sigma": float(new_r.sigma)}
 
-    current_app.logger.info(
+    current_app.logger.debug(
         "[ts-after-rate] match=%s court=%s | updated=%d sample=%s",
         result_item.get("match_id"),
         result_item.get("court_number"),
         len(updated_skills),
         next(iter(updated_skills.items()), None),
-    )
-
-    for uid, vals in updated_skills.items():
-        if str(uid).startswith("test_"):
-            continue
-        try:
-            user_table.update_item(
-                Key={"user#user_id": normalize_user_pk(uid)},
-                UpdateExpression="SET skill_score = :s, skill_sigma = :g",
-                ExpressionAttributeValues={
-                    ":s": Decimal(str(round(vals["skill_score"], 2))),
-                    ":g": Decimal(str(round(vals["skill_sigma"], 4))),
-                }
-            )
-            current_app.logger.info(f"スキル永続化: {uid} → {vals['skill_score']:.2f}")
-        except Exception as e:
-            current_app.logger.error(f"スキル永続化エラー [{uid}]: {e}")
+    )    
 
     return updated_skills
 
@@ -221,7 +217,7 @@ def sync_match_entries_with_updated_skills(entry_mapping, updated_skills):
     
     try:
         # 同期開始のサマリー
-        current_app.logger.info(f"エントリー同期開始: 対象 {total_count} 件")
+        current_app.logger.debug(f"エントリー同期開始: 対象 {total_count} 件")
         
         for user_id, data in updated_skills.items():
             entry_id = data.get("entry_id") or entry_mapping.get(user_id)
@@ -342,6 +338,7 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 
     return pairs, matches, waiting_players
 
+
 def _names_sample(players: List["Player"], n: int = 12) -> str:
     """ログ用：先頭n人だけ名前を出す（多い時は ... を付ける）"""
     names = [p.name for p in players]
@@ -385,54 +382,78 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
     return pairs, waiting_players
 
 
-def generate_matches_by_pair_skill_balance(
-    pairs: List[Tuple[Player, Player]],
-    max_courts: int
-):
+# def generate_matches_by_pair_skill_balance(
+#     pairs: List[Tuple[Player, Player]],
+#     max_courts: int
+# ):
+#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+#     scored.sort(key=lambda x: x[1])
+
+#     max_matches = min(len(scored) // 2, max_courts)
+#     matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
+#     used = [False] * len(scored)
+
+#     for _ in range(max_matches):
+#         # まだ使ってない最小のペアを探す
+#         i = next((k for k, u in enumerate(used) if not u), None)
+#         if i is None:
+#             break
+#         used[i] = True
+
+#         # i と最も差が小さい未使用ペアを探す
+#         best_j = None
+#         best_diff = float("inf")
+#         for j in range(i + 1, len(scored)):
+#             if used[j]:
+#                 continue
+#             diff = abs(scored[i][1] - scored[j][1])
+#             if diff < best_diff:
+#                 best_diff = diff
+#                 best_j = j
+#                 if best_diff == 0:
+#                     break
+
+#         if best_j is None:
+#             # 相手が見つからないなら戻す
+#             used[i] = False
+#             break
+
+#         used[best_j] = True
+#         matches.append((scored[i][0], scored[best_j][0]))
+
+#     unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
+#     return matches, unused_pairs
+
+
+def generate_matches_by_pair_skill_balance(pairs, max_courts):
+    # スキル合計でソート
     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
     scored.sort(key=lambda x: x[1])
 
-    max_matches = min(len(scored) // 2, max_courts)
-    matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
-    used = [False] * len(scored)
+    matches = []
+    # シンプルに、実力が近い隣り合わせのペア同士で試合を組む
+    # こうすることで、極端に強いペアは、次に強いペアと当たりやすくなる
+    for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+        matches.append((scored[i][0], scored[i+1][0]))
 
-    for _ in range(max_matches):
-        # まだ使ってない最小のペアを探す
-        i = next((k for k, u in enumerate(used) if not u), None)
-        if i is None:
-            break
-        used[i] = True
-
-        # i と最も差が小さい未使用ペアを探す
-        best_j = None
-        best_diff = float("inf")
-        for j in range(i + 1, len(scored)):
-            if used[j]:
-                continue
-            diff = abs(scored[i][1] - scored[j][1])
-            if diff < best_diff:
-                best_diff = diff
-                best_j = j
-                if best_diff == 0:
-                    break
-
-        if best_j is None:
-            # 相手が見つからないなら戻す
-            used[i] = False
-            break
-
-        used[best_j] = True
-        matches.append((scored[i][0], scored[best_j][0]))
-
-    unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
+    # 余ったペアを待機リストへ
+    used_count = len(matches) * 2
+    unused_pairs = [p[0] for p in scored[used_count:]]
+    
     return matches, unused_pairs
 
 
 def pair_strength(p1: Player, p2: Player) -> float:
+    c1 = getattr(p1, "conservative", None)
+    c2 = getattr(p2, "conservative", None)
+    if c1 is not None and c2 is not None:
+        return float(c1) + float(c2)
+
     s1 = getattr(p1, "skill_score", None)
     s2 = getattr(p2, "skill_score", None)
     if s1 is not None and s2 is not None:
         return float(s1) + float(s2)
+
     return float(getattr(p1, "level", 0)) + float(getattr(p2, "level", 0))
 
 
@@ -481,8 +502,8 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
             
             for t1, t2 in possible_teams:
                 # 平均スキルの差（conservativeスキルを使用）
-                avg1 = (t1[0].skill_score + t1[1].skill_score) / 2
-                avg2 = (t2[0].skill_score + t2[1].skill_score) / 2
+                avg1 = (t1[0].conservative + t1[1].conservative) / 2
+                avg2 = (t2[0].conservative + t2[1].conservative) / 2
                 diff = abs(avg1 - avg2)
                 
                 if diff < best_court_diff:
@@ -501,3 +522,171 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
 
     return best_matches, best_waiting
 
+
+# =========================================================
+# Rest queue (queue 방식 + late joiners at tail)
+# =========================================================
+from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime, timezone
+import random
+
+from botocore.exceptions import ClientError
+from flask import current_app
+
+
+def _parse_iso_dt(s: Optional[str]) -> Optional[datetime]:
+    """ISO8601文字列をUTC datetimeへ。失敗したらNone。"""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _rest_queue_pk(queue_key: str) -> str:
+    return f"meta#{queue_key}"
+
+
+def _load_rest_queue(meta_table, *, queue_key: str = "rest_queue") -> Dict[str, Any]:
+    """
+    Returns dict:
+      queue: List[str]
+      generation: int
+      version: int
+      cycle_started_at: Optional[str]
+    """
+    pk = _rest_queue_pk(queue_key)
+    try:
+        resp = meta_table.get_item(Key={"match_id": pk}, ConsistentRead=True)
+        item = resp.get("Item") or {}
+
+        q = item.get("queue", [])
+        if not isinstance(q, list):
+            q = []
+
+        return {
+            "queue": q,
+            "generation": int(item.get("generation", 1) or 1),
+            "version": int(item.get("version", 0) or 0),
+            "cycle_started_at": item.get("cycle_started_at"),
+        }
+    except ClientError as e:
+        current_app.logger.error("[rest_queue][LOAD_ERR] %s", e)
+        return {"queue": [], "generation": 1, "version": 0, "cycle_started_at": None}
+
+
+# def _save_rest_queue_optimistic(
+#     meta_table,
+#     *,
+#     queue_key: str,
+#     queue: List[str],
+#     generation: int,
+#     prev_version: int,
+#     cycle_started_at: Optional[str] = None,
+# ) -> bool:
+#     """
+#     楽観ロックで rest_queue を保存する
+#     - match_id = meta#<queue_key>
+#     - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
+#     - cycle_started_at は指定された場合のみ更新
+#     """
+#     pk = _rest_queue_pk(queue_key)
+#     new_version = int(prev_version) + 1
+
+#     expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
+#     expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
+
+#     if cycle_started_at is not None:
+#         expr_names["#cs"] = "cycle_started_at"
+#         expr_vals[":cs"] = cycle_started_at
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
+#     else:
+#         update_expr = "SET #q=:q, #g=:g, #v=:nv"
+
+#     try:
+#         meta_table.update_item(
+#             Key={"match_id": pk},
+#             UpdateExpression=update_expr,
+#             ExpressionAttributeNames=expr_names,
+#             ExpressionAttributeValues=expr_vals,
+#             ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
+#         )
+#         return True
+#     except ClientError as e:
+#         code = e.response.get("Error", {}).get("Code")
+#         if code == "ConditionalCheckFailedException":
+#             return False
+#         current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
+#         return False
+
+
+# def _weighted_sample_from_queue(
+#     *,
+#     queue: List[str],
+#     waiting_count: int,
+#     by_id: Dict[str, Dict[str, Any]],
+#     skill_key: str = "skill_score",
+#     bottom_n: int = 2,
+#     boost: float = 1.2,
+# ) -> Tuple[List[str], List[str]]:
+#     """
+#     queue から waiting_count 人を重み付きで非復元抽出。
+#     戻り値: (picked_uids, remaining_queue)
+#     ※ remaining_queue は picked を除いた queue（元の順序保持）
+#     """
+#     if waiting_count <= 0 or not queue:
+#         return [], list(queue)
+
+#     cand = list(queue)
+
+#     def get_skill(uid: str) -> float:
+#         v = by_id.get(uid, {}).get(skill_key, 50)
+#         try:
+#             return float(v)
+#         except Exception:
+#             return 50.0
+
+#     skills = {uid: get_skill(uid) for uid in cand}
+#     low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
+#     weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
+
+#     picked: List[str] = []
+#     remaining = list(cand)
+
+#     for _ in range(min(waiting_count, len(remaining))):
+#         total = sum(weights[uid] for uid in remaining)
+#         r = random.random() * total
+#         acc = 0.0
+#         chosen = remaining[-1]
+#         for uid in remaining:
+#             acc += weights[uid]
+#             if acc >= r:
+#                 chosen = uid
+#                 break
+#         picked.append(chosen)
+#         remaining = [u for u in remaining if u != chosen]
+
+#     picked_set = set(picked)
+#     remaining_queue = [uid for uid in queue if uid not in picked_set]
+#     return picked, remaining_queue
+
+
+# def _safe_float(v: Any, default: float) -> float:
+#     if v is None:
+#         return default
+#     try:
+#         if isinstance(v, Decimal):
+#             return float(v)
+#         return float(v)
+#     except Exception:
+#         return default

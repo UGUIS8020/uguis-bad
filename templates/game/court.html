@@ -303,7 +303,7 @@
                         {% endif %}>
                         <div class="fs-5 fw-semibold">
                             {{ player.display_name }}                        </div>
-                        <div class="fs-5 fw-semibold">
+                        <!-- <div class="fs-5 fw-semibold">
                             {% if player.join_count is defined %}
                                 <span class="badge bg-info me-1">{{ player.join_count }}回</span>
                             {% endif %}
@@ -313,7 +313,7 @@
                             {% if player.rest_count is defined %}
                                 <span class="badge bg-secondary">休憩 {{ player.rest_count }}回</span>
                             {% endif %}
-                        </div>
+                        </div> -->
                     </div>
                 </div>
                 {% endfor %}
@@ -328,20 +328,22 @@
             {% if resting_players %}
             <div class="row {% if pending_players %}mt-4{% endif %}">
                 <div class="col-12 mb-3">
-                    <h6 class="text-warning fw-bold">休憩中プレイヤー</h6>
+                    <h6 class="text-warning fw-bold">休憩中プレイヤー</h6>                    
                 </div>
                 {% for player in resting_players %}
                 <div class="col-xxl-2 col-xl-3 col-lg-4 col-md-6 col-sm-12 mb-2">
                     <div class="player-item border border-warning rounded px-2 py-2 text-center h-100 bg-light {% if current_user.administrator %}admin-clickable{% endif %}"
+                    
                         {% if current_user.administrator %}
                         onclick="togglePlayerStatus('{{ player.user_id }}', 'resting')"
                         data-player-id="{{ player.user_id }}"
                         data-player-name="{{ player.display_name }}"
                         data-current-status="resting"
                         {% endif %}>
-                        <div class="fw-bold fs-5 mb-1 text-warning">                            
+                        <div class="fw-bold fs-5 mb-1 text-warning">
+                            {{ player.display_name }}                            
                         </div>
-                        <div class="fs-5 fw-semibold">
+                        <!-- <div class="fs-5 fw-semibold">
                             {% if player.join_count is defined %}
                                 <span class="badge bg-info me-1">{{ player.join_count }}回</span>
                             {% endif %}
@@ -351,7 +353,7 @@
                             {% if player.rest_count is defined %}
                                 <span class="badge bg-secondary">休憩 {{ player.rest_count }}回</span>
                             {% endif %}
-                        </div>
+                        </div> -->
                     </div>
                 </div>
                 {% endfor %}
@@ -373,8 +375,9 @@
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% set selected = (session.get("selected_max_courts", 3)) | int %}
                     {% for i in range(1, 7) %}
-                        <option value="{{ i }}" {% if i == 3 %}selected{% endif %}>{{ i }}面</option>
+                        <option value="{{ i }}" {% if i == selected %}selected{% endif %}>{{ i }}面</option>
                     {% endfor %}
                     </select>
 
@@ -405,16 +408,7 @@
             </div>
         </div>           
        
-        {% endif %}
-
-        <!-- ペアリング可能な人数に達した場合の通知（一般ユーザー向け） -->
-        {% if not current_user.administrator and pending_players|length >= 4 %}
-        <div class="alert alert-success mt-4">
-            <i class="fas fa-check-circle"></i>
-            <strong>ペアリング可能人数に達しました！</strong>
-            管理者がペアリングを実行するまでお待ちください。
-        </div>
-        {% endif %}
+        {% endif %}       
 
         <div class="container mt-4">
             <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
@@ -434,14 +428,14 @@
             </div>
         </div>
 
-        {% if current_user.is_authenticated and current_user.administrator %}
+        {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
             <form method="POST" action="{{ url_for('game.score_input') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="text-center my-2">
                     <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
                 </div>
             </form>
-        {% endif %} 
+        {% endif %}
                        
         {% for court in match_courts.values() %}
         <div class="col">
@@ -648,6 +642,9 @@
                 }
             }
 
+            window._stopPolling = stopPolling;
+            window._startPolling = startPolling;
+
             // タブの表示/非表示を検知
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
@@ -674,4 +671,5 @@
             }
         });
     </script>
+
 </body>

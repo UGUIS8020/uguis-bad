@@ -1,9 +1,14 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from datetime import datetime
+
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass
+from datetime import date, datetime, time
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Set, Tuple
+from boto3.dynamodb.conditions import Attr
+
 from utils.timezone import JST
+
 
 @dataclass(frozen=True)
 class ParticipationRecord:
@@ -20,24 +25,58 @@ class PointRules:
 
 def normalize_participation_history(raw_history: List[Dict[str, Any]]) -> List[ParticipationRecord]:
     records: List[ParticipationRecord] = []
+
     for r in raw_history:
         status = (r.get("status") or "registered").lower()
         if status == "cancelled":
             continue
+
         try:
-            event_date = datetime.strptime(r["event_date"], "%Y-%m-%d")
-            registered_at = datetime.strptime(r["registered_at"], "%Y-%m-%d %H:%M:%S")
-        except (KeyError, ValueError):
+            event_date_raw = r.get("event_date")
+            registered_at_raw = r.get("registered_at")
+
+            if not event_date_raw or not registered_at_raw:
+                continue
+
+            # event_date は YYYY-MM-DD を想定
+            if isinstance(event_date_raw, str):
+                event_date = datetime.strptime(event_date_raw[:10], "%Y-%m-%d")
+            else:
+                event_date = event_date_raw
+
+            # registered_at は
+            # 1) "2026-02-12 12:34:56"
+            # 2) "2026-02-12T07:35:29.131+00:00"
+            # の両方に対応
+            if isinstance(registered_at_raw, str):
+                s = registered_at_raw.strip()
+                if "T" in s:
+                    registered_at = datetime.fromisoformat(s)
+                else:
+                    registered_at = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            else:
+                registered_at = registered_at_raw
+
+        except Exception as e:
+            print(f"[WARN normalize] skip record={r} error={e}")
             continue
-        records.append(ParticipationRecord(event_date=event_date, registered_at=registered_at, status=status))
+
+        records.append(
+            ParticipationRecord(
+                event_date=event_date,
+                registered_at=registered_at,
+                status=status
+            )
+        )
+
     records.sort(key=lambda x: x.event_date)
     return records
 
 def calc_reset_index(records: List[ParticipationRecord], reset_days: int) -> Tuple[int, bool]:
     """
-    参加記録をチェックして、50日ルールでリセットされているか判定
-    - 参加記録間の間隔が50日超 → その地点でリセット（ポイント計算範囲を制限）
-    - 最後の参加日から現在まで50日超 → 現在リセット中（is_reset=True）
+    参加記録をチェックして、60日ルールでリセットされているか判定
+    - 参加記録間の間隔が60日超 → その地点でリセット（ポイント計算範囲を制限）
+    - 最後の参加日から現在まで60日超 → 現在リセット中（is_reset=True）
     """
     from datetime import datetime
     
@@ -144,7 +183,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 4 else 500 + (count - 4) * 200
+        base_bonus = 0 if count < 3 else 500 + (count - 3) * 150
         bonus = int(base_bonus * point_multiplier)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
@@ -227,7 +266,7 @@ def calc_streak_points(
     streak_start = None
 
     # マイルストーン管理
-    milestone_values = {5: 500, 10: 1000, 15: 1500, 20: 2000, 25: 2500}
+    milestone_values = {5: 400, 10: 800, 15: 1200, 20: 1600, 25: 2000}
     milestones = {k: False for k in milestone_values.keys()}
 
     resets = 0
@@ -415,3 +454,306 @@ def _is_junior_high_or_below(user_info):  # ← selfを削除
     except Exception as e:
         print(f"[WARN] 中学生以下判定エラー: {str(e)} → ポイント半減対象外として扱う")
         return False
+
+
+def is_adult(self, user_info):
+    """
+    生年月日から「成人（18歳以上）」かどうかを判定
+    ※日本の改正民法（18歳成人）に準拠
+    """
+    if not user_info or not user_info.get('birth_date'):
+        print(f"[DEBUG] 生年月日情報なし → 判定不可")
+        return False
+    
+    try:
+        from datetime import datetime
+        
+        birth_date = user_info['birth_date']
+        
+        # 文字列型(YYYY-MM-DD)の場合はdate型に変換
+        if isinstance(birth_date, str):
+            birth_date = datetime.strptime(birth_date, '%Y-%m-%d').date()
+        elif isinstance(birth_date, datetime):
+            birth_date = birth_date.date()
+        
+        # 判定日の基準（本日）
+        today = datetime.now(JST).date()
+        
+        # 満年齢の計算
+        # 本日の(月, 日)が誕生日の(月, 日)より前なら、まだ歳をとっていない（-1する）
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        
+        # 18歳以上なら成人（True）
+        is_adult_status = age >= 18
+        
+        print(f"[DEBUG] 生年月日: {birth_date}, 現在の年齢: {age}歳, 成人判定: {is_adult_status}")
+        
+        return is_adult_status
+        
+    except Exception as e:
+        print(f"[WARN] 成人判定エラー: {str(e)} → 未成年扱いとして処理")
+        return False
+    
+
+def get_point_multiplier(birth_date: date, gender: str) -> float:
+    today = date.today()
+    age = today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day)
+    )
+    print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
+
+    if age < 18:
+        return 1.35
+    elif gender and gender.lower() == "female":
+        return 1.25
+    else:
+        return 1.0
+
+
+POINTS_CUTOFF_DATE = date(2026, 3, 1)
+
+
+def to_decimal(value, default="0") -> Decimal:
+    """
+    int / float / str / Decimal を Decimal に揃える
+    """
+    if value is None:
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+
+def get_points_cutoff_datetime() -> datetime:
+    """
+    基準日時: 2026-03-01 00:00:00 JST
+    """
+    return datetime.combine(POINTS_CUTOFF_DATE, time.min, tzinfo=JST)
+
+
+def parse_iso_datetime(dt_str):
+    """
+    ISO日時文字列を datetime に変換して JST に揃える
+    例:
+      2026-03-04T12:34:56+09:00
+      2026-03-04T03:34:56Z
+      2026-03-04 12:34:56
+    """
+    if not dt_str:
+        return None
+
+    try:
+        s = str(dt_str).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=JST)
+        return dt.astimezone(JST)
+    except Exception:
+        return None
+
+
+def get_saved_point_snapshot(dynamodb, user_id: str) -> dict:
+    table = dynamodb.Table("ugu_points_v2")
+
+    resp = table.get_item(Key={"user_id": user_id})
+    item = resp.get("Item") or {}
+
+    # 修正: snapshot_date が None（新規ユーザー）の場合は、
+    # 履歴をすべて拾えるように十分に古い日付を入れる
+    snapshot_date = item.get("snapshot_date") or "2000-01-01"
+
+    snapshot_current = item.get("snapshot_current_points", 0)
+    total_spent_v1 = item.get("total_spent_v1", 0)
+
+    snapshot = {
+        "user_id": user_id,
+        "snapshot_date": snapshot_date,
+        "current_points": to_decimal(snapshot_current),
+        "base_points": to_decimal(snapshot_current),
+        "used_points": to_decimal(total_spent_v1),
+        "raw_item": item,
+    }
+
+    print(
+        f"[POINT_SNAPSHOT_V2] user={user_id} "
+        f"snapshot_date={snapshot['snapshot_date']} "
+        f"base_points={snapshot['base_points']} "
+        f"used_points={snapshot['used_points']}"
+    )
+    return snapshot
+
+
+def get_current_points_hybrid(dynamodb, user_id: str, participation_points=0) -> dict:
+    snapshot = get_saved_point_snapshot(dynamodb=dynamodb, user_id=user_id)
+    
+    # 【修正】ここでも participation_points を次の関数へバケツリレーする
+    delta = sum_history_points_after_cutoff(
+        dynamodb=dynamodb, 
+        user_id=user_id, 
+        participation_points=participation_points
+    )
+
+    base_points = to_decimal(snapshot.get("base_points", 0))
+    earned_after = to_decimal(delta.get("earned_after_cutoff", 0))
+    spent_after = to_decimal(delta.get("spent_after_cutoff", 0))
+    adjusted_after = to_decimal(delta.get("adjusted_after_cutoff", 0))
+
+    current_points = base_points + earned_after - spent_after + adjusted_after
+
+    result = {
+        "user_id": user_id,
+        "snapshot_date": snapshot.get("snapshot_date"),
+        "base_current_points": base_points,
+        "earned_after_cutoff": earned_after,
+        "spent_after_cutoff": spent_after,
+        "adjusted_after_cutoff": adjusted_after,
+        "current_points": current_points,
+        "earn_count": delta.get("earn_count", 0),
+        "spend_count": delta.get("spend_count", 0),
+        "adjust_count": delta.get("adjust_count", 0),
+    }
+
+    print(
+        f"[POINT_HYBRID] user={user_id} "
+        f"base={base_points} "
+        f"earn_after={earned_after} "
+        f"spend_after={spent_after} "
+        f"adjust_after={adjusted_after} "
+        f"current={current_points}"
+    )
+
+    return result
+
+
+def sum_history_points_after_cutoff(dynamodb, user_id: str, participation_points=0) -> dict:
+    cutoff_dt = get_points_cutoff_datetime()
+    table = dynamodb.Table("bad-users-history")
+
+    resp = table.scan(
+        FilterExpression=Attr("user_id").eq(user_id)
+    )
+    items = resp.get("Items", []) or []
+
+    while "LastEvaluatedKey" in resp:
+        resp = table.scan(
+            FilterExpression=Attr("user_id").eq(user_id),
+            ExclusiveStartKey=resp["LastEvaluatedKey"]
+        )
+        items.extend(resp.get("Items", []) or [])
+
+    print(f"[POINT_DELTA][RAW_ITEMS] user={user_id} count={len(items)}")
+
+    earn_items = []
+    spend_items = []
+    adjust_items = []
+
+    for item in items:
+        created_at = parse_iso_datetime(
+            item.get("created_at")
+            or item.get("joined_at")
+            or item.get("registered_at")
+        )
+
+        if not created_at or created_at < cutoff_dt:
+            continue
+
+        action = str(item.get("action") or "").lower().strip()
+        kind = str(item.get("kind") or "").lower().strip()
+        source = str(item.get("source") or "").lower().strip()
+        marker = str(
+            item.get("joined_at")
+            or item.get("history_id")
+            or item.get("sk")
+            or item.get("created_at")
+            or ""
+        )
+
+        print(
+            f"[POINT_DELTA][ITEM] "
+            f"created_at={created_at} action={action} kind={kind} source={source} "
+            f"history_id={item.get('history_id')} sk={item.get('sk')} "
+            f"delta_points={item.get('delta_points')} points={item.get('points')}"
+        )
+
+        if (
+            kind == "earn"
+            or "points#earn#" in marker
+            or action in (
+                "earn", "point_earn", "admin_add", "admin_grant", "grant",
+                "participate", "participated", "join", "joined",
+                "register", "registered"
+            )
+            or source in ("participation", "schedule_participation", "event_participation")
+        ):
+            earn_items.append(item)
+
+        elif (
+            kind == "spend"
+            or "points#spend#" in marker
+            or action in ("spend", "point_spend", "use", "consume")
+        ):
+            spend_items.append(item)
+
+        elif (
+            action in ("adjust", "point_adjust", "admin_adjust")
+            or source == "admin_manual"
+        ):
+            adjust_items.append(item)
+
+    applied_join_bonus = False
+
+    def _read_points(x):
+        val = (
+            x.get("delta_points")
+            or x.get("points")
+            or x.get("points_used")
+            or x.get("amount")
+            or x.get("point")
+        )
+        if val is not None:
+            return to_decimal(val)
+        return Decimal("0")
+
+    # 2. 獲得ポイントの集計（ここで1回だけ加算をコントロール）
+    earned_after_cutoff = Decimal("0")
+    join_bonus_done = False # この関数スコープで1回だけ
+
+    for x in earn_items:
+        p = _read_points(x)
+        
+        # DBが空（0）で、かつ join アクションの場合
+        action = str(x.get("action") or "").lower().strip()
+        if p == 0 and action in ("join", "joined"):
+            if not join_bonus_done:
+                p = to_decimal(participation_points) # 260Pをセット
+                join_bonus_done = True # 以降のjoinは0Pのまま
+        
+        earned_after_cutoff += p
+
+    # 3. 支出と調整の集計（これらはそのまま）
+    spent_after_cutoff = sum((abs(_read_points(x)) for x in spend_items), Decimal("0"))
+    adjusted_after_cutoff = sum((_read_points(x) for x in adjust_items), Decimal("0"))
+
+    print(
+        f"[POINT_DELTA] user={user_id} "
+        f"earn={earned_after_cutoff}({len(earn_items)}) "
+        f"spend={spent_after_cutoff}({len(spend_items)}) "
+        f"adjust={adjusted_after_cutoff}({len(adjust_items)})"
+    )
+
+    return {
+        "earned_after_cutoff": earned_after_cutoff,
+        "spent_after_cutoff": spent_after_cutoff,
+        "adjusted_after_cutoff": adjusted_after_cutoff,
+        "earn_count": len(earn_items),
+        "spend_count": len(spend_items),
+        "adjust_count": len(adjust_items),
+        "earn_items": earn_items,
+        "spend_items": spend_items,
+        "adjust_items": adjust_items,
+    }

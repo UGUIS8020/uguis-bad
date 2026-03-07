@@ -1,0 +1,177 @@
+{
+    "Items": [
+        {
+            "match_id": {
+                "S": "20260305_193651"
+            },
+            "courts": {
+                "L": [
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "内田大樹"
+                                            },
+                                            "user_id": {
+                                                "S": "ac3008b6-145e-45e9-8f97-5b6ee000a067"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "オイ"
+                                            },
+                                            "user_id": {
+                                                "S": "380c2e1a-8906-40ab-bf4d-a091704ec257"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "1"
+                            },
+                            "winner": {
+                                "S": "A"
+                            },
+                            "team1_score": {
+                                "S": "22"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "りょうた"
+                                            },
+                                            "user_id": {
+                                                "S": "c06221c9-d934-4c35-b45b-b07be711568c"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "yua"
+                                            },
+                                            "user_id": {
+                                                "S": "52b9d36e-1413-49c3-8362-9130016df2d4"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "team2_score": {
+                                "S": "20"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "カスン"
+                                            },
+                                            "user_id": {
+                                                "S": "1e14658d-0f86-4df3-9b33-f9b5ccc9a2aa"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "ゆうあ"
+                                            },
+                                            "user_id": {
+                                                "S": "7dcecf0d-4b53-4622-8d51-2dd7276df655"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "3"
+                            },
+                            "winner": {
+                                "S": "B"
+                            },
+                            "team1_score": {
+                                "S": "6"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "オカモト"
+                                            },
+                                            "user_id": {
+                                                "S": "5f5b6ee2-9a30-400a-9225-c54691f4e408"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "ひかる"
+                                            },
+                                            "user_id": {
+                                                "S": "aee5c9ed-31bc-44bf-b12a-c2116da661a6"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "team2_score": {
+                                "S": "21"
+                            }
+                        }
+                    },
+                    {
+                        "M": {
+                            "team_a": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "酒井"
+                                            },
+                                            "user_id": {
+                                                "S": "b597315e-7c5f-4a08-bbd5-c442cfe57832"
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": "つかこし"
+                                            },
+                                            "user_id": {
+                                                "S": "ed1967da-0e91-46d6-b3e2-4a843cb80659"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "court_number": {
+                                "N": "2"
+                            },
+                            "winner": {
+                                "S": "A"
+                            },
+                            "team1_score": {
+                                "S": "21"
+                            },
+                            "team_b": {
+                                "L": [
+                                    {
+                                        "M": {
+                                            "display_name": {
+                                                "S": 

@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 login_manager = LoginManager()
 cache = Cache()
-csrf = CSRFProtect()   # ★グローバルで1回作る
+csrf = CSRFProtect()
 
 
 def create_app():
@@ -590,9 +590,12 @@ class User(UserMixin):
     def from_dynamodb_item(item):
         def get_value(field, default=None):
             return item.get(field, default)
+        
+        # user# プレフィックスを除去してUIDだけにする
+        user_id = get_value('user#user_id') or ""
 
         return User(
-            user_id=get_value('user#user_id'),
+            user_id=user_id,
             display_name=get_value('display_name'),
             user_name=get_value('user_name'),
             furigana=get_value('furigana'),
@@ -714,7 +717,7 @@ class User(UserMixin):
 
 #     return participants_info
 
-@cache.memoize(timeout=600)
+
 def get_participants_info(schedule):
     participants_info = []
     try:
@@ -736,16 +739,16 @@ def get_participants_info(schedule):
         if not ids:
             return participants_info
 
-        request = {
+        batch_request = {
             table_name: {
-                "Keys": [{"user#user_id": uid} for uid in ids],
+                "Keys": [{"user#user_id": id} for id in ids],
                 "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
-                "ExpressionAttributeNames": {"#uid": "user#user_id"},
+                "ExpressionAttributeNames": {"#uid": "user#user_id"}
             }
         }
 
         responses = []
-        unprocessed = request
+        unprocessed = batch_request
 
         client = dynamodb.meta.client if hasattr(dynamodb, "meta") else dynamodb
 
@@ -759,8 +762,10 @@ def get_participants_info(schedule):
 
         by_id = {it["user#user_id"]: it for it in responses}
 
+        # 修正後：1つのループに統合
         for uid in ids:
-            user = by_id.get(uid)
+            pk = uid
+            user = by_id.get(pk)
             if user:
                 raw_score = user.get("skill_score")
                 skill_score = int(raw_score) if isinstance(raw_score, (int, float, Decimal)) else None
@@ -1016,36 +1021,42 @@ def get_schedules():
 @app.route("/", methods=["GET"])
 @app.route("/index", methods=["GET"])
 def index():
-    try:
-        start_time = time.time()
+    start_time = time.time()
 
+    try:
         schedules = get_schedules_with_formatting()
 
-        table_name = current_app.config.get("TABLE_NAME_USER") or getattr(current_app, "table_name", None)
+        table_name = (
+            current_app.config.get("TABLE_NAME_USER")
+            or getattr(current_app, "table_name", None)
+        )
         if not table_name:
             raise RuntimeError("TABLE_NAME_USER is not configured")
 
         # =========================================================
-        # 1) 全スケジュールから user_id を集める
+        # 1) 全スケジュールから user_id(UUID) を集める
         # =========================================================
         all_user_ids = set()
 
         def _extract_uid(item):
+            # DynamoDB low-level形式: {"S": "..."}
             if isinstance(item, dict) and "S" in item:
-                return item["S"]
+                return item.get("S")
+            # dict形式: {"user_id": "..."}
             if isinstance(item, dict) and "user_id" in item:
-                return item["user_id"]
+                return item.get("user_id")
+            # 文字列: "uuid..."
             if isinstance(item, str):
                 return item
             return None
 
         for schedule in schedules:
-            for item in schedule.get("participants", []):
+            for item in schedule.get("participants", []) or []:
                 uid = _extract_uid(item)
                 if uid:
                     all_user_ids.add(uid)
 
-            for item in schedule.get("tara_participants", []):
+            for item in schedule.get("tara_participants", []) or []:
                 uid = _extract_uid(item)
                 if uid:
                     all_user_ids.add(uid)
@@ -1054,37 +1065,48 @@ def index():
 
         # =========================================================
         # 2) DynamoDB BatchGet（100件ずつ）
-        #    ★ user#user_id の値が「uuid」 or 「user#uuid」混在に備えて両方取る
+        #    - user# は使わない（UUIDのみ）
+        #    - UnprocessedKeys をリトライして取りこぼし防止
         # =========================================================
         user_cache = {}
         user_ids_list = list(all_user_ids)
-        batch_count = 0
 
+        # current_app.dynamodb が resource / client どちらでも動くようにする
+        dynamo_client = getattr(current_app.dynamodb, "meta", None)
+        dynamo_client = dynamo_client.client if dynamo_client else current_app.dynamodb
+
+        batch_count = 0
         batch_start = time.time()
+
+        def _cache_user(user_item: dict):
+            pk = user_item.get("user#user_id")  # この属性名はそのまま（値はUUIDのみ）
+            if pk:
+                user_cache[pk] = user_item
 
         for i in range(0, len(user_ids_list), 100):
             batch_ids = user_ids_list[i:i + 100]
+            keys = [{"user#user_id": uid} for uid in batch_ids if uid]
 
-            # 候補キーを両方作る（uuid / user#uuid）
-            keys = []
-            for uid in batch_ids:
-                keys.append({"user#user_id": uid})
-                if not str(uid).startswith("user#"):
-                    keys.append({"user#user_id": f"user#{uid}"})
+            request_items = {table_name: {"Keys": keys}}
+            tries = 0
 
-            try:
-                response = current_app.dynamodb.batch_get_item(
-                    RequestItems={table_name: {"Keys": keys}}
-                )
-                batch_count += 1
+            while request_items and tries < 5:
+                tries += 1
+                try:
+                    resp = dynamo_client.batch_get_item(RequestItems=request_items)
+                    batch_count += 1
 
-                for user in response.get("Responses", {}).get(table_name, []):
-                    pk = user.get("user#user_id")
-                    if pk:
-                        user_cache[pk] = user
+                    for user_item in resp.get("Responses", {}).get(table_name, []):
+                        _cache_user(user_item)
 
-            except Exception as e:
-                current_app.logger.error("[index] バッチ取得エラー: %s", e, exc_info=True)
+                    # 取りこぼしがある場合は再試行
+                    request_items = resp.get("UnprocessedKeys", {})
+                    if request_items:
+                        time.sleep(min(0.2 * tries, 1.0))
+
+                except Exception as e:
+                    current_app.logger.error("[index] バッチ取得エラー: %s", e, exc_info=True)
+                    break
 
         batch_time = time.time() - batch_start
         current_app.logger.info(
@@ -1114,17 +1136,12 @@ def index():
                 return default
 
         def _get_user(uid: str):
-            # cache key が uuid / user#uuid のどちらでも当たるように
-            if uid in user_cache:
-                return user_cache[uid]
-            if not str(uid).startswith("user#"):
-                return user_cache.get(f"user#{uid}")
-            return user_cache.get(uid.replace("user#", "", 1))
+            return user_cache.get(uid)
 
         for schedule in schedules:
             # --- 参加者 ---
             user_ids = []
-            for item in schedule.get("participants", []):
+            for item in schedule.get("participants", []) or []:
                 uid = _extract_uid(item)
                 if uid:
                     user_ids.append(uid)
@@ -1136,12 +1153,12 @@ def index():
                     continue
 
                 participants_info.append({
-                    "user_id": user.get("user#user_id"),
+                    "user_id": user.get("user#user_id"),  # 値はUUID
                     "display_name": user.get("display_name", "不明"),
                     "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
                     "join_count": _to_int(user.get("practice_count"), 0),
-                })
+                })           
 
             participants_info.sort(
                 key=lambda x: (
@@ -1151,10 +1168,11 @@ def index():
                 )
             )
             schedule["participants_info"] = participants_info
+            schedule["participants_count"] = len(participants_info)
 
             # --- たら参加者 ---
             tara_ids = []
-            for item in schedule.get("tara_participants", []):
+            for item in schedule.get("tara_participants", []) or []:
                 uid = _extract_uid(item)
                 if uid:
                     tara_ids.append(uid)
@@ -1183,13 +1201,10 @@ def index():
         current_app.logger.info("[index] 参加者情報処理: %.3f秒", process_time)
         current_app.logger.info("[index] 合計処理時間: %.3f秒", total_time)
 
-        image_files = [
-            "images/top001.jpg",
-            "images/top002.jpg",
-            "images/top003.jpg",
-            "images/top004.jpg",
-            "images/top005.jpg",
-        ]
+        # =========================================================
+        # 4) ランダム背景画像
+        # =========================================================
+        image_files = [f"images/top{i:03d}.jpg" for i in range(1, 9)]
         selected_image = random.choice(image_files)
 
         return render_template(
@@ -1200,150 +1215,112 @@ def index():
         )
 
     except Exception as e:
-        current_app.logger.error("[index] スケジュール取得エラー: %s", e, exc_info=True)
-        flash("スケジュールの取得中にエラーが発生しました", "error")
+        current_app.logger.error("[index] エラー: %s", e, exc_info=True)
+        # 既存テンプレがあるならエラーページへ。なければ最低限 index に落とすなどでもOK
         return render_template(
             "index.html",
             schedules=[],
-            selected_image="images/default.jpg",
-        )
+            selected_image=None,
+            canonical=url_for("index", _external=True),
+        ), 500
     
     
+# =========================================================
+# schedule_koyomi 関数（BatchGet導入による高速化版）
+# =========================================================
 @app.route("/schedule_koyomi", methods=['GET'])
 @app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
 def schedule_koyomi(year=None, month=None):
     try:
-        # 年月が指定されていない場合は現在の年月を使用
         if year is None or month is None:
             today = date.today()
-            year = today.year
-            month = today.month
+            year, month = today.year, today.month
         
-        # 前月と翌月の計算
-        if month == 1:
-            prev_month = 12
-            prev_year = year - 1
-        else:
-            prev_month = month - 1
-            prev_year = year
+        # 前月・翌月の計算
+        prev_date = date(year, month, 1) - timedelta(days=1)
+        prev_year, prev_month = prev_date.year, prev_date.month
+        next_date = date(year, month, 28) + timedelta(days=5) # 翌月へ確実に飛ばす
+        next_year, next_month = next_date.year, next_date.month
         
-        if month == 12:
-            next_month = 1
-            next_year = year + 1
-        else:
-            next_month = month + 1
-            next_year = year
-        
-        # カレンダー情報の生成 - cal_module を使用 
         calendar.setfirstweekday(calendar.SUNDAY)       
         cal = calendar.monthcalendar(year, month)
         
-        # 軽量なスケジュール情報のみ取得
+        # スケジュール取得
         schedules = get_schedules_with_formatting_all()
+        table_name = current_app.config.get("TABLE_NAME_USER") or "bad-users"
 
-        # 参加者詳細情報の取得を追加
-        user_table = current_app.dynamodb.Table("bad-users")  # 適宜変更
+        # 1) 全参加者の user_id を抽出
+        all_uids = set()
+        for s in schedules:
+            for item in s.get("participants", []):
+                if isinstance(item, dict) and "S" in item: all_uids.add(item["S"])
+                elif isinstance(item, str): all_uids.add(item)
 
+        # 2) 参加者情報を一括取得 (BatchGet)
+        user_cache = {}
+        uid_list = list(all_uids)
+        for i in range(0, len(uid_list), 100):
+            batch = uid_list[i:i+100]
+            keys = [{"user#user_id": uid} for uid in batch]
+            res = current_app.dynamodb.batch_get_item(RequestItems={table_name: {"Keys": keys}})
+            for u in res.get("Responses", {}).get(table_name, []):
+                user_cache[u["user#user_id"]] = u
+
+        # 3) スケジュールに参加者情報を紐付け
         for schedule in schedules:
-            participants_info = []
-            raw_participants = schedule.get("participants", [])
-            user_ids = []
-
-            # [{"S": "uuid"}] 形式にも対応
-            for item in raw_participants:
-                if isinstance(item, dict) and "S" in item:
-                    user_ids.append(item["S"])
-                elif isinstance(item, str):
-                    user_ids.append(item)
-
-            for user_id in user_ids:
-                try:
-                    res = user_table.get_item(Key={"user#user_id": user_id})
-                    user = res.get("Item")
-                    if user:
-                        participants_info.append({
-                            "user_id": user["user#user_id"],
-                            "display_name": user.get("display_name", "不明")
-                        })
-                except Exception:
-                    # ログ出力を削除
-                    pass
-
-            schedule["participants_info"] = participants_info
+            p_info = []
+            raw_p = schedule.get("participants", [])
+            for item in raw_p:
+                uid = item["S"] if isinstance(item, dict) else item
+                user = user_cache.get(uid)
+                if user:
+                    p_info.append({
+                        "user_id": user["user#user_id"],
+                        "display_name": user.get("display_name", "不明")
+                    })
+            schedule["participants_info"] = p_info
         
-        # カレンダーデータの作成（簡易版）
+        # カレンダーデータ構築
         calendar_data = []
-        today_date = date.today()
-        
+        today_obj = date.today()
         for week in cal:
             week_data = []
             for day_num in week:
                 if day_num == 0:
-                    # 月外の日
-                    week_data.append({
-                        'day': 0,
-                        'is_today': False,
-                        'is_other_month': True,
-                        'schedules': []
-                    })
+                    week_data.append({'day': 0, 'is_other_month': True, 'schedules': []})
                 else:
-                    # その月の日
-                    day_date = date(year, month, day_num)
-                    date_str = day_date.strftime('%Y-%m-%d')
-                    
-                    # その日のスケジュール
-                    day_schedules = [s for s in schedules if s.get("date") == date_str]
-                    
+                    d_obj = date(year, month, day_num)
+                    d_str = d_obj.strftime('%Y-%m-%d')
+                    day_schedules = [s for s in schedules if s.get("date") == d_str]
                     week_data.append({
                         'day': day_num,
-                        'is_today': day_date == today_date,
+                        'is_today': d_obj == today_obj,
                         'is_other_month': False,
                         'schedules': day_schedules,
-                        'has_schedule': len(day_schedules) > 0,
-                        'has_full_schedule': any(s.get("participants_count", 0) >= s.get("max_participants", 0) for s in day_schedules)
+                        'has_schedule': len(day_schedules) > 0
                     })
             calendar_data.append(week_data)
 
-        image_files = [
-            'images/top001.jpg',
-            'images/top002.jpg',
-            'images/top003.jpg',
-            'images/top004.jpg',
-            'images/top005.jpg'
-        ]
+        month_name = f"{month}月"
+        selected_image = random.choice([f"images/top{i:03d}.jpg" for i in range(1, 6)])
 
-        selected_image = random.choice(image_files)
-
-        # 月の日本語表記
-        month_name = ["１月", "２月", "３月", "４月", "５月", "６月", 
-                     "７月", "８月", "９月", "１０月", "１１月", "１２月"][month-1]
-
-        # テンプレート名は schedule_koyomi.html
         return render_template("schedule_koyomi.html", 
                                schedules=schedules,
                                selected_image=selected_image,
-                               canonical=url_for('schedule_koyomi', _external=True),
-                               year=year,
-                               month=month,
+                               year=year, month=month,
                                month_name=month_name,
-                               prev_year=prev_year,
-                               prev_month=prev_month,
-                               next_year=next_year,
-                               next_month=next_month,
+                               prev_year=prev_year, prev_month=prev_month,
+                               next_year=next_year, next_month=next_month,
                                calendar_data=calendar_data)
         
     except Exception as e:
-        # 重要なエラーのみログ出力を残す
-        logger.error(f"[schedule_koyomi] スケジュール取得エラー: {e}")
-        flash('スケジュールの取得中にエラーが発生しました', 'error')
-        return render_template("schedule_koyomi.html", 
-                               schedules=[], 
-                               selected_image='images/default.jpg',
-                               year=date.today().year,
-                               month=date.today().month)
+        current_app.logger.error(f"[schedule_koyomi] エラー: {e}", exc_info=True)
+        flash('カレンダーの取得中にエラーが発生しました', 'error')
+        return render_template("schedule_koyomi.html", schedules=[], year=year, month=month)
     
     
 @app.route("/day_of_participants", methods=["GET"])
+@login_required
 def day_of_participants():
     try:
         date = request.args.get("date")
@@ -1535,7 +1512,7 @@ def update_last_participation(users_table, user_id: str, event_date: str):
         ExpressionAttributeValues={
             ":d": event_date,
             ":pk": "recent",            
-            ":sk": f"user#{user_id}",  # ★ここが変更：日付を含めない
+            ":sk": user_id,
             ":u": now_utc_iso,
         },
     )
@@ -1644,17 +1621,30 @@ def previously_joined(schedule_id, user_id):
     )
     return bool(response.get('Items'))
 
+def _user_pk(user_id: str) -> dict:
+    return {"user#user_id": user_id}
+
 def increment_practice_count(user_id):
     user_table = app.dynamodb.Table(app.table_name_users)
 
-    user_table.update_item(
-        Key={'user#user_id': user_id},
-        UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
-        ExpressionAttributeValues={
-            ':start': Decimal(0),
-            ':inc': Decimal(1)
-        }
-    )
+    try:
+        user_table.update_item(
+            Key=_user_pk(user_id),
+            UpdateExpression="SET practice_count = if_not_exists(practice_count, :start) + :inc",
+            ExpressionAttributeValues={
+                ":start": Decimal(0),
+                ":inc": Decimal(1),
+            },
+            ConditionExpression="attribute_exists(#pk)",
+            ExpressionAttributeNames={"#pk": "user#user_id"},
+        )
+    except ClientError as e:
+        # キー間違い/ユーザー未作成ならここに来る
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            app.logger.warning("[increment_practice_count] user not found: %s", user_id)
+            return False
+        raise
+    return True
 
 @app.route('/participants/by_date/<schedule_id>')
 @login_required
@@ -1801,7 +1791,7 @@ def temp_register():
             hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
             user_id = str(uuid.uuid4())
 
-            table = current_app.table   # ✅ これ（または app.table）
+            table = current_app.table   
 
             temp_data = {
                 "user#user_id": user_id,
@@ -1816,7 +1806,7 @@ def temp_register():
                 "created_at": current_time,
                 "administrator": False,
 
-                # ✅ DynamoDBのNumberはDecimalが安全
+                # DynamoDBのNumberはDecimalが安全
                 "skill_score": Decimal(str(skill_score)),
                 "skill_sigma": Decimal("8.333"),
 
@@ -1995,21 +1985,16 @@ def user_maintenance():
                 current_app.logger.debug(f"[user_maintenance] {event_date}: {len(participants)}人")
             
             for participant in participants:
-                # ★participant の形式を確認
                 if isinstance(participant, dict):
-                    # 辞書形式の場合
                     user_id = participant.get("user_id") or participant.get("user#user_id") or participant.get("S")
                 elif isinstance(participant, str):
-                    # 文字列形式の場合
                     user_id = participant
                 else:
                     current_app.logger.warning(f"[user_maintenance] 不明な形式: {type(participant)} - {participant}")
                     continue
                 
-                # user#プレフィックスを削除
+                # ★削除：user#プレフィックス除去（移行済みのため不要）
                 if user_id and isinstance(user_id, str):
-                    user_id = user_id.replace("user#", "")
-                    
                     if user_id not in user_last_dates or event_date > user_last_dates[user_id]:
                         user_last_dates[user_id] = event_date
         
@@ -2035,7 +2020,7 @@ def user_maintenance():
                         batch_response = app.dynamodb.batch_get_item(RequestItems=request_items)
                         
                         for user in batch_response.get("Responses", {}).get(app.table_name_users, []):
-                            uid = user.get("user#user_id", "").replace("user#", "")
+                            uid = user.get("user#user_id", "")  
                             users_data[uid] = user
                         
                         # 未処理キーを確認
@@ -2195,13 +2180,18 @@ def get_table_info():
     except Exception as e:
         return f'Error: {str(e)}'    
     
+    
+def _user_key(user_id: str) -> dict:
+    uid = str(user_id)
+    return {"user#user_id": uid}
+
 
 @app.route('/account/<string:user_id>', methods=['GET', 'POST'])
 def account(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
         # 更新直後でも最新を読む
-        response = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        response = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
         user = response.get('Item')
         if not user:
             abort(404)
@@ -2306,9 +2296,11 @@ def account(user_id):
                 if update_expression_parts:
                     update_expression = "SET " + ", ".join(update_expression_parts)
                     table.update_item(
-                        Key={'user#user_id': user_id},
+                        Key=_user_key(user_id),
                         UpdateExpression=update_expression,
                         ExpressionAttributeValues=expression_values,
+                        ConditionExpression="attribute_exists(#pk)",
+                        ExpressionAttributeNames={"#pk": "user#user_id"},
                         ReturnValues="ALL_NEW"
                     )
                     flash('プロフィールが更新されました。', 'success')
@@ -2342,43 +2334,42 @@ def is_image_accessible(url):
         return False                
 
 @app.route("/delete_user/<string:user_id>")
+@login_required
 def delete_user(user_id):
     try:
         table = app.dynamodb.Table(app.table_name)
-        response = table.get_item(
-            TableName=app.table_name,
-            Key={
-                'user#user_id': user_id
-            }
-        )
-        user = response.get('Item')
-        
+        key = _user_key(user_id)
+
+        response = table.get_item(Key=key, ConsistentRead=True)
+        user = response.get("Item")
+
         if not user:
-            flash('ユーザーが見つかりません。', 'error')
-            return redirect(url_for('user_maintenance'))
-            
-          # 削除権限を確認（本人または管理者のみ許可）
-        if current_user.id != user_id and not current_user.administrator:
-            app.logger.warning(f"Unauthorized delete attempt by user {current_user.id} for user {user_id}.")
-            abort(403)  # 権限がない場合は403エラー
-        
-        # ここで実際の削除処理を実行
-        table = app.dynamodb.Table(app.table_name)
-        table.delete_item(Key={'user#user_id': user_id})
+            flash("ユーザーが見つかりません。", "error")
+            return redirect(url_for("user_maintenance"))
 
-         # ログイン中のユーザーが削除対象の場合はログアウト
-        if current_user.id == user_id:
+        # 権限チェック：current_user.id が uuid なら uuid に揃えて比較
+        uid_no_prefix = key["user#user_id"]
+        if current_user.id != uid_no_prefix and not getattr(current_user, "administrator", False):
+            app.logger.warning(
+                "Unauthorized delete attempt by user %s for user %s",
+                current_user.id, uid_no_prefix
+            )
+            abort(403)
+
+        table.delete_item(Key=key)
+
+        if current_user.id == uid_no_prefix:
             logout_user()
-            flash('アカウントが削除されました。再度ログインしてください。', 'info')
-            return redirect(url_for('login'))
+            flash("アカウントが削除されました。再度ログインしてください。", "info")
+            return redirect(url_for("login"))
 
-        flash('ユーザーアカウントが削除されました', 'success')
-        return redirect(url_for('user_maintenance'))
+        flash("ユーザーアカウントが削除されました", "success")
+        return redirect(url_for("user_maintenance"))
 
     except ClientError as e:
-        app.logger.error(f"DynamoDB error: {str(e)}")
-        flash('データベースエラーが発生しました。', 'error')
-        return redirect(url_for('user_maintenance'))
+        app.logger.error("DynamoDB error: %s", str(e), exc_info=True)
+        flash("データベースエラーが発生しました。", "error")
+        return redirect(url_for("user_maintenance"))
     
 
 @app.route("/gallery", methods=["GET", "POST"])
@@ -2592,74 +2583,70 @@ def api_chat_logs():
     result = get_badminton_chat_logs(cache_filter, limit)
     return jsonify(result)
 
+
 @app.route('/update_skill_score', methods=['POST'])
+@login_required
 def update_skill_score():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         user_id = data.get("user_id")
         new_score = data.get("skill_score")
 
         if not user_id or new_score is None:
             return jsonify({"success": False, "error": "Missing parameters"}), 400
 
-        # DynamoDB テーブルを取得
         table = app.dynamodb.Table(app.table_name)
 
-        # データ更新
-        table.update_item(
-            Key={'user#user_id': user_id},
+        resp = table.update_item(
+            Key=_user_key(user_id),
             UpdateExpression='SET skill_score = :score',
-            ExpressionAttributeValues={':score': Decimal(str(new_score))}
+            ExpressionAttributeValues={':score': Decimal(str(new_score))},
+            ReturnValues="UPDATED_NEW"
         )
 
         return jsonify({
             "success": True,
             "message": "Skill score updated",
-            "updated_score": new_score
+            "updated_score": new_score,
+            "ddb": resp.get("Attributes", {})
         }), 200
 
     except Exception as e:
-        app.logger.error(f"[update_skill_score] 更新エラー: {e}")
-        return jsonify({
-            "success": False,
-            "error": "更新に失敗しました"
-        }), 500
+        app.logger.error("[update_skill_score] 更新エラー: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "更新に失敗しました"}), 500
     
-@app.route('/api/user_info/<user_id>')
-def get_user_info(self, user_id: str):
-    """
-    ユーザー情報を取得（生年月日を含む）
-    """
+    
+@app.route('/api/user_info/<string:user_id>')
+@login_required
+def api_user_info(user_id):
     try:
-        response = self.table.get_item(
-            Key={'user#user_id': user_id}
+        table = current_app.dynamodb.Table(current_app.table_name)  # usersテーブル想定
+
+        resp = table.get_item(
+            Key=_user_key(user_id),
+            ConsistentRead=True
         )
-        
-        if 'Item' not in response:
-            print(f"[WARN] ユーザー情報が見つかりません - user_id: {user_id}")
-            return None
-        
-        item = response['Item']
-        
-        # 生年月日を取得（date_of_birthフィールド）
-        birth_date = item.get('date_of_birth', None)
-        
-        user_info = {
-            'user_id': user_id,
-            'birth_date': birth_date,
-            'display_name': item.get('display_name', ''),
-            'skill_score': item.get('skill_score', 0)
-        }
-        
-        print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
-        
-        return user_info
-        
+
+        item = resp.get("Item")
+        if not item:
+            current_app.logger.warning("[api_user_info] not found user_id=%s", user_id)
+            return jsonify({"success": False, "error": "not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "birth_date": item.get("date_of_birth"),
+            "display_name": item.get("display_name", ""),
+            "skill_score": item.get("skill_score", 0),
+        }), 200
+
+    except ClientError as e:
+        current_app.logger.error("[api_user_info] ddb error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "ddb error"}), 500
     except Exception as e:
-        print(f"[ERROR] ユーザー情報取得エラー: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+        current_app.logger.error("[api_user_info] error: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "server error"}), 500
+    
     
 @app.route('/profile_image_edit/<user_id>', methods=['GET', 'POST'])
 @login_required
@@ -2667,17 +2654,22 @@ def profile_image_edit(user_id):
     """プロフィール画像編集ページ"""
     try:
         table = app.dynamodb.Table(app.table_name)
-        resp = table.get_item(Key={'user#user_id': user_id}, ConsistentRead=True)
+        resp = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
+
+        table.update_item(
+            Key=_user_key(user_id),
+            UpdateExpression="SET profile_image_url = :p, large_image_url = :l, updated_at = :u",
+            ExpressionAttributeValues={...},
+        )
         user = resp.get('Item')
         if not user:
             flash('ユーザーが見つかりません。', 'error')
             return redirect(url_for('index'))
 
         # 内部表記を統一
-        user['user_id'] = user.get('user#user_id', user_id)
-
-        # 権限チェック
-        if session.get('_user_id') != user_id:
+        user["user_id"] = user.get("user#user_id", user_id)
+        me = current_user.get_id()
+        if me != user_id:
             flash('アクセス権限がありません。', 'error')
             return redirect(url_for('index'))
 
@@ -2716,11 +2708,7 @@ def profile_image_edit(user_id):
             # 座標（クライアントで計算したクロップ位置が来ていれば使用）
             sx  = request.form.get('crop_sx',   type=float)
             sy  = request.form.get('crop_sy',   type=float)
-            ssz = request.form.get('crop_side', type=float)
-
-            # ★ここに追加★
-            print(f"Debug received: sx={sx}, sy={sy}, ssz={ssz}")
-            print(f"Debug orig_file exists: {orig_file is not None}")
+            ssz = request.form.get('crop_side', type=float)            
 
             # large と サーバ側プロフィール生成用に元画像のバイト列を確保
             source_for_large = orig_file or profile_file

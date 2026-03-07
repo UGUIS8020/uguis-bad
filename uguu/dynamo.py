@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
 from utils.points import record_spend
+from uguu.point import get_point_multiplier
 from typing import Any, Dict, List, Optional, Tuple, Set
 import json, base64
 from decimal import Decimal
@@ -10,6 +11,7 @@ from botocore.exceptions import ClientError
 import re
 from utils.timezone import JST
 from flask import current_app
+
 
 from uguu.point import (
     PointRules,
@@ -24,7 +26,7 @@ from uguu.point import (
     classify,
     better,
     calc_streak_points,
-    _is_junior_high_or_below
+    get_point_multiplier,
 )
 
 load_dotenv()
@@ -516,15 +518,17 @@ class DynamoDB:
             return False
     
     def get_user_by_id(self, user_id: str) -> dict | None:
-        """ユーザー情報を取得（表示用に最低限整形）"""
         try:
-            if not user_id:
-                return None
+            if not user_id: return None
 
-            res = self.users_table.get_item(Key={"user#user_id": user_id})
+            # 余計なプレフィックス付与をせず、そのままのIDで検索
+            res = self.users_table.get_item(
+                Key={"user#user_id": user_id},
+                ConsistentRead=True
+            )
             u = res.get("Item")
-            if not u:
-                return None
+            
+            if not u: return None
 
             # 表示名のフォールバック
             display_name = (u.get("display_name") or "").strip() or "不明"
@@ -628,69 +632,69 @@ class DynamoDB:
         
     
         
-    def get_user_participation_history(self, user_id: str):
-        """
-        bad-users-history からユーザーの参加日を昇順で返す
-        PK=user_id, SK=date (YYYY-MM-DD) を想定
-        キャンセルされた参加は除外
-        """
-        from datetime import datetime
-        table = self.part_history
-        items = []
+    # def get_user_participation_history(self, user_id: str):
+    #     """
+    #     bad-users-history からユーザーの参加日を昇順で返す
+    #     PK=user_id, SK=date (YYYY-MM-DD) を想定
+    #     キャンセルされた参加は除外
+    #     """
+    #     from datetime import datetime
+    #     table = self.part_history
+    #     items = []
 
-        # user_id に対する全件取得
-        resp = table.query(
-            KeyConditionExpression=Key("user_id").eq(user_id),
-            ProjectionExpression="#d, #s",  # dateとstatusを取得
-            ExpressionAttributeNames={
-                "#d": "date", 
-                "#s": "status"  # statusも取得するように追加
-            },
-            ScanIndexForward=True
-        )
-        items.extend(resp.get("Items", []))
+    #     # user_id に対する全件取得
+    #     resp = table.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id),
+    #         ProjectionExpression="#d, #s",  # dateとstatusを取得
+    #         ExpressionAttributeNames={
+    #             "#d": "date", 
+    #             "#s": "status"  # statusも取得するように追加
+    #         },
+    #         ScanIndexForward=True
+    #     )
+    #     items.extend(resp.get("Items", []))
 
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ProjectionExpression="#d, #s",
-                ExpressionAttributeNames={
-                    "#d": "date",
-                    "#s": "status"
-                },
-                ExclusiveStartKey=resp["LastEvaluatedKey"],
-                ScanIndexForward=True
-            )
-            items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = table.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ProjectionExpression="#d, #s",
+    #             ExpressionAttributeNames={
+    #                 "#d": "date",
+    #                 "#s": "status"
+    #             },
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"],
+    #             ScanIndexForward=True
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        # 現在の日付（未来の参加を除外するため）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（未来の参加を除外するため）
+    #     today = datetime.now(JST).date()
         
-        dates = []
-        for it in items:
-            try:
-                # キャンセルされた参加は除外
-                if "status" in it and it["status"] == 'cancelled':
-                    print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
-                    continue
+    #     dates = []
+    #     for it in items:
+    #         try:
+    #             # キャンセルされた参加は除外
+    #             if "status" in it and it["status"] == 'cancelled':
+    #                 print(f"[DEBUG] キャンセル済みの参加をスキップ: {it['date']}")
+    #                 continue
                     
-                # 日付文字列をdatetimeオブジェクトに変換
-                date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
+    #             # 日付文字列をdatetimeオブジェクトに変換
+    #             date_obj = datetime.strptime(it["date"], "%Y-%m-%d")
                 
-                # 未来の日付は除外
-                if date_obj.date() > today:
-                    print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
-                    continue
+    #             # 未来の日付は除外
+    #             if date_obj.date() > today:
+    #                 print(f"[DEBUG] 未来の参加日をスキップ: {it['date']}")
+    #                 continue
                     
-                dates.append(date_obj)
-            except Exception as e:
-                print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
-                pass
+    #             dates.append(date_obj)
+    #         except Exception as e:
+    #             print(f"[WARN] 日付変換エラー: {it.get('date')} - {str(e)}")
+    #             pass
 
-        # 日付順にソート
-        dates.sort()
-        print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
-        return dates
+    #     # 日付順にソート
+    #     dates.sort()
+    #     print(f"[DEBUG] 有効な参加履歴 - user_id: {user_id}, 件数: {len(dates)}")
+    #     return dates
     
     def cancel_participation(self, user_id: str, date: str, schedule_id: str = None):
         """参加をキャンセル - 該当する全レコードを更新"""
@@ -793,6 +797,12 @@ class DynamoDB:
         def better_local(new: dict, old: dict) -> bool:
             cn, co = classify_local(new), classify_local(old)
 
+            # --- 追加: official 保護ロジック ---
+            # すでに official (参加) があるなら、後から来た cancelled や tara に上書きさせない
+            if co == "official" and cn in ["cancelled", "tara"]:
+                return False
+            # -------------------------------
+
             # other は参加履歴の採用対象外
             if cn == "other" and co != "other":
                 return False
@@ -805,7 +815,7 @@ class DynamoDB:
             if cn == "tara" and co == "official":
                 return False
 
-            # それ以外は時刻で比較
+            # それ以外（同じ種別同士など）は時刻で比較
             tn = new.get("registered_at_dt")
             to = old.get("registered_at_dt")
             if tn and to:
@@ -1049,52 +1059,52 @@ class DynamoDB:
                 "schedule_id": schedule_id
             })
 
-    def get_user_participation_history(self, user_id: str):
-        from datetime import datetime
+    # def get_user_participation_history(self, user_id: str):
+    #     from datetime import datetime
 
-        # 現在の日付（JST）
-        today = datetime.now(JST).date()
+    #     # 現在の日付（JST）
+    #     today = datetime.now(JST).date()
 
-        items, resp = [], self.part_history.query(
-            KeyConditionExpression=Key("user_id").eq(user_id)
-        )
-        items.extend(resp.get("Items", []))
-        while "LastEvaluatedKey" in resp:
-            resp = self.part_history.query(
-                KeyConditionExpression=Key("user_id").eq(user_id),
-                ExclusiveStartKey=resp["LastEvaluatedKey"]
-            )
-            items.extend(resp.get("Items", []))
+    #     items, resp = [], self.part_history.query(
+    #         KeyConditionExpression=Key("user_id").eq(user_id)
+    #     )
+    #     items.extend(resp.get("Items", []))
+    #     while "LastEvaluatedKey" in resp:
+    #         resp = self.part_history.query(
+    #             KeyConditionExpression=Key("user_id").eq(user_id),
+    #             ExclusiveStartKey=resp["LastEvaluatedKey"]
+    #         )
+    #         items.extend(resp.get("Items", []))
 
-        valid_dates = []
-        for it in items:
-            d_str = it.get("date")
-            if not d_str:
-                continue
+    #     valid_dates = []
+    #     for it in items:
+    #         d_str = it.get("date")
+    #         if not d_str:
+    #             continue
 
-            # キャンセル済みは除外
-            if (it.get("status") or "").lower() == "cancelled":
-                print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
-                continue
+    #         # キャンセル済みは除外
+    #         if (it.get("status") or "").lower() == "cancelled":
+    #             print(f"[DEBUG] キャンセル済みの参加をスキップ: {d_str}")
+    #             continue
 
-            # 文字列 → date に変換して未来除外
-            try:
-                d = datetime.strptime(d_str, "%Y-%m-%d").date()
-            except ValueError:
-                print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
-                continue
+    #         # 文字列 → date に変換して未来除外
+    #         try:
+    #             d = datetime.strptime(d_str, "%Y-%m-%d").date()
+    #         except ValueError:
+    #             print(f"[WARN] 不正な日付形式をスキップ: {d_str}")
+    #             continue
 
-            if d <= today:
-                valid_dates.append(d_str)
+    #         if d <= today:
+    #             valid_dates.append(d_str)
 
-        # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
-        dates = sorted(set(valid_dates))
+    #     # 重複を削除してソート（文字列のままでも YYYY-MM-DD なら時系列順）
+    #     dates = sorted(set(valid_dates))
 
-        print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
-        for i, date in enumerate(dates):
-            print(f"[DEBUG] 参加日 {i+1}: {date}")
+    #     print(f"[DEBUG] 参加履歴取得完了 - user_id: {user_id}, 件数: {len(dates)}")
+    #     for i, date in enumerate(dates):
+    #         print(f"[DEBUG] 参加日 {i+1}: {date}")
 
-        return dates  # 'YYYY-MM-DD' の文字列配列
+    #     return dates  # 'YYYY-MM-DD' の文字列配列
     
     def get_all_past_schedules(self, until_date):
         """
@@ -1164,7 +1174,8 @@ class DynamoDB:
                 'user_id': user_id,
                 'birth_date': birth_date,
                 'display_name': item.get('display_name', ''),
-                'skill_score': item.get('skill_score', 0)
+                'skill_score': item.get('skill_score', 0),
+                'gender': item.get('gender', 'male'),
             }
             
             print(f"[DEBUG] ユーザー情報取得 - user_id: {user_id}, birth_date: {birth_date}")
@@ -1763,14 +1774,24 @@ class DynamoDB:
 
         manual_points = self.get_manual_points(user_id)
 
-        # 中学生以下の倍率（1.0なら割引なし、0.7なら30%割引）
-        JUNIOR_HIGH_MULTIPLIER = 0.7
-
         user_info = self.get_user_info(user_id)
-        is_junior_high = _is_junior_high_or_below(user_info)
+        print(f"[DBG] user_info={user_info}")
 
-        # 中学生以下なら指定倍率、それ以外は通常料金
-        point_multiplier = JUNIOR_HIGH_MULTIPLIER if is_junior_high else 1.0
+        birth_date_str = user_info.get("birth_date")  # ← .birth_date ではなく .get("date_of_birth")
+        gender = user_info.get("gender", "male")
+
+        if birth_date_str:
+            birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date()
+            print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
+            try:
+                point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
+            except Exception as e:
+                print(f"[DBG] get_point_multiplier ERROR: {e}")
+                point_multiplier = 1.0
+        else:
+            point_multiplier = 1.0
+
+        print(f"[DBG] point_multiplier={point_multiplier}")
 
         # ★ raw_history が渡ってきたらそれを使う
         if raw_history is None:
@@ -1796,7 +1817,7 @@ class DynamoDB:
                 'direct_registration_count': 0,
                 'all_time_early_registration_count': 0,
                 'all_time_direct_registration_count': 0,
-                'is_junior_high': is_junior_high,
+                'is_junior_high': point_multiplier > 1.0,
                 'is_reset': False,
                 'days_until_reset': None,
                 'manual_points': manual_points,
@@ -1832,8 +1853,7 @@ class DynamoDB:
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
 
-        # 連続ポイント
-        from datetime import datetime
+        # 連続ポイント        
         today = datetime.now(JST).date()
 
         if all_schedules is None:
@@ -1944,10 +1964,11 @@ class DynamoDB:
             'current_streak_count': current_streak_count,
             'cumulative_count': cumulative_count,
             'monthly_bonuses': monthly_bonuses,
-            'is_junior_high': is_junior_high,
+            'is_junior_high': point_multiplier > 1.0,
             'is_reset': is_reset,
             'days_until_reset': days_until_reset,
             'manual_points': manual_points,
+            'point_multiplier': point_multiplier,
         }
         
     def calc_total_points_spent(self, user_id: str, since: str | None = None) -> int:
@@ -1998,7 +2019,7 @@ class DynamoDB:
         """ユーザーのポイントを失効させる"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': True}
             )
@@ -2012,7 +2033,7 @@ class DynamoDB:
         """ユーザーのポイント失効を解除"""
         try:
             self.users_table.update_item(
-                Key={'user_id': user_id},
+                Key={'user#user_id': user_id},
                 UpdateExpression='SET points_disabled = :val',
                 ExpressionAttributeValues={':val': False}
             )
