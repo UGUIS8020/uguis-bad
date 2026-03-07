@@ -183,7 +183,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 4 else 500 + (count - 4) * 200
+        base_bonus = 0 if count < 3 else 500 + (count - 3) * 150
         bonus = int(base_bonus * point_multiplier)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
@@ -266,7 +266,7 @@ def calc_streak_points(
     streak_start = None
 
     # マイルストーン管理
-    milestone_values = {5: 500, 10: 1000, 15: 1500, 20: 2000, 25: 2500}
+    milestone_values = {5: 400, 10: 800, 15: 1200, 20: 1600, 25: 2000}
     milestones = {k: False for k in milestone_values.keys()}
 
     resets = 0
