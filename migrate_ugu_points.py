@@ -1,3 +1,6 @@
+# ugu_points テーブルのデータを bad-users-history テーブルへ移行するマイグレーションスクリプトです。
+
+
 from datetime import datetime, timezone
 from uuid import uuid4
 from decimal import Decimal
