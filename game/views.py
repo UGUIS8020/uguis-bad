@@ -2694,6 +2694,16 @@ def submit_score(match_id, court_number):
             current_app.logger.error("❌ エントリー不在: match=%s, court=%d", match_id, court_number_int)
             return "コートのエントリーが見つかりません", 404
 
+        # ---- 2.5. 権限チェック ----
+        if not current_user.administrator:
+            court_user_ids = [str(e.get("user_id", "")) for e in entries]
+            if current_user.user_id not in court_user_ids:
+                current_app.logger.warning(
+                    "[submit_score] 権限なし: user=%s, match=%s, court=%d",
+                    current_user.user_id, match_id, court_number_int
+                )
+                return "このコートへのスコア送信権限がありません", 403
+
         # ---- 3. チーム分類（正規化は維持） ----
         team_a, team_b = [], []
         for entry in entries:

@@ -171,7 +171,10 @@
     <!-- コートデータのループ -->
     <div class="row row-cols-1 g-4">
     {% if match_courts and match_courts|length > 0 %}
-        {% for court_num, court in match_courts.items() %}
+    {% for court_num, court in match_courts.items() %}
+        {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+        {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+        {% if current_user.administrator or in_team_a or in_team_b %}
         <div class="col">
             <div class="card h-100 shadow-lg court-card">
                 <div class="card-header bg-success text-white text-center">
@@ -265,7 +268,8 @@
                 </div>
             </div>
         </div>
-        {% endfor %}
+        {% endif %} 
+    {% endfor %} 
     {% else %}
         <div class="col-12">
             <div class="alert alert-warning">
@@ -274,6 +278,7 @@
         </div>
     {% endif %}
 </div>
+
 
     <!-- 試合終了ボタン -->
     <form method="POST" action="{{ url_for('game.finish_current_match') }}">
