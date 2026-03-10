@@ -183,7 +183,7 @@ def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_mult
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 3 else 500 + (count - 3) * 150
+        base_bonus = 0 if count < 3 else 450 + (count - 3) * 150
         bonus = int(base_bonus * point_multiplier)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
@@ -497,19 +497,17 @@ def is_adult(self, user_info):
         return False
     
 
-def get_point_multiplier(birth_date: date, gender: str) -> float:
+def get_point_multiplier(birth_date, gender: str) -> float:
     today = date.today()
-    age = today.year - birth_date.year - (
-        (today.month, today.day) < (birth_date.month, birth_date.day)
-    )
-    print(f"[MULTIPLIER] birth={birth_date} age={age} gender={gender}")
-
-    if age < 18:
-        return 1.35
-    elif gender and gender.lower() == "female":
-        return 1.25
-    else:
-        return 1.0
+    if birth_date is not None:
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        if age < 18:
+            return 1.3
+    if gender and gender.lower() == "female":
+        return 1.2
+    return 1.0
 
 
 POINTS_CUTOFF_DATE = date(2026, 3, 1)

@@ -2414,41 +2414,30 @@ def leave_court():
     """コートから出る（エントリー削除）"""
     try:
         user_id = current_user.get_id()
-        current_entry = get_user_current_entry(user_id)
 
-        current_app.logger.info(
-            "[leave_court] user_id=%s entry=%s",
-            user_id, current_entry
+        # ユーザーの全エントリーを取得
+        res = match_table.scan(
+            FilterExpression=Attr('user_id').eq(user_id)
         )
+        items = res.get('Items', [])
 
-        if not current_entry:
+        current_app.logger.info("[leave_court] user_id=%s entries=%s", user_id, items)
+
+        if not items:
             flash("エントリーが見つかりませんでした", "warning")
             return redirect(url_for("game.court"))
 
-        entry_status = (current_entry.get("entry_status") or "").strip().lower()
-        match_id = current_entry.get("match_id")
+        # playing中は退出不可
+        for entry in items:
+            entry_status = (entry.get("entry_status") or "").strip().lower()
+            if entry_status == "playing":
+                flash("試合中のため退出できません", "warning")
+                return redirect(url_for("game.court"))
 
-        # 判定は match_id ではなく entry_status
-        if entry_status == "playing":
-            flash("試合中のため退出できません", "warning")
-            return redirect(url_for("game.court"))
-
-        entry_id = current_entry.get("entry_id")
-        if not entry_id:
-            flash("退出に失敗しました（entry_id がありません）", "danger")
-            return redirect(url_for("game.court"))
-
-        # テーブル参照（あなたの環境に合わせて）
-        table = current_app.dynamodb.Table("bad-game-match_entries")
-
-        current_app.logger.info(
-            "[leave_court] deleting entry_id=%s status=%s match_id=%s",
-            entry_id, entry_status, match_id
-        )
-
-        res = table.delete_item(Key={"entry_id": entry_id})
-
-        current_app.logger.info("[leave_court] delete_item response=%s", res)
+        # 全エントリーを削除
+        for entry in items:
+            match_table.delete_item(Key={"entry_id": entry['entry_id']})
+            current_app.logger.info("[leave_court] deleted entry_id=%s", entry['entry_id'])
 
         flash("コートから退出しました", "info")
         return redirect(url_for("index"))

@@ -212,6 +212,7 @@
 
                 {% else %}
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
+                        
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-primary btn-lg px-5 py-3">
                         <i class="fas fa-sign-in-alt me-2"></i>
@@ -281,13 +282,138 @@
 
 
 
+        
 
+         {% if current_user.administrator %}
+        <div class="card status-card mb-4">
+            <div class="card-body">
+                <!-- 進行中の試合がある場合の表示 -->                
+                
+                <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
 
+                <form method="POST" action="{{ url_for('game.create_pairings') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% set selected = (session.get("selected_max_courts", 3)) | int %}
+                    {% for i in range(1, 7) %}
+                        <option value="{{ i }}" {% if i == selected %}selected{% endif %}>{{ i }}面</option>
+                    {% endfor %}
+                    </select>
 
+                    <button type="submit"
+                    class="btn btn-lg {{ 'btn-secondary' if has_ongoing_matches else 'btn-success' }}"
+                    {{ 'disabled' if has_ongoing_matches else '' }}>
+                    {% if has_ongoing_matches %}
+                        <i class="fa-solid fa-clock"></i> スコア入力待ち
+                    {% else %}
+                        <i class="fa-solid fa-circle-play"></i>
+                        LET'S PLAY（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
+                    {% endif %}
+                    </button>
+                </form>
 
+                {% if has_ongoing_matches and current_user.administrator %}
+                <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
+                
+                        onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-warning">
+                    <i class="fa-solid fa-refresh"></i> 強制リセット
+                    </button>
+                </form>
+                {% endif %}
+
+                </div>
+            </div>
+        </div>           
+       
+        {% endif %}       
 
         
-        <div class="card-body px-4">
+            <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
+                
+                <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group">
+                        <label class="input-group-text" for="score_format">試合点数</label>
+                        <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
+                            <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
+                            <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+        
+
+        {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
+            <form method="POST" action="{{ url_for('game.score_input') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="text-center my-2">
+                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
+                </div>
+            </form>
+        {% endif %}
+                       
+        {% set user_court = namespace(found=false) %}
+
+        {% for court in match_courts.values() %}
+            {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+            {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+            {% set show_court = current_user.administrator or in_team_a or in_team_b %}
+
+            {% if show_court %}
+                {% set user_court.found = true %}
+                <div class="col">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header text-white text-center
+                            {% if in_team_a %}bg-danger
+                            {% elif in_team_b %}bg-primary
+                            {% else %}bg-success{% endif %}">
+                            <h4 class="mb-0">
+                                コート{{ court.court_number }}
+                                {% if in_team_a %}<span class="badge bg-white text-danger ms-2 fs-6">あなたはAチーム</span>{% endif %}
+                                {% if in_team_b %}<span class="badge bg-white text-primary ms-2 fs-6">あなたはBチーム</span>{% endif %}
+                            </h4>
+                        </div>
+                        <div class="card-body">
+                            <form class="score-form" 
+                                data-court-number="{{ court.court_number }}"
+                                action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
+                                
+                                <div class="d-flex justify-content-center align-items-center mb-3">               
+                                    <div class="me-2">
+                                        <span class="badge bg-danger me-2 fs-4">A</span>
+                                        <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
+                                    </div>                    
+                                </div>
+
+                                <div class="d-flex justify-content-center align-items-center mb-3">
+                                    <div class="me-2">
+                                        <span class="badge bg-primary me-2 fs-4">B</span>
+                                        <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+
+        {% if not current_user.administrator and not user_court.found and match_courts %}
+        <div class="alert alert-warning text-center mt-3 mx-3">
+            <i class="fas fa-couch fa-2x mb-2 d-block"></i>
+            <strong>今回はお休みです。次の試合をお待ちください。</strong>
+        </div>
+        {% endif %}
+        </div>
+
+
+
+
+
+        {% if current_user.administrator or not has_ongoing_matches %}
+        <div class="card-body px-4 pt-2">
             <!-- 参加待ちプレイヤー -->
             {% if pending_players %}
             <div class="row gx-3 gy-2">
@@ -343,17 +469,7 @@
                         <div class="fw-bold fs-5 mb-1 text-warning">
                             {{ player.display_name }}                            
                         </div>
-                        <!-- <div class="fs-5 fw-semibold">
-                            {% if player.join_count is defined %}
-                                <span class="badge bg-info me-1">{{ player.join_count }}回</span>
-                            {% endif %}
-                            {% if player.match_count is defined %}
-                                <span class="badge bg-success me-1">試合 {{ player.match_count }}回</span>
-                            {% endif %}
-                            {% if player.rest_count is defined %}
-                                <span class="badge bg-secondary">休憩 {{ player.rest_count }}回</span>
-                            {% endif %}
-                        </div> -->
+                        
                     </div>
                 </div>
                 {% endfor %}
@@ -363,110 +479,13 @@
                 <strong>休憩中プレイヤーはいません</strong><br>                
             </div>
             {% endif %}
-        </div>
-
-        {% if current_user.administrator %}
-        <div class="card status-card mb-4">
-            <div class="card-body">
-                <!-- 進行中の試合がある場合の表示 -->                
-                
-                <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
-
-                <form method="POST" action="{{ url_for('game.create_pairings') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <select name="max_courts" id="max_courts" class="form-select" {{ 'disabled' if has_ongoing_matches else '' }}>
-                    {% set selected = (session.get("selected_max_courts", 3)) | int %}
-                    {% for i in range(1, 7) %}
-                        <option value="{{ i }}" {% if i == selected %}selected{% endif %}>{{ i }}面</option>
-                    {% endfor %}
-                    </select>
-
-                    <button type="submit"
-                    class="btn btn-lg {{ 'btn-secondary' if has_ongoing_matches else 'btn-success' }}"
-                    {{ 'disabled' if has_ongoing_matches else '' }}>
-                    {% if has_ongoing_matches %}
-                        <i class="fa-solid fa-clock"></i> スコア入力待ち
-                    {% else %}
-                        <i class="fa-solid fa-circle-play"></i>
-                        LET'S PLAY（{{ pending_players|length }}人 → {{ pending_players|length // 4 }}試合）
-                    {% endif %}
-                    </button>
-                </form>
-
-                {% if has_ongoing_matches and current_user.administrator %}
-                <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
-                
-                        onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-warning">
-                    <i class="fa-solid fa-refresh"></i> 強制リセット
-                    </button>
-                </form>
-                {% endif %}
-
-                </div>
-            </div>
-        </div>           
-       
-        {% endif %}       
-
-        <div class="container mt-4">
-            <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
-                <h3 class="text-success fw-bold mb-0">
-                    本日の試合（{{ match_courts|length }}面）
-                </h3>
-                <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="input-group">
-                        <label class="input-group-text" for="score_format">試合点数</label>
-                        <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
-                            <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
-                            <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
-                        </select>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
-            <form method="POST" action="{{ url_for('game.score_input') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="text-center my-2">
-                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
-                </div>
-            </form>
-        {% endif %}
+        </div>  
+        
+        {% endif %}        
                        
-        {% for court in match_courts.values() %}
-        <div class="col">
-            <div class="card h-100 shadow-sm">
-                <div class="card-header bg-success text-white text-center">
-                    <h4 class="mb-0">コート{{ court.court_number }}</h4>
-                </div>
-                <div class="card-body">
-                    <form class="score-form" 
-                        data-court-number="{{ court.court_number }}"
-                        action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
-                        
-                        <div class="d-flex justify-content-center align-items-center mb-3">               
-                            <div class="me-2">
-                                <span class="badge bg-danger me-2 fs-4">A</span>
-                                <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
-                            </div>                    
-                        </div>
+        {% set user_court = namespace(found=false) %}
 
-                        <div class="d-flex justify-content-center align-items-center mb-3">
-                            <div class="me-2">
-                                <span class="badge bg-primary me-2 fs-4">B</span>
-                                <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
+
 
     <script>
         let lastUpdateTime = new Date();
@@ -494,13 +513,9 @@
             return;
             }
             const playerName = playerElement.getAttribute('data-player-name') || 'プレイヤー';
+            const actionText = currentStatus === 'pending' ? '休憩' : '参加'; //
             
-            const actionText = currentStatus === 'pending' ? '休憩' : '参加';
             
-            if (!confirm(`${playerName}さんを${actionText}状態に変更しますか？`)) {
-                return;
-            }
-
             // ローディング表示
             document.getElementById('loadingOverlay').style.display = 'flex';
 
@@ -517,22 +532,24 @@
                     })
                 });
 
-                const result = await response.json();
+                const text = await response.text();
+                console.log('サーバー生レスポンス:', text);
+                const result = JSON.parse(text);  // これだけ、response.json()は削除
                 console.log('サーバー応答:', result);
 
                 if (result.success) {
                     console.log(`${playerName}さんの状態を${actionText}に変更しました`);
-                    // ページリロードして最新状態を反映
                     location.reload();
                 } else {
                     console.error('エラー詳細:', result);
                     alert(`エラー: ${result.message}`);
                 }
             } catch (error) {
-                console.error('⚠️ 状態変更エラー:', error);
-                alert('状態変更に失敗しました。再度お試しください。');
+                console.error('⚠️ 状態変更エラー詳細:', error);
+                console.error('エラータイプ:', error.constructor.name);
+                console.error('エラーメッセージ:', error.message);
+                alert('状態変更に失敗しました: ' + error.message);
             } finally {
-                // ローディング非表示
                 document.getElementById('loadingOverlay').style.display = 'none';
             }
         }

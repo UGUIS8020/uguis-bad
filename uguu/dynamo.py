@@ -1777,19 +1777,16 @@ class DynamoDB:
         user_info = self.get_user_info(user_id)
         print(f"[DBG] user_info={user_info}")
 
-        birth_date_str = user_info.get("birth_date")  # ← .birth_date ではなく .get("date_of_birth")
+        birth_date_str = user_info.get("birth_date")
         gender = user_info.get("gender", "male")
 
-        if birth_date_str:
-            birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date()
-            print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
-            try:
-                point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
-            except Exception as e:
-                print(f"[DBG] get_point_multiplier ERROR: {e}")
-                point_multiplier = 1.0
-        else:
-            point_multiplier = 1.0
+        birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date() if birth_date_str else None
+        print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
+        try:
+            point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
+        except Exception as e:
+            print(f"[DBG] get_point_multiplier ERROR: {e}")
+            point_multiplier = 1.0       
 
         print(f"[DBG] point_multiplier={point_multiplier}")
 
