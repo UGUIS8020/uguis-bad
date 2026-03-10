@@ -297,6 +297,10 @@
 </div>
 
 <script>
+  const TOTAL_COURTS = {{ match_courts | length }};
+</script>
+
+<script>
 document.addEventListener("DOMContentLoaded", function () {
   const forms = document.querySelectorAll(".score-form");
   const totalForms = forms.length;
