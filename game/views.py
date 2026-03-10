@@ -2618,17 +2618,12 @@ def match_score_status(match_id):
 @bp_game.route("/score_input", methods=["GET", "POST"])
 @login_required
 def score_input():
-    # 1. 管理者以外は入れない
-    if not current_user.administrator:
-        flash("権限がありません。", "danger")
-        return redirect(url_for("game.court"))
-
-    # 2. 進行中の試合がないなら入れない
+    # 1. 進行中の試合がないなら入れない
     if not has_ongoing_matches():
         flash("進行中の試合がないため、スコア入力はできません。", "warning")
         return redirect(url_for("game.court"))
 
-    # 3. 最新の match_id を取得
+    # 2. 最新の match_id を取得
     match_id = get_latest_match_id()
     current_app.logger.info(f"[score_input] match_id = {match_id}")
 
@@ -2636,12 +2631,22 @@ def score_input():
         flash("試合情報が見つかりませんでした。", "warning")
         return redirect(url_for("game.court"))
 
-    # 4. コート情報取得
+    # 3. コート情報取得
     match_courts = get_organized_match_data(match_id)
 
     if not match_courts:
         flash("スコア入力対象の試合データが見つかりませんでした。", "warning")
         return redirect(url_for("game.court"))
+
+    # 4. 管理者 or 自分がコートにいる場合のみ許可
+    if not current_user.administrator:
+        user_in_match = any(
+            current_user.user_id in [p["user_id"] for p in court["team_a"] + court["team_b"]]
+            for court in match_courts.values()
+        )
+        if not user_in_match:
+            flash("権限がありません。", "danger")
+            return redirect(url_for("game.court"))
 
     return render_template(
         "game/score_input.html",
