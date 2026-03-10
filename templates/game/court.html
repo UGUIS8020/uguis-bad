@@ -354,13 +354,13 @@
                 {% set user_in_match.found = true %}
             {% endif %}
         {% endfor %}
-
+       
         {% if current_user.is_authenticated and has_ongoing_matches %}
         {% if current_user.administrator or user_in_match.found %}
             <form method="POST" action="{{ url_for('game.score_input') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="text-center my-2">
-                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
+                    <button type="submit" class="btn btn-danger btn-lg">テスト：スコア入力</button>
                 </div>
             </form>
         {% endif %}
