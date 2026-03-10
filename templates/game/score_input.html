@@ -484,7 +484,7 @@ document.addEventListener("DOMContentLoaded", function () {
           formStatus[formId].inFlight = false;
           submittedCount++;
 
-          if (submittedCount === totalForms) {
+          if (submittedCount === TOTAL_COURTS) {
             onAllSubmitted();
           } else {
             disableEndButton();
@@ -507,10 +507,10 @@ document.addEventListener("DOMContentLoaded", function () {
     endButton.addEventListener("click", function (e) {
       e.preventDefault();
 
-      if (submittedCount !== totalForms) {
-        alert("未送信のコートがあります。すべて送信してください。");
-        return;
-      }
+      if (submittedCount !== TOTAL_COURTS) {
+    alert(`未送信のコートがあります（${submittedCount}/${TOTAL_COURTS}）`);
+    return;
+  }
       if (finishInFlight) return;
       finishMatchAjax({ auto: false });
     });
