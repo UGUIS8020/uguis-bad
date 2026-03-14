@@ -345,14 +345,7 @@
             </div>
         
 
-        {% if current_user.is_authenticated and current_user.administrator and has_ongoing_matches %}
-            <form method="POST" action="{{ url_for('game.score_input') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="text-center my-2">
-                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
-                </div>
-            </form>
-        {% endif %}
+        
                        
         {% set user_court = namespace(found=false) %}
 
@@ -399,6 +392,15 @@
                 </div>
             {% endif %}
         {% endfor %}
+        
+        {% if current_user.is_authenticated and has_ongoing_matches and (current_user.administrator or user_court.found) %}
+            <form method="POST" action="{{ url_for('game.score_input') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="text-center my-2">
+                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
+                </div>
+            </form>
+        {% endif %}
 
         {% if not current_user.administrator and not user_court.found and match_courts %}
         <div class="alert alert-warning text-center mt-3 mx-3">

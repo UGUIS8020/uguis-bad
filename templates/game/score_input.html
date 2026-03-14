@@ -171,7 +171,10 @@
     <!-- コートデータのループ -->
     <div class="row row-cols-1 g-4">
     {% if match_courts and match_courts|length > 0 %}
-        {% for court_num, court in match_courts.items() %}
+    {% for court_num, court in match_courts.items() %}
+        {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+        {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+        {% if current_user.administrator or in_team_a or in_team_b %}
         <div class="col">
             <div class="card h-100 shadow-lg court-card">
                 <div class="card-header bg-success text-white text-center">
@@ -265,6 +268,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
         {% endfor %}
     {% else %}
         <div class="col-12">
@@ -290,6 +294,12 @@
         <button id="debugButton" class="btn btn-secondary">デバッグ情報表示</button>
     </div>
 </div>
+
+
+<script>
+  const TOTAL_COURTS = {{ match_courts | length }};
+</script>
+
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -421,6 +431,43 @@ document.addEventListener("DOMContentLoaded", function () {
     finishMatchAjax({ auto: true });
   }
 
+   // 管理者用：サーバーポーリングで完了検知
+  {% if current_user.administrator %}
+  let pollingTimer = null;
+
+  function pollSubmissionStatus() {
+    fetch(`/game/api/submission_status?match_id={{ match_id }}`)
+      .then(r => r.json())
+      .then(data => {
+        console.log(`[poll] submitted=${data.submitted_count}/${TOTAL_COURTS}`);
+        if (data.submitted_count >= TOTAL_COURTS) {
+          stopPolling();
+          onAllSubmitted();
+        }
+      })
+      .catch(err => console.error("[poll] error:", err));
+  }
+
+  function startPolling() {
+    if (pollingTimer) return;
+    pollingTimer = setInterval(pollSubmissionStatus, 3000);
+  }
+
+  function stopPolling() {
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
+    }
+  }
+
+  // ページ読み込み時にポーリング開始
+  startPolling();
+
+  // finishMatchAjax から参照できるように
+  window._startPolling = startPolling;
+  window._stopPolling = stopPolling;
+  {% endif %}
+
   // 各スコアフォームの送信処理
   forms.forEach((form) => {
     const formId = form.getAttribute("id") || `score-form-${Math.random().toString(36).slice(2)}`;
@@ -479,7 +526,14 @@ document.addEventListener("DOMContentLoaded", function () {
           formStatus[formId].inFlight = false;
           submittedCount++;
 
-          if (submittedCount === totalForms) {
+          // 管理者以外は送信後すぐにcourtへ移動
+          {% if not current_user.administrator %}
+            window.location.href = "/game/court";
+            return;
+          {% endif %}
+
+          // 管理者は全コート完了で自動終了
+          if (submittedCount === TOTAL_COURTS) {
             onAllSubmitted();
           } else {
             disableEndButton();
@@ -502,8 +556,8 @@ document.addEventListener("DOMContentLoaded", function () {
     endButton.addEventListener("click", function (e) {
       e.preventDefault();
 
-      if (submittedCount !== totalForms) {
-        alert("未送信のコートがあります。すべて送信してください。");
+      if (submittedCount !== TOTAL_COURTS) {  // ← totalForms から TOTAL_COURTS に変更
+        alert(`未送信のコートがあります（${submittedCount}/${TOTAL_COURTS}）`);
         return;
       }
       if (finishInFlight) return;
