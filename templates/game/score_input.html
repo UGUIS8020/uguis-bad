@@ -526,11 +526,18 @@ document.addEventListener("DOMContentLoaded", function () {
           formStatus[formId].inFlight = false;
           submittedCount++;
 
-          // 管理者以外は送信後すぐにcourtへ移動
+          // ↓ここを追加
           {% if not current_user.administrator %}
             window.location.href = "/game/court";
             return;
           {% endif %}
+
+          if (submittedCount === TOTAL_COURTS) {
+            onAllSubmitted();
+          } else {
+            disableEndButton();
+          }
+        })
 
           // 管理者は全コート完了で自動終了
           if (submittedCount === TOTAL_COURTS) {
