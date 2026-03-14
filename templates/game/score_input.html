@@ -430,6 +430,32 @@ document.addEventListener("DOMContentLoaded", function () {
     finishMatchAjax({ auto: true });
   }
 
+  // 管理者用ポーリング
+  {% if current_user.administrator %}
+  let pollingTimer = null;
+  function pollSubmissionStatus() {
+    fetch(`/game/api/submission_status?match_id={{ match_id }}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.submitted_count >= TOTAL_COURTS) {
+          stopPolling();
+          onAllSubmitted();
+        }
+      })
+      .catch(err => console.error("[poll] error:", err));
+  }
+  function startPolling() {
+    if (pollingTimer) return;
+    pollingTimer = setInterval(pollSubmissionStatus, 3000);
+  }
+  function stopPolling() {
+    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+  }
+  startPolling();
+  window._startPolling = startPolling;
+  window._stopPolling = stopPolling;
+  {% endif %}
+
   // 各スコアフォームの送信処理
   forms.forEach((form) => {
     const formId = form.getAttribute("id") || `score-form-${Math.random().toString(36).slice(2)}`;
@@ -487,6 +513,18 @@ document.addEventListener("DOMContentLoaded", function () {
           formStatus[formId].submitted = true;
           formStatus[formId].inFlight = false;
           submittedCount++;
+
+          // 管理者以外は送信後すぐにcourtへ移動
+          {% if not current_user.administrator %}
+            window.location.href = "/game/court";
+            return;
+          {% endif %}
+
+          if (submittedCount === TOTAL_COURTS) {
+            onAllSubmitted();
+          } else {
+            disableEndButton();
+          }
 
           if (submittedCount === TOTAL_COURTS) {
             onAllSubmitted();
