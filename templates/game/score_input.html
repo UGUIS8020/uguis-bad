@@ -437,6 +437,11 @@ document.addEventListener("DOMContentLoaded", function () {
     fetch(`/game/api/submission_status?match_id={{ match_id }}`)
       .then(r => r.json())
       .then(data => {
+        console.log(`[poll] submitted=${data.submitted_count}/${TOTAL_COURTS}`);
+        if (!data.match_active) {
+          stopPolling();
+          return;
+        }
         if (data.submitted_count >= TOTAL_COURTS) {
           stopPolling();
           onAllSubmitted();
@@ -524,13 +529,7 @@ document.addEventListener("DOMContentLoaded", function () {
             onAllSubmitted();
           } else {
             disableEndButton();
-          }
-
-          if (submittedCount === TOTAL_COURTS) {
-            onAllSubmitted();
-          } else {
-            disableEndButton();
-          }
+          }          
         })
         .catch((error) => {
           formStatus[formId].inFlight = false;

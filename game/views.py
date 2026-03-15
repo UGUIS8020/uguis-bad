@@ -2762,6 +2762,14 @@ def submission_status():
     if not match_id:
         return jsonify({"error": "match_idが必要です"}), 400
 
+    # 試合がまだアクティブか確認
+    if not has_ongoing_matches():
+        return jsonify({
+            "match_id": match_id,
+            "submitted_count": 0,
+            "match_active": False
+        })
+
     result_table = current_app.dynamodb.Table("bad-game-results")
     resp = result_table.scan(
         FilterExpression=Attr("match_id").eq(str(match_id))
@@ -2770,7 +2778,8 @@ def submission_status():
 
     return jsonify({
         "match_id": match_id,
-        "submitted_count": submitted_count
+        "submitted_count": submitted_count,
+        "match_active": True
     })
 
 
