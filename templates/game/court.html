@@ -445,8 +445,8 @@
         {% if current_user.administrator and has_ongoing_matches %}
         <div class="text-center mt-4 mb-5">
             <button id="finishMatchBtn"
-                    class="btn btn-danger btn-lg px-5 py-3 fs-4"
-                    {% if not all_courts_submitted %}disabled{% endif %}>
+                    class="btn btn-secondary btn-lg px-5 py-3 fs-4"
+                    disabled>
                 <i class="fas fa-flag-checkered me-2"></i>試合終了
             </button>
         </div>
@@ -621,6 +621,7 @@
             if (!sRes.ok) return;
             const sData = await sRes.json();
             const submittedCourts = sData.submitted_courts || [];
+            const totalCourts = {{ match_courts | length }};
 
             // 受信済みコートを表示更新
             submittedCourts.forEach(courtNum => {
@@ -635,10 +636,22 @@
                 }
             });
 
-            // 全コート揃ったら自動で試合終了
-            if (submittedCourts.length >= {{ match_courts | length }}) {
+            const finishBtn = document.getElementById("finishMatchBtn");
+
+            if (totalCourts > 0 && submittedCourts.length >= totalCourts) {
+                // 全コート受信済み → ボタン有効化 → 自動実行
                 console.log("✅ 全コート受信済み → 試合終了自動実行");
+                if (finishBtn) {
+                    finishBtn.disabled = false;
+                    finishBtn.className = "btn btn-danger btn-lg px-5 py-3 fs-4";
+                }
                 await finishMatch();
+            } else {
+                // 未受信あり → ボタン無効のまま
+                if (finishBtn) {
+                    finishBtn.disabled = true;
+                    finishBtn.className = "btn btn-secondary btn-lg px-5 py-3 fs-4";
+                }
             }
         } catch (err) {
             console.error("[updateScoreInputButton] error:", err);
