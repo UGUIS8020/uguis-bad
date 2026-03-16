@@ -548,7 +548,43 @@
         {% if not current_user.administrator %}
         return;
         {% endif %}
-        // ...既存コードそのまま...
+
+        // ローディング表示（オーバーレイ）を開始
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.style.display = 'flex';
+
+        try {
+            const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            
+            // Python側のエンドポイントに合わせてPOSTリクエストを送信
+            const res = await fetch("/game/api/toggle_player_status", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": CSRF_TOKEN,
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({
+                    player_id: playerId,
+                    current_status: currentStatus
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || !data.success) {
+                throw new Error(data.message || "状態の変更に失敗しました");
+            }
+            
+            // 成功したら画面をリロードして反映
+            location.reload();
+
+        } catch (err) {
+            console.error("❌ togglePlayerStatus エラー:", err);
+            alert(err.message);
+            // エラー時はローディングを消す
+            if (overlay) overlay.style.display = 'none';
+        }
     }
 
     function updateTimestamp() {
