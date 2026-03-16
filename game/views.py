@@ -174,6 +174,12 @@ def court():
                 user_court_submitted = court.get("score_submitted", False)
                 break
 
+        # ★ 管理者用：全コート送信済み判定
+        all_courts_submitted = (
+            bool(match_courts)
+            and all(c.get("score_submitted", False) for c in match_courts.values())
+        )
+
         logger.debug(
             "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
             len(items), len(pending_players), len(resting_players), len(playing_players),
@@ -2735,8 +2741,27 @@ def submit_score(match_id, court_number):
             current_app.logger.error("❌ チーム不完全: match=%s, court=%d", match_id, court_number_int)
             return "コートのチームデータが不完全です", 404
 
-        # ---- 4. 結果保存 ----
+        # ★ 重複チェック
+
         result_table = current_app.dynamodb.Table("bad-game-results")
+        
+        existing = _scan_all(  # またはresult_table.scan(...)
+            result_table,
+            FilterExpression=(
+                Attr("match_id").eq(str(match_id)) &
+                Attr("court_number").eq(court_number_int)
+            ),
+            ProjectionExpression="result_id",
+            ConsistentRead=True,
+        )
+        if existing:
+            current_app.logger.warning(
+                "[submit_score] 重複送信ブロック: match=%s, court=%d",
+                match_id, court_number_int
+            )
+            return "", 200  # 冪等に200を返す（クライアントは正常扱い）
+
+        # ---- 4. 結果保存 ----        
         result_item = {
             "result_id": str(uuid.uuid4()),
             "match_id": str(match_id),
