@@ -441,6 +441,17 @@
             {% endif %}
         {% endfor %}
 
+        {# 管理者用：試合終了ボタン #}
+        {% if current_user.administrator and has_ongoing_matches %}
+        <div class="text-center mt-4 mb-5">
+            <button id="finishMatchBtn"
+                    class="btn btn-danger btn-lg px-5 py-3 fs-4"
+                    {% if not all_courts_submitted %}disabled{% endif %}>
+                <i class="fas fa-flag-checkered me-2"></i>試合終了
+            </button>
+        </div>
+        {% endif %}
+
 
 
 
@@ -592,9 +603,14 @@
                 }
             });
 
-            const finishBtn = document.getElementById("finishMatchBtn");
-            if (finishBtn && submittedCourts.length >= {{ match_courts | length }}) {
-                finishBtn.disabled = false;
+            // 全コート揃ったら自動で試合終了
+            if (submittedCourts.length >= {{ match_courts | length }}) {
+                const finishBtn = document.getElementById("finishMatchBtn");
+                if (finishBtn && !finishBtn.disabled) {
+                    finishBtn.disabled = false;
+                    console.log("✅ 全コート受信済み → 試合終了自動実行");
+                    finishBtn.click();  // ★ 自動クリック
+                }
             }
         } catch (err) {
             console.error("[updateScoreInputButton] error:", err);
