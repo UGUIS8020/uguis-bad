@@ -354,95 +354,90 @@
                 {% set user_in_match.found = true %}
             {% endif %}
         {% endfor %}
-       
-        {% if current_user.is_authenticated and has_ongoing_matches %}
-        {% if current_user.administrator or user_in_match.found %}
-            {% if current_user.administrator %}
-                {# 管理者：コートごとにボタンを表示 #}
-                <div class="d-flex flex-wrap justify-content-center gap-2 my-2">
-                    {% for court_num, court in match_courts.items() %}
-                        {% if court.score_submitted %}
-                            <button type="button" class="btn btn-secondary btn-lg" disabled
-                                    id="scoreInputBtn-{{ court_num }}">
-                                <i class="fas fa-check me-2"></i>コート{{ court_num }} 受信済み
-                            </button>
-                        {% else %}
-                            <form method="POST" action="{{ url_for('game.score_input') }}">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-danger btn-lg"
-                                        id="scoreInputBtn-{{ court_num }}">
-                                    コート{{ court_num }} スコア入力
-                                </button>
-                            </form>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-            {% else %}
-                {# 一般参加者：自分のコートのみ #}
-                <form method="POST" action="{{ url_for('game.score_input') }}" id="scoreInputForm">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="text-center my-2">
-                        {% if user_court_submitted %}
-                            <button type="button" class="btn btn-secondary btn-lg" disabled>
-                                <i class="fas fa-check me-2"></i>送信済み
-                            </button>
-                        {% else %}
-                            <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
-                        {% endif %}
-                    </div>
-                </form>
-            {% endif %}
-        {% endif %}
-        {% endif %}
-                       
-        {% set user_court = namespace(found=false) %}
 
-        {% for court in match_courts.values() %}
-            {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
-            {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
-            {% set show_court = current_user.administrator or in_team_a or in_team_b %}
-
-            {% if show_court %}
-                {% set user_court.found = true %}
+        {% if has_ongoing_matches and match_courts %}
+        <div class="row row-cols-1 g-3 mt-2">
+            {% for court_num, court in match_courts.items() %}
+                {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+                {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+                {% set show = current_user.administrator or in_team_a or in_team_b %}
+                {% if show %}
                 <div class="col">
-                    <div class="card h-100 shadow-sm">
+                    <div class="card shadow-sm">
                         <div class="card-header text-white text-center
                             {% if in_team_a %}bg-danger
                             {% elif in_team_b %}bg-primary
                             {% else %}bg-success{% endif %}">
-                            <h4 class="mb-0">
-                                コート{{ court.court_number }}
-                                {% if in_team_a %}<span class="badge bg-white text-danger ms-2 fs-6">あなたはAチーム</span>{% endif %}
-                                {% if in_team_b %}<span class="badge bg-white text-primary ms-2 fs-6">あなたはBチーム</span>{% endif %}
-                            </h4>
+                            <h5 class="mb-0">
+                                コート{{ court_num }}
+                                {% if in_team_a %}<span class="badge bg-white text-danger ms-2">あなたはAチーム</span>{% endif %}
+                                {% if in_team_b %}<span class="badge bg-white text-primary ms-2">あなたはBチーム</span>{% endif %}
+                            </h5>
                         </div>
-                        <div class="card-body">
-                            <form class="score-form" 
-                                data-court-number="{{ court.court_number }}"
-                                action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
-                                
-                                <div class="d-flex justify-content-center align-items-center mb-3">               
-                                    <div class="me-2">
-                                        <span class="badge bg-danger me-2 fs-4">A</span>
-                                        <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
-                                    </div>                    
+                        <div class="card-body" id="court-body-{{ court_num }}">
+                            {% if court.score_submitted %}
+                                <div class="text-center py-3">
+                                    <span class="btn btn-secondary btn-lg disabled">
+                                        <i class="fas fa-check me-2"></i>
+                                        {% if current_user.administrator %}受信済み{% else %}送信済み{% endif %}
+                                    </span>
                                 </div>
+                            {% else %}
+                                <form class="court-score-form"
+                                    data-court-number="{{ court_num }}"
+                                    action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                                <div class="d-flex justify-content-center align-items-center mb-3">
-                                    <div class="me-2">
-                                        <span class="badge bg-primary me-2 fs-4">B</span>
-                                        <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded">
+                                        <div>
+                                            <span class="badge bg-danger me-2 fs-5">A</span>
+                                            <span class="fw-bold fs-5">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
+                                            <input type="text" name="team1_score"
+                                                class="form-control score-input text-center"
+                                                value="{{ session.get('score_format', '21') }}"
+                                                inputmode="numeric" pattern="[0-9]*"
+                                                data-min="0" data-max="99" data-step="1"
+                                                style="width:80px; font-size:1.8rem; font-weight:bold;">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, 1)">＋</button>
+                                        </div>
                                     </div>
-                                </div>
-                            </form>
+
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded">
+                                        <div>
+                                            <span class="badge bg-primary me-2 fs-5">B</span>
+                                            <span class="fw-bold fs-5">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
+                                            <input type="text" name="team2_score"
+                                                class="form-control score-input text-center"
+                                                value="{{ session.get('score_format', '21') }}"
+                                                inputmode="numeric" pattern="[0-9]*"
+                                                data-min="0" data-max="99" data-step="1"
+                                                style="width:80px; font-size:1.8rem; font-weight:bold;">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, 1)">＋</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="text-center">
+                                        <button type="submit" class="btn btn-warning btn-lg w-100 fw-bold">
+                                            <i class="fas fa-trophy me-2"></i>スコア送信
+                                        </button>
+                                    </div>
+                                </form>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
-            {% endif %}
-        {% endfor %}
+                {% endif %}
+            {% endfor %}
+        </div>
 
         {# 管理者用：試合終了ボタン #}
-        {% if current_user.administrator and has_ongoing_matches %}
+        {% if current_user.administrator %}
         <div class="text-center mt-4 mb-5">
             <button id="finishMatchBtn"
                     class="btn btn-secondary btn-lg px-5 py-3 fs-4"
@@ -451,6 +446,17 @@
             </button>
         </div>
         {% endif %}
+
+        {# 一般参加者：お休みメッセージ #}
+        {% if not current_user.administrator and not user_in_match.found %}
+        <div class="alert alert-warning text-center mt-3 mx-3">
+            <i class="fas fa-couch fa-2x mb-2 d-block"></i>
+            <strong>今回はお休みです。次の試合をお待ちください。</strong>
+        </div>
+        {% endif %}
+
+        {% endif %}
+
 
 
 
