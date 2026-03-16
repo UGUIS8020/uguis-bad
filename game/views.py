@@ -166,6 +166,14 @@ def court():
         else:
             match_courts = {}
 
+        user_court_submitted = False
+        for court in match_courts.values():
+            in_team_a = user_id in [p.get("user_id") for p in court.get("team_a", [])]
+            in_team_b = user_id in [p.get("user_id") for p in court.get("team_b", [])]
+            if in_team_a or in_team_b:
+                user_court_submitted = court.get("score_submitted", False)
+                break
+
         logger.debug(
             "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
             len(items), len(pending_players), len(resting_players), len(playing_players),
@@ -200,6 +208,7 @@ def court():
             completed_matches=completed,
             total_matches=total,
             current_courts=current_courts,
+            user_court_submitted=user_court_submitted,
         )
 
     except Exception:
@@ -2950,7 +2959,31 @@ def get_organized_match_data(match_id):
         f"試合データ取得: match_id={match_id} | 構成: {' / '.join(summary_list)}"
     )
 
-    return match_courts
+    # --- スコア送信済みコートを判定 ---
+    try:
+        result_table = current_app.dynamodb.Table("bad-game-results")
+        score_items = _scan_all(
+            result_table,
+            FilterExpression=Attr("match_id").eq(match_id),
+            ProjectionExpression="court_number",
+            ConsistentRead=True,
+        )
+        submitted_courts = set()
+        for s in score_items:
+            try:
+                submitted_courts.add(int(str(s["court_number"])))
+            except Exception:
+                pass
+
+        for c_num, court_data in match_courts.items():
+            court_data["score_submitted"] = c_num in submitted_courts
+
+    except Exception:
+        current_app.logger.warning("[get_organized_match_data] score_submitted チェック失敗")
+        for court_data in match_courts.values():
+            court_data["score_submitted"] = False
+
+    return match_courts  # ← 既存のreturnをここに統合
 
 @bp_game.route("/api/skill_score")
 @login_required
