@@ -364,7 +364,7 @@
                         {% if court.score_submitted %}
                             <button type="button" class="btn btn-secondary btn-lg" disabled
                                     id="scoreInputBtn-{{ court_num }}">
-                                <i class="fas fa-check me-2"></i>コート{{ court_num }} 送信済み
+                                <i class="fas fa-check me-2"></i>コート{{ court_num }} 受信済み
                             </button>
                         {% else %}
                             <form method="POST" action="{{ url_for('game.score_input') }}">
@@ -440,14 +440,6 @@
                 </div>
             {% endif %}
         {% endfor %}
-
-        {% if not current_user.administrator and not user_court.found and match_courts %}
-        <div class="alert alert-warning text-center mt-3 mx-3">
-            <i class="fas fa-couch fa-2x mb-2 d-block"></i>
-            <strong>今回はお休みです。次の試合をお待ちください。</strong>
-        </div>
-        {% endif %}
-        </div>
 
 
 
@@ -534,7 +526,6 @@
     let currentRestingCount = {{ resting_players|length }};
     let emptyStartTime = null;
 
-    // 管理者用: プレイヤーの状態切り替え
     async function togglePlayerStatus(playerId, currentStatus) {
         {% if not current_user.administrator %}
         return;
@@ -568,7 +559,19 @@
             .catch(err => console.error("⚠️ スキルスコア取得エラー:", err));
     }
 
-    // ★ ボタン更新専用関数（グローバルスコープで定義）
+    // ステッパー
+    function stepScore(btn, deltaSign) {
+        const wrapper = btn.closest('.d-flex');
+        const input = wrapper.querySelector('input.score-input');
+        const step = parseInt(input.dataset.step || '1', 10);
+        const min  = parseInt(input.dataset.min  || '0', 10);
+        const max  = parseInt(input.dataset.max  || '99', 10);
+        let v = parseInt(input.value || '0', 10);
+        if (Number.isNaN(v)) v = 0;
+        v = Math.min(max, Math.max(min, v + deltaSign * step));
+        input.value = String(v);
+    }
+
     {% if current_user.administrator and match_id %}
     async function updateScoreInputButton() {
         try {
@@ -577,19 +580,22 @@
             const sData = await sRes.json();
             const submittedCourts = sData.submitted_courts || [];
 
-            // 送信済みコートのボタンを個別に無効化
             submittedCourts.forEach(courtNum => {
-                const btn = document.getElementById(`scoreInputBtn-${courtNum}`);
-                if (btn && !btn.disabled) {
-                    btn.disabled = true;
-                    btn.type = "button";
-                    btn.className = "btn btn-secondary btn-lg";
-                    btn.innerHTML = `<i class="fas fa-check me-2"></i>コート${courtNum} 送信済み`;
-                    const form = btn.closest("form");
-                    if (form) form.addEventListener("submit", e => e.preventDefault());
-                    console.log(`✅ コート${courtNum} 送信済み → ボタン無効化`);
+                const body = document.getElementById(`court-body-${courtNum}`);
+                if (body && body.querySelector('.court-score-form')) {
+                    body.innerHTML = `
+                        <div class="text-center py-3">
+                            <span class="btn btn-secondary btn-lg disabled">
+                                <i class="fas fa-check me-2"></i>受信済み
+                            </span>
+                        </div>`;
                 }
             });
+
+            const finishBtn = document.getElementById("finishMatchBtn");
+            if (finishBtn && submittedCourts.length >= {{ match_courts | length }}) {
+                finishBtn.disabled = false;
+            }
         } catch (err) {
             console.error("[updateScoreInputButton] error:", err);
         }
@@ -607,10 +613,8 @@
                 if (totalCount === 0) {
                     if (emptyStartTime === null) {
                         emptyStartTime = Date.now();
-                        console.log('エントリー者が0人になりました');
                     } else {
-                        const emptyDuration = Date.now() - emptyStartTime;
-                        if (emptyDuration >= 5 * 60 * 1000) {
+                        if (Date.now() - emptyStartTime >= 5 * 60 * 1000) {
                             window.location.href = '/';
                             return;
                         }
@@ -633,7 +637,6 @@
                 }
             }
 
-            // ★ ボタン更新（reload不要な軽量処理）
             {% if current_user.administrator and match_id %}
             await updateScoreInputButton();
             {% endif %}
@@ -647,16 +650,89 @@
         }
     }
 
+    // ★ DOMContentLoaded は1つに統合
     document.addEventListener("DOMContentLoaded", function () {
         console.log('📱 コート画面初期化完了');
         updateTimestamp();
         updateSkillScore();
 
-        // ★ 起動時はボタン更新のみ（checkForUpdatesは呼ばない）
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const IS_ADMIN = {{ 'true' if current_user.administrator else 'false' }};
+
+        // 起動時のボタン状態確認
         {% if current_user.administrator and match_id %}
         updateScoreInputButton();
         {% endif %}
 
+        // コートスコアフォーム送信
+        document.querySelectorAll(".court-score-form").forEach(form => {
+            form.addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const courtNum = form.dataset.courtNumber;
+                const team1Score = Number(form.querySelector('[name="team1_score"]').value);
+                const team2Score = Number(form.querySelector('[name="team2_score"]').value);
+
+                if (team1Score === team2Score) {
+                    alert("スコアが同点です。勝者を決めてください。");
+                    return;
+                }
+
+                const submitBtn = form.querySelector("button[type='submit']");
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>送信中...';
+
+                try {
+                    const formData = new FormData(form);
+                    const res = await fetch(form.getAttribute("action"), {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": CSRF_TOKEN,
+                            "X-Requested-With": "XMLHttpRequest"
+                        },
+                        body: formData,
+                    });
+                    if (!res.ok) throw new Error(await res.text());
+
+                    document.getElementById(`court-body-${courtNum}`).innerHTML = `
+                        <div class="text-center py-3">
+                            <span class="btn btn-secondary btn-lg disabled">
+                                <i class="fas fa-check me-2"></i>${IS_ADMIN ? '受信済み' : '送信済み'}
+                            </span>
+                        </div>`;
+
+                    if (IS_ADMIN) await updateScoreInputButton();
+
+                } catch (err) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-trophy me-2"></i>スコア送信';
+                    alert(err.message || "送信に失敗しました");
+                }
+            });
+        });
+
+        // 試合終了ボタン
+        const finishBtn = document.getElementById("finishMatchBtn");
+        if (finishBtn) {
+            finishBtn.addEventListener("click", async function () {
+                finishBtn.disabled = true;
+                finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+                try {
+                    const res = await fetch("/game/finish_current_match", {
+                        method: "POST",
+                        headers: { "X-CSRFToken": CSRF_TOKEN },
+                        body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+                    });
+                    if (!res.ok) throw new Error("試合終了に失敗しました");
+                    window.location.href = "/game/court";
+                } catch (err) {
+                    finishBtn.disabled = false;
+                    finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+                    alert(err.message);
+                }
+            });
+        }
+
+        // ポーリング管理
         let intervalId = null;
 
         function startPolling() {
