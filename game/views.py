@@ -2744,7 +2744,7 @@ def submit_score(match_id, court_number):
         # ★ 重複チェック
 
         result_table = current_app.dynamodb.Table("bad-game-results")
-        
+
         existing = _scan_all(  # またはresult_table.scan(...)
             result_table,
             FilterExpression=(
@@ -2796,25 +2796,28 @@ def submission_status():
     if not match_id:
         return jsonify({"error": "match_idが必要です"}), 400
 
-    # 試合がアクティブか確認
     if not has_ongoing_matches():
         return jsonify({"match_id": match_id, "submitted_count": 0, "match_active": False})
 
-    # 現在のmatch_idと一致するか確認
     current_match_id = get_latest_match_id()
     if current_match_id != match_id:
-        # 別の試合が進行中 = このmatch_idは終了済み
         return jsonify({"match_id": match_id, "submitted_count": 0, "match_active": False})
 
     result_table = current_app.dynamodb.Table("bad-game-results")
     resp = result_table.scan(
         FilterExpression=Attr("match_id").eq(str(match_id))
     )
-    submitted_count = len(resp.get("Items", []))
+    items = resp.get("Items", [])
+
+    # ★ 追加
+    submitted_courts = [int(str(r["court_number"])) for r in items]
+    total_courts = len(get_organized_match_data(match_id))
 
     return jsonify({
         "match_id": match_id,
-        "submitted_count": submitted_count,
+        "submitted_count": len(submitted_courts),
+        "total_courts": total_courts,          # ★ 追加
+        "submitted_courts": submitted_courts,  # ★ 追加
         "match_active": True
     })
 
