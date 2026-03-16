@@ -589,81 +589,81 @@
         input.value = String(v);
     }
 
-    {% if current_user.administrator and match_id %}
-    // ★ 試合終了共通関数（自動・手動両方から呼ぶ）
-    async function finishMatch() {
-        if (finishInFlight) return;
-        finishInFlight = true;
+    {% if current_user.administrator %}
+        const MATCH_ID = {{ match_id | tojson }};  // null または "20260316_231031"
 
-        const finishBtn = document.getElementById("finishMatchBtn");
-        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-
-        if (finishBtn) {
-            finishBtn.disabled = true;
-            finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
-        }
-        try {
-            const res = await fetch("/game/finish_current_match", {
-                method: "POST",
-                headers: { "X-CSRFToken": CSRF_TOKEN },
-                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
-            });
-            if (!res.ok) throw new Error("試合終了に失敗しました");
-            window.location.href = "/game/court";
-        } catch (err) {
-            finishInFlight = false;
-            if (finishBtn) {
-                finishBtn.disabled = false;
-                finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
-            }
-            alert(err.message);
-        }
-    }
-
-    // ★ スコア受信状況の更新
-    async function updateScoreInputButton() {
-        try {
-            const sRes = await fetch(`/game/api/submission_status?match_id={{ match_id }}`);
-            if (!sRes.ok) return;
-            const sData = await sRes.json();
-            const submittedCourts = sData.submitted_courts || [];
-            const totalCourts = {{ match_courts | length }};
-
-            // 受信済みコートを表示更新
-            submittedCourts.forEach(courtNum => {
-                const body = document.getElementById(`court-body-${courtNum}`);
-                if (body && body.querySelector('.court-score-form')) {
-                    body.innerHTML = `
-                        <div class="text-center py-3">
-                            <span class="btn btn-secondary btn-lg disabled">
-                                <i class="fas fa-check me-2"></i>受信済み
-                            </span>
-                        </div>`;
-                }
-            });
+        async function finishMatch() {
+            if (finishInFlight) return;
+            finishInFlight = true;
+            console.log("🏁 finishMatch() 開始");
 
             const finishBtn = document.getElementById("finishMatchBtn");
+            const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
-            if (totalCourts > 0 && submittedCourts.length >= totalCourts) {
-                // 全コート受信済み → ボタン有効化 → 自動実行
-                console.log("✅ 全コート受信済み → 試合終了自動実行");
+            if (finishBtn) {
+                finishBtn.disabled = true;
+                finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+            }
+            try {
+                const res = await fetch("/game/finish_current_match", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": CSRF_TOKEN,
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+                });
+                const data = await res.json();
+                console.log("finish レスポンス:", data);
+                if (!res.ok || !data.success) throw new Error(data.error || "試合終了に失敗しました");
+                window.location.href = "/game/court";
+            } catch (err) {
+                console.error("❌ finishMatch エラー:", err.message);
+                finishInFlight = false;
                 if (finishBtn) {
                     finishBtn.disabled = false;
-                    finishBtn.className = "btn btn-danger btn-lg px-5 py-3 fs-4";
+                    finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
                 }
-                await finishMatch();
-            } else {
-                // 未受信あり → ボタン無効のまま
-                if (finishBtn) {
-                    finishBtn.disabled = true;
-                    finishBtn.className = "btn btn-secondary btn-lg px-5 py-3 fs-4";
-                }
+                alert(err.message);
             }
-        } catch (err) {
-            console.error("[updateScoreInputButton] error:", err);
         }
-    }
-    {% endif %}
+
+        async function updateScoreInputButton() {
+            // ★ Jinja2条件ではなくJS条件で判定
+            if (!MATCH_ID) {
+                console.warn("⚠️ MATCH_IDがnullのためスキップ");
+                return;
+            }
+            try {
+                const sRes = await fetch(`/game/api/submission_status?match_id=${MATCH_ID}`);
+                if (!sRes.ok) return;
+                const sData = await sRes.json();
+                const submittedCourts = sData.submitted_courts || [];
+                const totalCourts = sData.total_courts || 0;
+
+                console.log(`[updateScoreInputButton] 受信済みコート番号: ${submittedCourts.join(', ')} / 全${totalCourts}コート`);
+
+                submittedCourts.forEach(courtNum => {
+                    const body = document.getElementById(`court-body-${courtNum}`);
+                    if (body && body.querySelector('.court-score-form')) {
+                        body.innerHTML = `
+                            <div class="text-center py-3">
+                                <span class="btn btn-secondary btn-lg disabled">
+                                    <i class="fas fa-check me-2"></i>受信済み
+                                </span>
+                            </div>`;
+                    }
+                });
+
+                if (totalCourts > 0 && submittedCourts.length >= totalCourts) {
+                    console.log("✅ 全コート受信済み → 試合終了自動実行");
+                    await finishMatch();
+                }
+            } catch (err) {
+                console.error("[updateScoreInputButton] error:", err);
+            }
+        }
+        {% endif %}
 
     async function checkForUpdates() {
         try {
@@ -700,7 +700,7 @@
                 }
             }
 
-            {% if current_user.administrator and match_id %}
+            {% if current_user.administrator %}
             await updateScoreInputButton();
             {% endif %}
 
@@ -722,7 +722,7 @@
         const IS_ADMIN = {{ 'true' if current_user.administrator else 'false' }};
 
         // 起動時のボタン状態確認
-        {% if current_user.administrator and match_id %}
+        {% if current_user.administrator %}
         updateScoreInputButton();
         {% endif %}
 
@@ -762,7 +762,13 @@
                             </span>
                         </div>`;
 
-                    if (IS_ADMIN) await updateScoreInputButton();
+                    // ★ ここを修正：サーバー側のDB反映（ConsistentRead含む）を待つために1秒待機
+                    if (IS_ADMIN) {
+                        setTimeout(async () => {
+                            console.log(`[submit_score] 待機終了。最終チェックを実行します...`);
+                            await updateScoreInputButton();
+                        }, 1000); 
+                    }
 
                 } catch (err) {
                     submitBtn.disabled = false;

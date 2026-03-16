@@ -215,6 +215,7 @@ def court():
             total_matches=total,
             current_courts=current_courts,
             user_court_submitted=user_court_submitted,
+            all_courts_submitted=all_courts_submitted,
         )
 
     except Exception:
@@ -2775,6 +2776,8 @@ def submit_score(match_id, court_number):
         }
 
         result_table.put_item(Item=result_item)
+        res = result_table.put_item(Item=result_item)
+        current_app.logger.info(f"✅ [DEBUG] 保存完了レスポンス: {res.get('ResponseMetadata', {}).get('HTTPStatusCode')}")
         
         # 成功時はこの1行のみ
         current_app.logger.info("Score: Match=%s, Court=%d, %d-%d (Win:%s)", 
@@ -2786,6 +2789,7 @@ def submit_score(match_id, court_number):
         current_app.logger.error("[submit_score ERROR] %s", str(e), exc_info=True)
         return "スコアの送信中にエラーが発生しました", 500
     
+    
 @bp_game.route("/api/submission_status")
 @login_required
 def submission_status():
@@ -2796,6 +2800,8 @@ def submission_status():
     if not match_id:
         return jsonify({"error": "match_idが必要です"}), 400
 
+    current_app.logger.info(f"🔍 [submission_status] GSIを利用した照会開始: match_id={match_id}")
+
     if not has_ongoing_matches():
         return jsonify({"match_id": match_id, "submitted_count": 0, "match_active": False})
 
@@ -2804,20 +2810,48 @@ def submission_status():
         return jsonify({"match_id": match_id, "submitted_count": 0, "match_active": False})
 
     result_table = current_app.dynamodb.Table("bad-game-results")
-    resp = result_table.scan(
-        FilterExpression=Attr("match_id").eq(str(match_id))
-    )
-    items = resp.get("Items", [])
+    
+    # ★ 修正ポイント: scan をやめて query を使用
+    try:
+        # 作成したGSI（match_id-index）を指定してクエリを実行
+        resp = result_table.query(
+            IndexName="match_id-index",
+            KeyConditionExpression=Key("match_id").eq(str(match_id))
+        )
+        items = resp.get("Items", [])
+    except Exception as e:
+        # インデックス作成直後などでエラーが出た場合の安全策（フォールバック）
+        current_app.logger.error(f"❌ [submission_status] Query失敗、Scanに切り替えます: {str(e)}")
+        resp = result_table.scan(
+            FilterExpression=Attr("match_id").eq(str(match_id)),
+            ConsistentRead=True
+        )
+        items = resp.get("Items", [])
 
-    # ★ 追加
-    submitted_courts = [int(str(r["court_number"])) for r in items]
-    total_courts = len(get_organized_match_data(match_id))
+    # 📊 デバッグログ（取得できた中身の確認）
+    current_app.logger.info(f"📊 [submission_status] 取得件数: {len(items)}件")
+    for i, item in enumerate(items):
+        c_num = item.get('court_number')
+        current_app.logger.info(f"   item[{i}]: court_number={c_num}")
+
+    # 重複のないユニークなコート番号リストを作成
+    try:
+        submitted_courts = sorted(list(set(int(str(r["court_number"])) for r in items if "court_number" in r)))
+    except Exception as e:
+        current_app.logger.error(f"❌ [submission_status] リスト作成エラー: {str(e)}")
+        submitted_courts = []
+
+    # 試合データの取得（全コート数を確認）
+    match_data = get_organized_match_data(match_id)
+    total_courts = len(match_data)
+    
+    current_app.logger.info(f"✅ [submission_status] 最終判定: {len(submitted_courts)}/{total_courts} (コート: {submitted_courts})")
 
     return jsonify({
         "match_id": match_id,
         "submitted_count": len(submitted_courts),
-        "total_courts": total_courts,          # ★ 追加
-        "submitted_courts": submitted_courts,  # ★ 追加
+        "total_courts": total_courts,
+        "submitted_courts": submitted_courts,
         "match_active": True
     })
 
