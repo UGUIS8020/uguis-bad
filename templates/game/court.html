@@ -357,18 +357,31 @@
        
         {% if current_user.is_authenticated and has_ongoing_matches %}
         {% if current_user.administrator or user_in_match.found %}
-            <form method="POST" action="{{ url_for('game.score_input') }}" id="scoreInputForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="text-center my-2">
-                    {% if current_user.administrator %}
-                        {% if all_courts_submitted %}
-                            <button type="button" class="btn btn-secondary btn-lg" disabled id="scoreInputBtn">
-                                <i class="fas fa-check me-2"></i>全コート送信済み
+            {% if current_user.administrator %}
+                {# 管理者：コートごとにボタンを表示 #}
+                <div class="d-flex flex-wrap justify-content-center gap-2 my-2">
+                    {% for court_num, court in match_courts.items() %}
+                        {% if court.score_submitted %}
+                            <button type="button" class="btn btn-secondary btn-lg" disabled
+                                    id="scoreInputBtn-{{ court_num }}">
+                                <i class="fas fa-check me-2"></i>コート{{ court_num }} 送信済み
                             </button>
                         {% else %}
-                            <button type="submit" class="btn btn-danger btn-lg" id="scoreInputBtn">スコア入力</button>
+                            <form method="POST" action="{{ url_for('game.score_input') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-danger btn-lg"
+                                        id="scoreInputBtn-{{ court_num }}">
+                                    コート{{ court_num }} スコア入力
+                                </button>
+                            </form>
                         {% endif %}
-                    {% else %}
+                    {% endfor %}
+                </div>
+            {% else %}
+                {# 一般参加者：自分のコートのみ #}
+                <form method="POST" action="{{ url_for('game.score_input') }}" id="scoreInputForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="text-center my-2">
                         {% if user_court_submitted %}
                             <button type="button" class="btn btn-secondary btn-lg" disabled>
                                 <i class="fas fa-check me-2"></i>送信済み
@@ -376,9 +389,9 @@
                         {% else %}
                             <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
                         {% endif %}
-                    {% endif %}
-                </div>
-            </form>
+                    </div>
+                </form>
+            {% endif %}
         {% endif %}
         {% endif %}
                        
@@ -562,16 +575,21 @@
             const sRes = await fetch(`/game/api/submission_status?match_id={{ match_id }}`);
             if (!sRes.ok) return;
             const sData = await sRes.json();
-            const btn = document.getElementById("scoreInputBtn");
-            if (btn && !btn.disabled && sData.submitted_count >= {{ match_courts | length }}) {
-                btn.disabled = true;
-                btn.type = "button";
-                btn.className = "btn btn-secondary btn-lg";
-                btn.innerHTML = '<i class="fas fa-check me-2"></i>全コート送信済み';
-                const form = document.getElementById("scoreInputForm");
-                if (form) form.addEventListener("submit", e => e.preventDefault());
-                console.log("✅ 全コート送信済み → ボタン無効化");
-            }
+            const submittedCourts = sData.submitted_courts || [];
+
+            // 送信済みコートのボタンを個別に無効化
+            submittedCourts.forEach(courtNum => {
+                const btn = document.getElementById(`scoreInputBtn-${courtNum}`);
+                if (btn && !btn.disabled) {
+                    btn.disabled = true;
+                    btn.type = "button";
+                    btn.className = "btn btn-secondary btn-lg";
+                    btn.innerHTML = `<i class="fas fa-check me-2"></i>コート${courtNum} 送信済み`;
+                    const form = btn.closest("form");
+                    if (form) form.addEventListener("submit", e => e.preventDefault());
+                    console.log(`✅ コート${courtNum} 送信済み → ボタン無効化`);
+                }
+            });
         } catch (err) {
             console.error("[updateScoreInputButton] error:", err);
         }
