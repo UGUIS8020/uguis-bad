@@ -536,6 +536,7 @@
     let currentPendingCount = {{ pending_players|length }};
     let currentRestingCount = {{ resting_players|length }};
     let emptyStartTime = null;
+    let finishInFlight = false;  // 二重実行防止
 
     async function togglePlayerStatus(playerId, currentStatus) {
         {% if not current_user.administrator %}
@@ -570,7 +571,6 @@
             .catch(err => console.error("⚠️ スキルスコア取得エラー:", err));
     }
 
-    // ステッパー
     function stepScore(btn, deltaSign) {
         const wrapper = btn.closest('.d-flex');
         const input = wrapper.querySelector('input.score-input');
@@ -584,6 +584,37 @@
     }
 
     {% if current_user.administrator and match_id %}
+    // ★ 試合終了共通関数（自動・手動両方から呼ぶ）
+    async function finishMatch() {
+        if (finishInFlight) return;
+        finishInFlight = true;
+
+        const finishBtn = document.getElementById("finishMatchBtn");
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+        if (finishBtn) {
+            finishBtn.disabled = true;
+            finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+        }
+        try {
+            const res = await fetch("/game/finish_current_match", {
+                method: "POST",
+                headers: { "X-CSRFToken": CSRF_TOKEN },
+                body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
+            });
+            if (!res.ok) throw new Error("試合終了に失敗しました");
+            window.location.href = "/game/court";
+        } catch (err) {
+            finishInFlight = false;
+            if (finishBtn) {
+                finishBtn.disabled = false;
+                finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+            }
+            alert(err.message);
+        }
+    }
+
+    // ★ スコア受信状況の更新
     async function updateScoreInputButton() {
         try {
             const sRes = await fetch(`/game/api/submission_status?match_id={{ match_id }}`);
@@ -591,6 +622,7 @@
             const sData = await sRes.json();
             const submittedCourts = sData.submitted_courts || [];
 
+            // 受信済みコートを表示更新
             submittedCourts.forEach(courtNum => {
                 const body = document.getElementById(`court-body-${courtNum}`);
                 if (body && body.querySelector('.court-score-form')) {
@@ -605,12 +637,8 @@
 
             // 全コート揃ったら自動で試合終了
             if (submittedCourts.length >= {{ match_courts | length }}) {
-                const finishBtn = document.getElementById("finishMatchBtn");
-                if (finishBtn && !finishBtn.disabled) {
-                    finishBtn.disabled = false;
-                    console.log("✅ 全コート受信済み → 試合終了自動実行");
-                    finishBtn.click();  // ★ 自動クリック
-                }
+                console.log("✅ 全コート受信済み → 試合終了自動実行");
+                await finishMatch();
             }
         } catch (err) {
             console.error("[updateScoreInputButton] error:", err);
@@ -666,7 +694,6 @@
         }
     }
 
-    // ★ DOMContentLoaded は1つに統合
     document.addEventListener("DOMContentLoaded", function () {
         console.log('📱 コート画面初期化完了');
         updateTimestamp();
@@ -726,25 +753,11 @@
             });
         });
 
-        // 試合終了ボタン
+        // 試合終了ボタン（手動用）
         const finishBtn = document.getElementById("finishMatchBtn");
         if (finishBtn) {
             finishBtn.addEventListener("click", async function () {
-                finishBtn.disabled = true;
-                finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
-                try {
-                    const res = await fetch("/game/finish_current_match", {
-                        method: "POST",
-                        headers: { "X-CSRFToken": CSRF_TOKEN },
-                        body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
-                    });
-                    if (!res.ok) throw new Error("試合終了に失敗しました");
-                    window.location.href = "/game/court";
-                } catch (err) {
-                    finishBtn.disabled = false;
-                    finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
-                    alert(err.message);
-                }
+                await finishMatch();
             });
         }
 
