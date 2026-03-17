@@ -18,6 +18,26 @@ def init_app(app, db, cache):
     # ここでapp, db, cacheに依存する初期化を行う
     pass
 
+def leader_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 1. ログインしているか（current_userが有効か）
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        
+        # 2. 管理者(administrator=True) または roleがstaffなら許可
+        # getattrを使うことで、属性が存在しない場合でもエラーにならず安全に判定できます
+        is_admin = getattr(current_user, 'administrator', False)
+        is_staff = getattr(current_user, 'role', '') == 'staff'
+        
+        if not (is_admin or is_staff):
+            # 権限がない場合は403エラーを出すか、メッセージを出してリダイレクト
+            flash('リーダーまたは管理者権限が必要です', 'danger')
+            return redirect(url_for('main.index')) # メインページなどへ
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 @bp.route("/admin/schedules", methods=['GET', 'POST'])
 @login_required
