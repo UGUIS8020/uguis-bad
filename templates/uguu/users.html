@@ -168,6 +168,26 @@
 <div class="profile-name" style="text-align: center; font-size: 1.5rem; margin-top: 1rem; font-weight: 600;">
   {{ user.display_name }}
 </div>
+
+<div class="profile-info" style="display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 1rem; color: #666; margin-top: 0.5rem;">
+  
+  {# 渋谷さん（super）または ちゃんみなさん（admin）の場合にラベルを表示 #}
+  {% if user.role == 'super' or user.role == 'admin' %}
+    <span class="role-badge" style="padding: 2px 8px; background-color: #ffd700; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: #333; white-space: nowrap;">
+      {% if user.role == 'super' %}
+        管理者
+      {% else %}
+        所属チーム
+      {% endif %}
+    </span>
+  {% endif %}
+
+  {% if user.organization %}
+    <span class="org-name" style="font-weight: 500;">
+      {{ user.organization }}
+    </span>
+  {% endif %}
+</div>
   
 
         <style>
@@ -302,24 +322,19 @@
                 <div class="text-center">
                     <div class="profile-actions">
                         <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
-                        class="btn btn-outline-secondary btn-sm d-block mb-3">
+                          class="btn btn-outline-secondary btn-sm d-block mb-3">
                             <i class="fas fa-edit me-1"></i>プロフィールを編集
                         </a>
                         <a href="{{ url_for('logout') }}" 
-                        class="btn btn-outline-danger btn-sm d-block"
-                        onclick="return confirm('ログアウトしますか？')">
+                          class="btn btn-outline-danger btn-sm d-block"
+                          onclick="return confirm('ログアウトしますか？')">
                             <i class="fas fa-sign-out-alt me-1"></i>
                             ログアウト
                         </a>
                     </div>
                 </div>
-                {% else %}
-                <!-- 他人の場合：フォローボタン（将来実装） -->
-                <button class="btn btn-primary btn-sm" disabled>
-                    <i class="fas fa-user-plus me-1"></i>フォロー
-                </button>
                 {% endif %}
-            </div>           
+                {# 他人の場合は何も表示しない（フォローボタン削除済み） #}                      
             
             <p class="card-text mt-3 text-center">
           <strong class="d-block mb-2">戦闘力</strong>
