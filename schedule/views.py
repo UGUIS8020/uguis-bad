@@ -61,7 +61,8 @@ def admin_schedules():
             # --- 2. 保存データに team_id を追加 ---
             schedule_data = {
                 'schedule_id': schedule_id,
-                'team_id': current_user.team_id,  # ★ ログインユーザーのチームIDを保存
+                'team_id': current_user.team_id, 
+                'display_name': current_user.display_name,
                 'date': form.date.data.isoformat(),
                 'day_of_week': form.day_of_week.data,
                 'venue': form.venue.data,
@@ -195,7 +196,8 @@ def edit_schedule(schedule_id):
                             ':mp': form.max_participants.data,
                             ':ua': datetime.now().isoformat(),
                             ':s': form.status.data,
-                            ':c': request.form.get('comment', '')
+                            ':c': request.form.get('comment', ''),
+                            ':an': current_user.display_name
                         }
                     )
                     
@@ -232,7 +234,7 @@ def edit_schedule(schedule_id):
 def delete_schedule(schedule_id):    
     from flask import current_app
     
-    if not current_user.administrator:
+    if not current_user.administrator and current_user.role != 'admin':
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'success': False, 'message': '管理者権限が必要です'})
         flash('管理者権限が必要です', 'warning')

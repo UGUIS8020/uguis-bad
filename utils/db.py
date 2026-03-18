@@ -87,7 +87,9 @@ def get_schedules_with_formatting():
                     'description': schedule.get('description', ''),
                     'comment': schedule.get('comment', ''),
                     'tara_participants': schedule.get('tara_participants', []),
-                    'tara_count': len(schedule.get('tara_participants', []))
+                    'tara_count': len(schedule.get('tara_participants', [])),
+                    'display_name': schedule.get('display_name', '管理者'),
+                    
                 }
                 
                 formatted_schedules.append(formatted_schedule)
@@ -136,7 +138,11 @@ def get_schedules_with_formatting_all():
                 'participants_count': len(schedule.get('participants', [])),
                 'participants': schedule.get('participants', []),
                 'status': schedule.get('status', 'active'),
-                'description': schedule.get('description', '')
+                'description': schedule.get('description', ''),
+                'comment': schedule.get('comment', ''),
+                'tara_participants': schedule.get('tara_participants', []),
+                'tara_count': len(schedule.get('tara_participants', [])),
+                'display_name': schedule.get('display_name', '管理者'),
             })
 
         return formatted_schedules

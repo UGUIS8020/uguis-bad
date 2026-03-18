@@ -236,10 +236,15 @@
                             <span class="me-2">
 
                                 {% if schedule.team_id != 't000' %}
-                                    <span class="badge rounded-pill bg-dark text-white mb-2 fw-bold" style="font-size: 1rem;">
-                                        {{ schedule.team_name }}
-                                    </span>
-                                    <br>
+                                    <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
+                                        <span class="badge rounded-pill bg-dark text-white fw-bold" style="font-size: 1rem;">
+                                            {{ schedule.team_name }}
+                                        </span>
+                                        
+                                        <span class="text-muted small fw-bold">
+                                            管理者：{{ schedule.display_name }}
+                                        </span>
+                                    </div>
                                 {% endif %}
                                 <br>
 
