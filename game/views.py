@@ -11,6 +11,7 @@ from .game_utils import (
     Player,
     generate_ai_best_pairings,
     generate_balanced_pairs_and_matches,
+    generate_full_random_pairings,
     parse_players,
     sync_match_entries_with_updated_skills,
     update_trueskill_for_players_and_return_updates, _rest_queue_pk
@@ -3558,6 +3559,9 @@ def create_pairings():
 
         if cycle_index == 2:
             mode = "ai"
+            next_cycle_index = 3
+        elif cycle_index == 3:
+            mode = "full_random"
             next_cycle_index = 0
         else:
             mode = "random"
@@ -3652,11 +3656,10 @@ def create_pairings():
         match_id = generate_match_id()
 
         if mode == "ai":
-            # AIモードは通常 2つ の戻り値
             matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
-        else:
-            # Randomモードは 3つ の戻り値（pairs が最初に入る）
-            # ここで ValueError: too many values to unpack が起きていました
+        elif mode == "full_random":
+            pairs, matches, additional_waiting_players = generate_full_random_pairings(players, max_courts)
+        else:  # random
             pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
 
         current_app.logger.debug(

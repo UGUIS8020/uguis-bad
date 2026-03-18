@@ -523,6 +523,31 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
+def generate_full_random_pairings(players, max_courts):
+    """
+    ペアも対戦相手も完全ランダムで決定する。
+    スキルスコアを一切考慮しない。
+    """
+    import random
+
+    shuffled = players.copy()
+    random.shuffle(shuffled)
+
+    num_courts = min(max_courts, len(shuffled) // 4)
+    active = shuffled[:num_courts * 4]
+    additional_waiting = shuffled[num_courts * 4:]
+
+    pairs = []
+    for i in range(0, len(active), 2):
+        pairs.append((active[i], active[i + 1]))
+
+    matches = []
+    for i in range(0, len(pairs), 2):
+        matches.append((pairs[i], pairs[i + 1]))
+
+    return pairs, matches, additional_waiting
+
+
 # =========================================================
 # Rest queue (queue 방식 + late joiners at tail)
 # =========================================================
