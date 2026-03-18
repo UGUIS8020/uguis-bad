@@ -216,11 +216,21 @@
                     </div>
                     {% endif %}  
 
+                    {% if schedule.team_id != 't000' %}
+                        <div class="d-flex align-items-center flex-wrap gap-2 px-3 pt-2">
+                            <span class="badge rounded-pill bg-dark text-white fw-bold" style="font-size: 1rem;">
+                                {{ schedule.team_name }}
+                            </span>
+                            <span class="text-muted small fw-bold">
+                                管理者：{{ schedule.display_name }}
+                            </span>
+                        </div>
+                    {% endif %}               
+
 
                     <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
                     <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">     
-
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}"> 
 
                         {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %} 
                         
@@ -233,26 +243,14 @@
                                 style="box-shadow:none;">
                         <div class="d-flex w-100 align-items-center justify-content-between gap-2">
                             <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
-                            <span class="me-2">
-
-                                {% if schedule.team_id != 't000' %}
-                                    <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
-                                        <span class="badge rounded-pill bg-dark text-white fw-bold" style="font-size: 1rem;">
-                                            {{ schedule.team_name }}
-                                        </span>
-                                        
-                                        <span class="text-muted small fw-bold">
-                                            管理者：{{ schedule.display_name }}
-                                        </span>
-                                    </div>
-                                {% endif %}
-                                <br>
+                            <span class="me-2">                                
 
                                 {{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                 {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
                                 {{ schedule.venue }}{{ schedule.court }}   
 
                             </div>
+                            
                             <div class="text-end">
                             募集 {{ schedule.participants_count }}/{{ schedule.max_participants }}
                             {% if schedule.participants_count >= schedule.max_participants %}
@@ -261,6 +259,7 @@
                                 <span class="badge bg-success">募集中</span>
                             {% endif %}
                             </div>
+                            
                         </div>
                         </button>
                         {% else %}
