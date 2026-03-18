@@ -38,7 +38,7 @@ def setup_test_admin_with_hash(user_id):
                 ":dname": "てすと999まさひこ",
                 ":email": "test999@test.com",
                 ":pw": hashed_password,     # ハッシュ化した値をセット
-                ":org": "かわせみバドミントン倶楽部",
+                ":org": "かわせみバド倶楽部",
                 ":tid": "t999",
                 ":role_val": "admin",
                 ":admin_val": False

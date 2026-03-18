@@ -32,7 +32,7 @@ def get_schedule_table():
 TEAM_MAP = {
     't000': '鶯',
     't001': 'はねふわ',
-    't999': 'かわせみバドミントン倶楽部'
+    't999': 'かわせみバド倶楽部'
 }   
 
 def get_schedules_with_formatting():
