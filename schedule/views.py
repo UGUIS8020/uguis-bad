@@ -181,7 +181,9 @@ def edit_schedule(schedule_id):
                         },
                         UpdateExpression="SET day_of_week = :dow, venue = :v, start_time = :st, "
                                          "end_time = :et, max_participants = :mp, "
-                                         "updated_at = :ua, #status = :s, #comment = :c",
+                                         "updated_at = :ua, #status = :s, #comment = :c, "
+                                         "updated_by = :an",
+                                         
                         # --- ここが重要：エラーの直接的な原因 ---
                         ExpressionAttributeNames={
                             '#status': 'status',
