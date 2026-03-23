@@ -3150,9 +3150,8 @@ def clear_test_data():
     if not current_user.administrator:
         return redirect(url_for('index'))
 
-    match_table = current_app.dynamodb.Table("bad-game-match_entries") # テーブル定義の不足分を追加
-    
     # 1. マッチエントリー（参加者）から削除
+    match_table = current_app.dynamodb.Table("bad-game-match_entries")
     last_evaluated_key = None
     while True:
         scan_kwargs = {'FilterExpression': Attr('user_id').begins_with("test_user_")}
@@ -3162,15 +3161,13 @@ def clear_test_data():
             match_table.delete_item(Key={'entry_id': item['entry_id']})
         last_evaluated_key = response.get('LastEvaluatedKey')
         if not last_evaluated_key: break
-    
+
     # 2. ユーザーテーブル（スキル等）から削除
     user_table = current_app.dynamodb.Table("bad-users")
     last_evaluated_key = None
     while True:
         scan_kwargs = {
-            'FilterExpression': 'begins_with(#uid, :prefix)',
-            'ExpressionAttributeNames': {'#uid': 'user_id'},
-            'ExpressionAttributeValues': {':prefix': 'test_user_'}
+            'FilterExpression': Attr('user_id').begins_with("test_user_")
         }
         if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
         response = user_table.scan(**scan_kwargs)
@@ -3179,21 +3176,45 @@ def clear_test_data():
         last_evaluated_key = response.get('LastEvaluatedKey')
         if not last_evaluated_key: break
 
-    # 3. ★ここが最重要：メタデータ（進行状況とキュー）を消去★
+    # 3. bad-game-results から test_user_ 関連を削除
+    results_table = current_app.dynamodb.Table("bad-game-results")
+    last_evaluated_key = None
+    while True:
+        scan_kwargs = {
+            'FilterExpression': Attr('team_a').contains('test_user_') |
+                                Attr('team_b').contains('test_user_')
+        }
+        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
+        response = results_table.scan(**scan_kwargs)
+        for item in response.get('Items', []):
+            results_table.delete_item(Key={'result_id': item['result_id']})
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key: break
+
+    # 4. bad-game-history から test_user_ 関連を削除
+    history_table = current_app.dynamodb.Table("bad-game-history")
+    last_evaluated_key = None
+    while True:
+        scan_kwargs = {
+            'FilterExpression': Attr('courts').contains('test_user_')
+        }
+        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
+        response = history_table.scan(**scan_kwargs)
+        for item in response.get('Items', []):
+            history_table.delete_item(Key={'match_id': item['match_id']})
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key: break
+
+    # 5. メタデータ（進行状況とキュー）をリセット
     try:
         meta_table = current_app.dynamodb.Table("bad-game-matches")
-        
-        # 進行状況を idle にリセット
         meta_table.update_item(
             Key={"match_id": "meta#current"},
             UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
-        
-        # 休み順のキューを物理削除（これで次から Generation 1 に戻る）
         meta_table.delete_item(Key={"match_id": "rest_queue"})
-        
         current_app.logger.info("[clear_test_data] meta#current reset and rest_queue DELETED.")
     except Exception as e:
         current_app.logger.error(f"[clear_test_data] Meta reset failed: {e}")
@@ -3948,7 +3969,8 @@ def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[l
 #     except Exception as e:
 #         current_app.logger.error("[rest_queue] Save failed: %s", e)
 #         return entries, [], {"error": True}
-    
+
+from itertools import groupby    
 
 def _pick_waiters_by_rest_queue(entries, waiting_count, *, queue_key="rest_queue", max_retries=5):
     import random
@@ -3992,7 +4014,12 @@ def _pick_waiters_by_rest_queue(entries, waiting_count, *, queue_key="rest_queue
             
             # ★ここが重要：others (12人) の中身をランダムにシャッフルする！
             # これをしないと、othersの中での4人組の「塊」が一生崩れません。
-            random.shuffle(others)
+            shuffled = []
+            for _, g in groupby(others, key=lambda uid: by_id.get(uid, {}).get("rest_count", 0)):
+                g = list(g)
+                random.shuffle(g)
+                shuffled.extend(g)
+            others = shuffled
             
             # 4. 結合（12人の後ろに、直近の4人を置く）
             new_queue_ordered = others + prev_waiters

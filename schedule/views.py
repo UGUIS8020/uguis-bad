@@ -173,35 +173,54 @@ def edit_schedule(schedule_id):
                 try:
                     # （中略：バリデーションと更新処理...）
 
-                    # ★ 更新時のKey指定（DynamoDBの仕様に合わせる）
-                    table.update_item(
-                        Key={
-                            'schedule_id': schedule_id,
-                            'date': schedule['date']
-                        },
-                        UpdateExpression="SET day_of_week = :dow, venue = :v, start_time = :st, "
-                                         "end_time = :et, max_participants = :mp, "
-                                         "updated_at = :ua, #status = :s, #comment = :c, "
-                                         "updated_by = :an",
-                                         
-                        # --- ここが重要：エラーの直接的な原因 ---
-                        ExpressionAttributeNames={
-                            '#status': 'status',
-                            '#comment': 'comment'  # ★これを追加することでエラーが消えます
-                        },
-                        # --- 画面で入力した値をDBに送り込む ---
-                        ExpressionAttributeValues={
-                            ':dow': form.day_of_week.data,
-                            ':v': form.venue.data,      # ★これがあるから会場が保存されます
-                            ':st': form.start_time.data,
-                            ':et': form.end_time.data,
-                            ':mp': form.max_participants.data,
-                            ':ua': datetime.now().isoformat(),
-                            ':s': form.status.data,
-                            ':c': request.form.get('comment', ''),
-                            ':an': current_user.display_name
-                        }
-                    )
+                    new_date = form.date.data.strftime('%Y-%m-%d')
+                    old_date = schedule['date']
+
+                    new_item = {
+                        'schedule_id': schedule_id,
+                        'date': new_date,
+                        'day_of_week': form.day_of_week.data,
+                        'venue': form.venue.data,
+                        'start_time': form.start_time.data,
+                        'end_time': form.end_time.data,
+                        'max_participants': form.max_participants.data,
+                        'status': form.status.data,
+                        'comment': request.form.get('comment', ''),
+                        'updated_at': datetime.now().isoformat(),
+                        'updated_by': current_user.display_name,
+                        'team_id': schedule.get('team_id', ''),
+                        'created_at': schedule.get('created_at', ''),
+                    }
+
+                    if new_date != old_date:
+                        # 日付が変わった場合：古いアイテム削除 → 新規作成
+                        table.delete_item(Key={'schedule_id': schedule_id, 'date': old_date})
+                        table.put_item(Item=new_item)
+                    else:
+                        # 日付が変わらない場合：通常のupdate
+                        table.update_item(
+                            Key={'schedule_id': schedule_id, 'date': old_date},
+                            UpdateExpression=(
+                                "SET day_of_week=:dow, venue=:v, start_time=:st, "
+                                "end_time=:et, max_participants=:mp, "
+                                "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an"
+                            ),
+                            ExpressionAttributeNames={
+                                '#status': 'status',
+                                '#comment': 'comment'
+                            },
+                            ExpressionAttributeValues={
+                                ':dow': form.day_of_week.data,
+                                ':v': form.venue.data,
+                                ':st': form.start_time.data,
+                                ':et': form.end_time.data,
+                                ':mp': form.max_participants.data,
+                                ':ua': datetime.now().isoformat(),
+                                ':s': form.status.data,
+                                ':c': request.form.get('comment', ''),
+                                ':an': current_user.display_name,
+                            }
+                        )
                     
                     flash('スケジュールを更新しました', 'success')
                     # 編集後は一覧画面（admin_schedules）に戻るのが親切です

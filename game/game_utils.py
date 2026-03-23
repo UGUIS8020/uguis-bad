@@ -425,21 +425,48 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
 #     return matches, unused_pairs
 
 
+#スキル優先でペアリングされて強いペアが余ってしまう。旧コードはペアの重複を避けるための工夫が足りなかったため、以下の新コードではまず必要な人数分をランダムに選び、その中でスキルバランスを取る方式に変更しました。
+# def generate_matches_by_pair_skill_balance(pairs, max_courts):
+#     # スキル合計でソート
+#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+#     scored.sort(key=lambda x: x[1])
+
+#     matches = []    
+#     for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+#         matches.append((scored[i][0], scored[i+1][0]))
+    
+#     used_count = len(matches) * 2
+#     unused_pairs = [p[0] for p in scored[used_count:]]
+    
+#     return matches, unused_pairs
+
+
+#ペアの重複を避けるための新コード。
+
 def generate_matches_by_pair_skill_balance(pairs, max_courts):
-    # スキル合計でソート
-    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+    """
+    ペアからスキルが近い同士でマッチを組む。
+    余りが出る場合はランダムに選出する（強いペアが毎回余るのを防ぐ）。
+    """
+    num_courts = min(max_courts, len(pairs) // 2)
+    needed = num_courts * 2
+
+    if len(pairs) <= needed:
+        selected = pairs[:]
+        unused_pairs = []
+    else:
+        shuffled = pairs[:]
+        random.shuffle(shuffled)
+        selected = shuffled[:needed]
+        unused_pairs = shuffled[needed:]
+
+    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in selected]
     scored.sort(key=lambda x: x[1])
 
     matches = []
-    # シンプルに、実力が近い隣り合わせのペア同士で試合を組む
-    # こうすることで、極端に強いペアは、次に強いペアと当たりやすくなる
-    for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+    for i in range(0, len(scored) - 1, 2):
         matches.append((scored[i][0], scored[i+1][0]))
 
-    # 余ったペアを待機リストへ
-    used_count = len(matches) * 2
-    unused_pairs = [p[0] for p in scored[used_count:]]
-    
     return matches, unused_pairs
 
 
