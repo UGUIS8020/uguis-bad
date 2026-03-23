@@ -2947,6 +2947,7 @@ def show_routes():
     
     return '<br>'.join(sorted(output))
 
+
 @app.route('/schedule/<string:schedule_id>/participant/<string:user_id>/remove', methods=['POST'])
 @login_required
 def remove_participant(schedule_id, user_id):

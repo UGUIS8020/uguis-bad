@@ -288,4 +288,174 @@ def point_participation():
         return jsonify({'error': '内部エラー'}), 500
     
 
+@users.route('/my_stats')
+@login_required
+def my_stats():
+    from boto3.dynamodb.conditions import Attr
+
+    my_uid = current_user.user_id
+    current_app.logger.info("[my_stats] my_uid=%s", my_uid)
+
+    # bad-game-results を全スキャン（自分が含まれるレコードのみ）
+    results_table = current_app.dynamodb.Table("bad-game-results")
+    all_items = []
+    kwargs = {}
+    while True:
+        resp = results_table.scan(**kwargs)
+        all_items.extend(resp.get("Items", []))
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            break
+        kwargs["ExclusiveStartKey"] = lek
+
+    # Pythonで自分が含まれるレコードだけ絞り込む
+    def contains_me(team):
+        if not isinstance(team, list):
+            return False
+        return any(
+            isinstance(p, dict) and p.get("user_id") == my_uid
+            for p in team
+        )
+
+    items = [r for r in all_items if contains_me(r.get("team_a")) or contains_me(r.get("team_b"))]
+    current_app.logger.info("[my_stats] 全件=%d 自分含む=%d", len(all_items), len(items))
+    if items:
+        sample = items[0]
+        current_app.logger.info("[my_stats] サンプル team_a type=%s value=%s",
+                                type(sample.get("team_a")).__name__,
+                                sample.get("team_a"))
+        current_app.logger.info("[my_stats] サンプル team_b type=%s value=%s",
+                                type(sample.get("team_b")).__name__,
+                                sample.get("team_b"))
+    else:
+        # 件数0の場合、contains なしで1件だけ取ってフォーマット確認
+        probe = results_table.scan(Limit=1)
+        probe_items = probe.get("Items", [])
+        if probe_items:
+            p = probe_items[0]
+            current_app.logger.info("[my_stats] probe team_a type=%s value=%s",
+                                    type(p.get("team_a")).__name__,
+                                    p.get("team_a"))
+            current_app.logger.info("[my_stats] probe team_b type=%s value=%s",
+                                    type(p.get("team_b")).__name__,
+                                    p.get("team_b"))
+
+    # match_id + court_number でソート
+    items.sort(key=lambda x: (x.get("match_id", ""), int(x.get("court_number", 0))))
+
+    wins = 0
+    losses = 0
+    skill_history = []
+    seen_match_ids = set()
+    recent_matches = []
+
+    for r in items:
+        team_a = r.get("team_a", [])
+        team_b = r.get("team_b", [])
+        winner = r.get("winner", "")
+
+        in_a = any(
+            (p.get("user_id") == my_uid if isinstance(p, dict) else False)
+            for p in (team_a if isinstance(team_a, list) else [])
+        )
+        my_team = "A" if in_a else "B"
+        won = (winner == my_team)
+
+        if won:
+            wins += 1
+        else:
+            losses += 1
+
+        # スキル履歴（skill_snapshot から・match_id重複除去）
+        snap = r.get("skill_snapshot", {})
+        mid = r.get("match_id", "")
+        if isinstance(snap, dict) and my_uid in snap and mid not in seen_match_ids:
+            s = snap[my_uid]
+            score = float(s.get("skill_score", 0)) if isinstance(s, dict) else None
+            if score:
+                skill_history.append({
+                    "match_id": mid,
+                    "date": r.get("created_at", "")[:10],
+                    "score": round(score, 1),
+                })
+                seen_match_ids.add(mid)
+
+        opponent_team = team_b if in_a else team_a
+        partners = [
+            p.get("display_name", "?")
+            for p in (team_a if in_a else team_b)
+            if isinstance(p, dict) and p.get("user_id") != my_uid
+        ]
+        opponents = [
+            p.get("display_name", "?")
+            for p in opponent_team
+            if isinstance(p, dict)
+        ]
+        recent_matches.append({
+            "match_id": r.get("match_id", ""),
+            "date": r.get("created_at", "")[:10],
+            "court": r.get("court_number", "?"),
+            "won": won,
+            "score_my":  r.get("team1_score" if my_team == "A" else "team2_score", "?"),
+            "score_opp": r.get("team2_score" if my_team == "A" else "team1_score", "?"),
+            "partners":  partners,
+            "opponents": opponents,
+        })
+
+    current_app.logger.info("[my_stats] wins=%d losses=%d skill_history=%d recent=%d",
+                            wins, losses, len(skill_history), len(recent_matches))
+
+    user_table = current_app.dynamodb.Table("bad-users")
+    all_users_resp = user_table.scan(
+        FilterExpression=Attr("skill_score").exists()
+    )
+    all_scores = sorted(
+        [float(u.get("skill_score", 0)) for u in all_users_resp.get("Items", [])
+         if not str(u.get("user#user_id", "")).startswith("test_user_")],
+        reverse=True
+    )
+
+    # --- ヘルパー関数の定義（他の関数と統一） ---
+    def _to_float_or_none(v):
+        try: return float(v) if v is not None else None
+        except: return None
+
+    plain_user_id = current_user.user_id.replace('user#', '')
+    
+    # 2. DBから取得（user_profile と同じキー指定）
+    bad_users_table = current_app.dynamodb.Table("bad-users")
+    resp = bad_users_table.get_item(Key={"user#user_id": plain_user_id}, ConsistentRead=True)
+    bad_user = resp.get("Item") or {}
+
+    # 3. ヘルパー関数で数値変換
+    def _to_float_or_none(v):
+        try: return float(v) if v is not None else None
+        except: return None
+        
+    skill_score = _to_float_or_none(bad_user.get("skill_score"))
+
+    # デバッグログ
+    current_app.logger.info("[my_stats] plain_id=%s skill_score=%s", plain_user_id, skill_score)
+
+    # --- ランク計算（skill_score を使用） ---
+    rank = None
+    if skill_score is not None:
+        rank = next((i + 1 for i, s in enumerate(all_scores) if s <= skill_score + 0.01), len(all_scores))
+
+    # --- テンプレートへ渡す（名前を skill_score に統一） ---
+    return render_template(
+        "uguu/my_stats.html",
+        skill_score=skill_score,
+        rank=rank,
+        total_players=len(all_scores),
+        wins=wins,
+        losses=losses,
+        win_rate=round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
+        skill_history=skill_history,
+        recent_matches=list(reversed(recent_matches)),
+        user=current_user,
+        my_score=skill_score  # 念のため my_score という名前も残しておく（互換性のため）
+    )
+    
+
     
