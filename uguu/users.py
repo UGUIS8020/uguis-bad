@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 import boto3
 from typing import Any, cast
-from game.game_utils import normalize_user_pk
 
 users = Blueprint('users', __name__)
 
@@ -395,6 +394,7 @@ def my_stats():
             "match_id": r.get("match_id", ""),
             "date": r.get("created_at", "")[:10],
             "court": r.get("court_number", "?"),
+            "mode": r.get("pairing_mode", ""),
             "won": won,
             "score_my":  r.get("team1_score" if my_team == "A" else "team2_score", "?"),
             "score_opp": r.get("team2_score" if my_team == "A" else "team1_score", "?"),

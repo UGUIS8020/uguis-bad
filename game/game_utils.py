@@ -103,13 +103,6 @@ def finish_match_meta(match_id: str):
             return False
         raise
 
-def normalize_user_pk(uid: str) -> str:
-    if uid is None:
-        raise ValueError("uid is None")
-    s = str(uid).strip()
-    if not s:
-        raise ValueError("uid is empty")
-    return s if s.startswith("user#") else f"user#{s}"
 
 def update_trueskill_for_players_and_return_updates(result_item):
     """

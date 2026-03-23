@@ -93,7 +93,7 @@
               <span class="badge {% if m.won %}bg-success{% else %}bg-danger{% endif %} me-2">
                 {{ '勝' if m.won else '負' }}
               </span>
-              <span class="text-muted small">{{ m.date }} C{{ m.court }}</span>
+              <span class="text-muted small">{{ m.date }} C{{ m.court }} {{ m.get('mode') }}</span>
             </div>
             <div class="fw-bold">{{ m.score_my }} - {{ m.score_opp }}</div>
           </div>
@@ -135,7 +135,20 @@ new Chart(document.getElementById('skillChart'), {
   },
   options: {
     scales: {
-      y: { min: Math.max(0, Math.min(...scores) - 5) }
+      x: {
+        ticks: {
+          maxTicksLimit: 12,
+          maxRotation: 0,
+          callback: function(val, index) {
+            const label = this.getLabelForValue(val);
+            const parts = label.split('-');
+            return parts[1] + '/' + parts[2];
+          }
+        }
+      },
+      y: {
+        min: Math.max(0, Math.min(...scores) - 5)
+      }
     },
     plugins: { legend: { display: false } }
   }

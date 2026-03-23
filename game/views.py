@@ -24,7 +24,6 @@ import logging
 from botocore.exceptions import ClientError
 from zoneinfo import ZoneInfo
 from typing import List, Tuple, Dict, Any
-from .game_utils import normalize_user_pk
 from typing import Optional, List
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -1745,9 +1744,6 @@ def persist_skill_to_bad_users(updated_skills: dict):
                 Key={"user#user_id": uid},
                 UpdateExpression="SET skill_score=:s, skill_sigma=:g",
                 ExpressionAttributeValues={":s": new_s, ":g": new_g},
-                # ★存在しないユーザーは作らない
-                ConditionExpression="attribute_exists(#pk)",
-                ExpressionAttributeNames={"#pk": "user#user_id"},
                 ReturnValues="NONE",
             )
 
@@ -1756,14 +1752,6 @@ def persist_skill_to_bad_users(updated_skills: dict):
                 str(uid), str(new_s), str(new_g)
             )
             ok += 1
-
-        except ClientError as e:
-            ng += 1
-            code = e.response.get("Error", {}).get("Code", "Unknown")
-            if code == "ConditionalCheckFailedException":
-                current_app.logger.warning("[bad-users] Skip (not exists) uid=%s", str(uid))
-            else:
-                current_app.logger.error("[bad-users] ClientError uid=%s code=%s", str(uid), code)
 
         except Exception as e:
             ng += 1
