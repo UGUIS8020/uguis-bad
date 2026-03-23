@@ -1,5 +1,5 @@
 """
-bad-game-history 分析スクリプト
+bad-game-results 分析スクリプト（bad-game-history から移行）
 使い方:
   python analyze_history.py                    # 全履歴
   python analyze_history.py 20260305           # 日付指定
@@ -17,10 +17,11 @@ DEFAULT_SKIP = ["UGUIS渋谷"]
 PRODUCTION_START = "20260305"
 
 
-def fetch_history(date_prefix: str = None) -> list:
+def fetch_results(date_prefix: str = None) -> list:
+    """bad-game-results を全件スキャン（match_id プレフィックスでフィルタ可）"""
     cmd = [
         "aws", "dynamodb", "scan",
-        "--table-name", "bad-game-history",
+        "--table-name", "bad-game-results",
         "--output", "json", "--no-cli-pager"
     ]
     if date_prefix:
@@ -32,47 +33,106 @@ def fetch_history(date_prefix: str = None) -> list:
     return json.loads(r.stdout)["Items"]
 
 
-def parse_items(items: list, skip_names: list) -> list:
-    parsed = []
-    for i in items:
-        mid = i["match_id"]["S"]
-        mode = i["mode"]["S"]
-        date = i["date"]["S"][:16]
-        court_count = i["court_count"]["S"]
-        snap = i.get("skill_snapshot", {}).get("M", {})
-        waiting = [w["S"] for w in i.get("waiting", {}).get("L", [])]
+def parse_player_list(raw_list):
+    """DynamoDB typed JSON の team_a / team_b リストをパース"""
+    result = []
+    for p in raw_list.get("L", []):
+        m = p.get("M", {})
+        name = m.get("display_name", {}).get("S", "")
+        uid  = m.get("user_id",      {}).get("S", "")
+        result.append((name, uid))
+    return result
+
+
+def group_results_by_match(items: list) -> dict:
+    """
+    1コート1レコードのリストを match_id でグループ化し、
+    analyze_history.py と同じ構造の dict に再構築する。
+    """
+    groups = defaultdict(list)
+    for item in items:
+        mid = item["match_id"]["S"]
+        groups[mid].append(item)
+
+    matches = {}
+    for mid, courts_raw in groups.items():
+        # コート番号順にソート
+        courts_raw.sort(key=lambda x: int(x.get("court_number", {}).get("N", 0)))
+
+        # 最初のレコードから試合共通情報を取得
+        first = courts_raw[0]
+        mode     = first.get("pairing_mode",    {}).get("S", "unknown")
+        date_str = first.get("created_at",      {}).get("S", "")[:16]
+        snap_raw = first.get("skill_snapshot",  {}).get("M", {})
+        waiting  = [w["S"] for w in first.get("waiting_players", {}).get("L", [])]
+
+        # コートごとのデータ構築
         courts = []
-        for c in i.get("courts", {}).get("L", []):
-            cm = c["M"]
-            ta_players = cm["team_a"]["L"]
-            tb_players = cm["team_b"]["L"]
-            ta = [(p["M"]["display_name"]["S"], p["M"]["user_id"]["S"]) for p in ta_players]
-            tb = [(p["M"]["display_name"]["S"], p["M"]["user_id"]["S"]) for p in tb_players]
-            # スキップ対象を除いたスコア平均
-            def avg_score(team):
+        for c in courts_raw:
+            team_a = parse_player_list(c.get("team_a", {}))
+            team_b = parse_player_list(c.get("team_b", {}))
+
+            def avg_score(team, snap, skip_names):
                 scores = []
                 for name, uid in team:
-                    if name in skip_names: continue
+                    if name in skip_names:
+                        continue
                     if uid in snap:
                         scores.append(float(snap[uid]["M"]["skill_score"]["S"]))
                 return sum(scores) / len(scores) if scores else None
+
             courts.append({
-                "court_number": cm["court_number"]["N"],
-                "team_a": ta,
-                "team_b": tb,
-                "score_a": cm.get("team1_score", {}).get("S", "?"),
-                "score_b": cm.get("team2_score", {}).get("S", "?"),
-                "winner": cm.get("winner", {}).get("S", "?"),
-                "avg_a": avg_score(ta),
-                "avg_b": avg_score(tb),
+                "court_number": c.get("court_number", {}).get("N", "?"),
+                "team_a":  team_a,
+                "team_b":  team_b,
+                "score_a": str(c.get("team1_score", {}).get("N", "?")),
+                "score_b": str(c.get("team2_score", {}).get("N", "?")),
+                "winner":  c.get("winner", {}).get("S", "?"),
+                # avg は analyze() 内で skip_names を使って計算するため仮に None
+                "avg_a":   None,
+                "avg_b":   None,
+                "_snap":   snap_raw,  # avg 計算用に一時保持
             })
-        parsed.append({
-            "match_id": mid, "mode": mode, "date": date,
-            "court_count": court_count, "snap": snap,
-            "courts": courts, "waiting": waiting
-        })
+
+        matches[mid] = {
+            "match_id":    mid,
+            "mode":        mode,
+            "date":        date_str,
+            "court_count": str(len(courts)),
+            "snap":        snap_raw,
+            "courts":      courts,
+            "waiting":     waiting,
+        }
+    return matches
+
+
+def parse_items(items: list, skip_names: list) -> list:
+    """グループ化 → avg_a / avg_b を skip_names を考慮して計算"""
+    matches = group_results_by_match(items)
+    parsed = []
+    for mid, m in matches.items():
+        snap = m["snap"]
+        for c in m["courts"]:
+            snap_for_court = c.pop("_snap", snap)
+
+            def avg_score(team):
+                scores = []
+                for name, uid in team:
+                    if name in skip_names:
+                        continue
+                    if uid in snap_for_court:
+                        scores.append(float(snap_for_court[uid]["M"]["skill_score"]["S"]))
+                return sum(scores) / len(scores) if scores else None
+
+            c["avg_a"] = avg_score(c["team_a"])
+            c["avg_b"] = avg_score(c["team_b"])
+
+        parsed.append(m)
+
     return sorted(parsed, key=lambda x: x["match_id"])
 
+
+# ─── 以下は変更なし ───────────────────────────────────────────
 
 def print_separator(char="─", width=64):
     print(char * width)
@@ -85,20 +145,20 @@ def analyze(items: list, skip_names: list):
         return
 
     print_separator("═")
-    print(f"  🏸 bad-game-history 分析レポート")
+    print(f"  🏸 bad-game-results 分析レポート")
     print(f"  対象試合数: {len(parsed)}  除外プレイヤー: {skip_names or 'なし'}")
     print_separator("═")
 
     # ─── 1. 試合一覧 ──────────────────────────────────────────
     print("\n【1. 試合一覧】")
-    print(f"{'match_id':<22} {'mode':<8} {'コート':>4} {'待機':>4} {'記録時刻'}")
+    print(f"{'match_id':<22} {'mode':<12} {'コート':>4} {'待機':>4} {'記録時刻'}")
     print_separator()
     for m in parsed:
-        print(f"{m['match_id']:<22} {m['mode']:<8} {m['court_count']:>4}面 {len(m['waiting']):>3}人  {m['date']}")
+        print(f"{m['match_id']:<22} {m['mode']:<12} {m['court_count']:>4}面 {len(m['waiting']):>3}人  {m['date']}")
 
     # ─── 2. コートバランス分析 ────────────────────────────────
     print("\n【2. コートバランス分析（チーム平均スキル差）】")
-    print(f"{'match_id':<22} {'mode':<8} {'平均差':>6}  {'最大差':>6}  {'高側勝':>6}")
+    print(f"{'match_id':<22} {'mode':<12} {'平均差':>6}  {'最大差':>6}  {'高側勝'}")
     print_separator()
     mode_stats = defaultdict(lambda: {"diffs": [], "upsets": 0, "total": 0})
     for m in parsed:
@@ -118,17 +178,17 @@ def analyze(items: list, skip_names: list):
                 mode_stats[m["mode"]]["upsets"] += 1
         if diffs:
             upset_str = f"{upsets}/{len(diffs)}番狂わせ"
-            print(f"{m['match_id']:<22} {m['mode']:<8} {sum(diffs)/len(diffs):>5.1f}pt  {max(diffs):>5.1f}pt  {upset_str}")
+            print(f"{m['match_id']:<22} {m['mode']:<12} {sum(diffs)/len(diffs):>5.1f}pt  {max(diffs):>5.1f}pt  {upset_str}")
 
     # ─── 3. mode別比較 ────────────────────────────────────────
     print("\n【3. ペアリングモード比較】")
-    print(f"{'mode':<10} {'試合数':>6} {'平均チーム差':>10} {'番狂わせ率':>10}")
+    print(f"{'mode':<12} {'試合数':>6} {'平均チーム差':>10} {'番狂わせ率':>10}")
     print_separator()
     for mode, s in mode_stats.items():
         if s["diffs"]:
             avg_diff = sum(s["diffs"]) / len(s["diffs"])
             upset_rate = s["upsets"] / s["total"] * 100
-            print(f"{mode:<10} {s['total']:>6}コート {avg_diff:>8.1f}pt  {upset_rate:>8.1f}%")
+            print(f"{mode:<12} {s['total']:>6}コート {avg_diff:>8.1f}pt  {upset_rate:>8.1f}%")
 
     # ─── 4. 選手別成績 ────────────────────────────────────────
     print("\n【4. 選手別成績（除外プレイヤー以外）】")
@@ -184,7 +244,7 @@ def analyze(items: list, skip_names: list):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="bad-game-history 分析")
+    parser = argparse.ArgumentParser(description="bad-game-results 分析")
     parser.add_argument("dates", nargs="*", help="日付プレフィックス (例: 20260305)")
     parser.add_argument("--skip", nargs="*", default=DEFAULT_SKIP, help="除外プレイヤー名")
     parser.add_argument("--all", action="store_true", help="テストデータを含む全履歴を対象にする")
@@ -193,17 +253,17 @@ if __name__ == "__main__":
     if not args.dates:
         if args.all:
             print("全履歴を取得中（テストデータ含む）...")
-            items = fetch_history()
+            items = fetch_results()
         else:
             print(f"本番データを取得中（{PRODUCTION_START}以降）...")
-            all_items = fetch_history()
+            all_items = fetch_results()
             items = [i for i in all_items if i["match_id"]["S"][:8] >= PRODUCTION_START]
     elif len(args.dates) == 1:
         print(f"{args.dates[0]} のデータを取得中...")
-        items = fetch_history(args.dates[0])
+        items = fetch_results(args.dates[0])
     else:
         print(f"{args.dates[0]}〜{args.dates[1]} のデータを取得中...")
-        all_items = fetch_history()
+        all_items = fetch_results()
         items = [i for i in all_items if args.dates[0] <= i["match_id"]["S"][:8] <= args.dates[1]]
 
     analyze(items, args.skip)

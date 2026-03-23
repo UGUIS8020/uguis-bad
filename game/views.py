@@ -2083,24 +2083,12 @@ def finish_current_match():
             raise        
         
         # =========================================================
-        # 6) 試合履歴を bad-game-history テーブルに保存
+        # 6) bad-game-results に補足情報を追記
+        #    （pairing_mode / waiting_players / skill_snapshot）
         # =========================================================
         try:
-            history_table = current_app.dynamodb.Table("bad-game-history")
-
-            courts_data = []
-            for result in match_results:
-                team_a = parse_players(result.get("team_a", []))
-                team_b = parse_players(result.get("team_b", []))
-                courts_data.append({
-                    "court_number": result.get("court_number"),
-                    "team_a": [{"user_id": p.get("user_id"), "display_name": p.get("display_name", "")} for p in team_a],
-                    "team_b": [{"user_id": p.get("user_id"), "display_name": p.get("display_name", "")} for p in team_b],
-                    "team1_score": str(result.get("team1_score", "")),
-                    "team2_score": str(result.get("team2_score", "")),
-                    "winner": result.get("winner", ""),
-                })
-
+            pairing_mode   = meta_item.get("pairing_mode", "unknown")
+            waiting_players = meta_item.get("waiting_players", [])
             skill_snapshot = {
                 uid: {
                     "skill_score": str(round(v.get("skill_score", 25.0), 4)),
@@ -2109,22 +2097,31 @@ def finish_current_match():
                 for uid, v in updated_skills.items()
             }
 
-            history_item = {
-                "match_id": match_id,
-                "date": now_jst,
-                "mode": meta_item.get("pairing_mode", "unknown"),
-                "court_count": str(court_count or len(match_results)),
-                "courts": courts_data,
-                "skill_snapshot": skill_snapshot,
-                "waiting": meta_item.get("waiting_players", []),
-                "player_count": str(len(playing_players)),
-            }
+            for result in match_results:
+                result_id = result.get("result_id")
+                if not result_id:
+                    continue
+                results_table.update_item(
+                    Key={"result_id": result_id},
+                    UpdateExpression=(
+                        "SET pairing_mode = :pm, "
+                        "    waiting_players = :wp, "
+                        "    skill_snapshot = :ss"
+                    ),
+                    ExpressionAttributeValues={
+                        ":pm": pairing_mode,
+                        ":wp": waiting_players,
+                        ":ss": skill_snapshot,
+                    },
+                )
 
-            history_table.put_item(Item=history_item)
-            current_app.logger.info("[history] 試合履歴保存完了: match_id=%s courts=%d", match_id, len(courts_data))
+            current_app.logger.info(
+                "[results] 補足情報追記完了: match_id=%s courts=%d mode=%s",
+                match_id, len(match_results), pairing_mode
+            )
 
         except Exception as e:
-            current_app.logger.warning("[history] 履歴保存失敗（無視）: %s", e)
+            current_app.logger.warning("[results] 補足情報追記失敗（無視）: %s", e)
 
         # =========================================================
         # Ajax / 通常レスポンス  ← ステップ6の後に移動
@@ -3189,21 +3186,7 @@ def clear_test_data():
         for item in response.get('Items', []):
             results_table.delete_item(Key={'result_id': item['result_id']})
         last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key: break
-
-    # 4. bad-game-history から test_user_ 関連を削除
-    history_table = current_app.dynamodb.Table("bad-game-history")
-    last_evaluated_key = None
-    while True:
-        scan_kwargs = {
-            'FilterExpression': Attr('courts').contains('test_user_')
-        }
-        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-        response = history_table.scan(**scan_kwargs)
-        for item in response.get('Items', []):
-            history_table.delete_item(Key={'match_id': item['match_id']})
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key: break
+        if not last_evaluated_key: break    
 
     # 5. メタデータ（進行状況とキュー）をリセット
     try:
