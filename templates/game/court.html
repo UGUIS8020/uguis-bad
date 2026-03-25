@@ -581,6 +581,7 @@
     let currentRestingCount = {{ resting_players|length }};
     let emptyStartTime = null;
     let finishInFlight = false;
+    let finishTriggered = false;
  
     const MATCH_ID = {{ match_id | tojson }};
  
@@ -762,7 +763,12 @@
                 });
  
                 if (totalCourts > 0 && submittedCourts.length >= totalCourts) {
-                    console.log("✅ 全コート受信済み → 試合終了自動実行");
+                    if (finishTriggered) {          // ★ 追加
+                        console.log("⏭ 既にfinish実行済みのためスキップ");  // ★ 追加
+                        return;                     // ★ 追加
+                    }                               // ★ 追加
+                    finishTriggered = true;         // ★ 追加
+                    console.log("全コート受信済み → 試合終了自動実行");
                     await finishMatch();
                 }
             } catch (err) {
