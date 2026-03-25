@@ -11,6 +11,7 @@ from typing import Optional
 from decimal import Decimal
 from trueskill import Rating, rate
 from typing import Optional, List
+import copy
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -543,12 +544,38 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
+# def generate_full_random_pairings(players, max_courts):
+#     """
+#     ペアも対戦相手も完全ランダムで決定する。
+#     スキルスコアを一切考慮しない。
+#     """
+#     import random
+
+#     shuffled = players.copy()
+#     random.shuffle(shuffled)
+
+#     num_courts = min(max_courts, len(shuffled) // 4)
+#     active = shuffled[:num_courts * 4]
+#     additional_waiting = shuffled[num_courts * 4:]
+
+#     pairs = []
+#     for i in range(0, len(active), 2):
+#         pairs.append((active[i], active[i + 1]))
+
+#     matches = []
+#     for i in range(0, len(pairs), 2):
+#         matches.append((pairs[i], pairs[i + 1]))
+
+#     return pairs, matches, additional_waiting
+
+
+FULL_RANDOM_SWAP_THRESHOLD = 30
+
 def generate_full_random_pairings(players, max_courts):
     """
     ペアも対戦相手も完全ランダムで決定する。
-    スキルスコアを一切考慮しない。
-    """
-    import random
+    ただしdiffが閾値(30)以上のコートがあれば1回だけ選手交換で改善を試みる。
+    """    
 
     shuffled = players.copy()
     random.shuffle(shuffled)
@@ -559,11 +586,56 @@ def generate_full_random_pairings(players, max_courts):
 
     pairs = []
     for i in range(0, len(active), 2):
-        pairs.append((active[i], active[i + 1]))
+        pairs.append([active[i], active[i + 1]])
 
     matches = []
     for i in range(0, len(pairs), 2):
-        matches.append((pairs[i], pairs[i + 1]))
+        matches.append([list(pairs[i]), list(pairs[i + 1])])
+
+    def court_diff(match):
+        sa = sum(p.skill_score for p in match[0])
+        sb = sum(p.skill_score for p in match[1])
+        return abs(sa - sb)
+
+    worst_idx = max(range(len(matches)), key=lambda i: court_diff(matches[i]))
+    worst_diff = court_diff(matches[worst_idx])
+
+    if worst_diff >= FULL_RANDOM_SWAP_THRESHOLD:
+        current_app.logger.info(
+            "[full_random] worst C%d diff=%.1f >= %d, trying swap",
+            worst_idx + 1, worst_diff, FULL_RANDOM_SWAP_THRESHOLD
+        )
+
+        best_matches = copy.deepcopy(matches)
+        best_total_diff = sum(court_diff(m) for m in matches)
+
+        for other_idx in range(len(matches)):
+            if other_idx == worst_idx:
+                continue
+            for wi in range(2):          # worst コートのチーム
+                for wj in range(2):      # worst チームの選手
+                    for oi in range(2):      # other コートのチーム
+                        for oj in range(2):  # other チームの選手
+                            trial = copy.deepcopy(matches)
+                            trial[worst_idx][wi][wj], trial[other_idx][oi][oj] = \
+                                trial[other_idx][oi][oj], trial[worst_idx][wi][wj]
+                            trial_diff = sum(court_diff(m) for m in trial)
+                            if trial_diff < best_total_diff:
+                                best_total_diff = trial_diff
+                                best_matches = trial
+
+        new_worst = max(court_diff(m) for m in best_matches)
+        current_app.logger.info(
+            "[full_random] after swap: worst diff=%.1f -> %.1f",
+            worst_diff, new_worst
+        )
+        matches = best_matches
+        pairs = [team for match in matches for team in match]
+
+    else:
+        current_app.logger.info(
+            "[full_random] diff=%.1f < threshold, no swap", worst_diff
+        )
 
     return pairs, matches, additional_waiting
 
