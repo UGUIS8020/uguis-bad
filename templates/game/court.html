@@ -299,7 +299,7 @@
             <div class="card-body">
                 <!-- 進行中の試合がある場合の表示 -->                
                 
-                <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
+                <div class="d-flex justify-content-center align-items-center flex-wrap gap-2">
 
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -326,7 +326,7 @@
                 {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
                 {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
                 {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
-                <div class="text-center mt-2 w-100">
+                <div class="text-center mt-1 w-100">
                     {% if last_mode %}
                     <small class="text-muted">{% if not has_ongoing_matches %}前回: {% endif %}
                         <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }}">
@@ -365,7 +365,7 @@
         {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
         {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
         {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
-        <div class="text-center mb-3">
+        <div class="text-center mb-1">
             <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }} fs-6">
                 <i class="fa-solid {{ mode_icons.get(last_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(last_mode, last_mode) }}
             </span>
