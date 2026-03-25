@@ -155,16 +155,6 @@
             <h3 class="text-success fw-bold mb-0">
                 本日の試合（{{ court_data|length }}面）
             </h3>
-            <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="input-group input-group-lg">
-                    <label class="input-group-text" for="score_format">試合点数</label>
-                    <select class="form-select form-select-lg" name="score_format" id="score_format" onchange="this.form.submit()">
-                        <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
-                        <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
-                    </select>
-                </div>
-            </form>
         </div>
     </div>
 

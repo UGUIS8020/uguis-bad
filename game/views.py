@@ -72,7 +72,6 @@ def court():
 
     try:
         # セッション初期値
-        session.setdefault("score_format", "21")
 
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
 
@@ -2520,13 +2519,6 @@ def waiting_status():
     })
    
     
-@bp_game.route("/set_score_format", methods=["POST"])
-@login_required
-def set_score_format():
-    selected_format = request.form.get("score_format")
-    if selected_format in {"15", "21"}:
-        session["score_format"] = selected_format
-    return redirect(url_for("game.court"))
 
 # @bp_game.route('/api/match_score_status/<match_id>')
 # @login_required

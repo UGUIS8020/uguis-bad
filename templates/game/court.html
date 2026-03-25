@@ -372,19 +372,6 @@
         </div>
         {% endif %}
 
-            <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
-                
-                <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="input-group">
-                        <label class="input-group-text" for="score_format">試合点数</label>
-                        <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
-                            <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
-                            <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
-                        </select>
-                    </div>
-                </form>
-            </div>
         
 
         {% set user_in_match = namespace(found=false) %}
@@ -448,7 +435,7 @@
                                             <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
                                             <input type="text" name="team1_score"
                                                 class="form-control score-input text-center"
-                                                value="{{ session.get('score_format', '21') }}"
+                                                value="21"
                                                 inputmode="numeric" pattern="[0-9]*"
                                                 data-min="0" data-max="99" data-step="1"
                                                 style="width:80px; font-size:1.8rem; font-weight:bold;">
@@ -465,7 +452,7 @@
                                             <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
                                             <input type="text" name="team2_score"
                                                 class="form-control score-input text-center"
-                                                value="{{ session.get('score_format', '21') }}"
+                                                value="21"
                                                 inputmode="numeric" pattern="[0-9]*"
                                                 data-min="0" data-max="99" data-step="1"
                                                 style="width:80px; font-size:1.8rem; font-weight:bold;">
