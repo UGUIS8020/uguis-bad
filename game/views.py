@@ -155,6 +155,26 @@ def court():
         except Exception:
             logger.exception("[court] user skill_score reload failed")
 
+        # --- ペアリングモード情報 ---
+        try:
+            meta_table = current_app.dynamodb.Table("bad-game-matches")
+            pairing_meta = meta_table.get_item(
+                Key={"match_id": "meta#pairing"},
+                ConsistentRead=True
+            ).get("Item", {}) or {}
+            cycle_index = int(pairing_meta.get("cycle_index", 0))
+            last_mode = pairing_meta.get("last_mode", None)
+            if cycle_index == 2:
+                next_mode = "ai"
+            elif cycle_index == 3:
+                next_mode = "full_random"
+            else:
+                next_mode = "random"
+        except Exception:
+            cycle_index = 0
+            last_mode = None
+            next_mode = "random"
+
         # --- 進行中試合関連（INFO最小、詳細はDEBUG） ---
         has_ongoing = has_ongoing_matches()
         completed, total = get_match_progress()
@@ -216,6 +236,8 @@ def court():
             current_courts=current_courts,
             user_court_submitted=user_court_submitted,
             all_courts_submitted=all_courts_submitted,
+            last_mode=last_mode,
+            next_mode=next_mode,
         )
 
     except Exception:

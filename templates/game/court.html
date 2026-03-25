@@ -320,6 +320,28 @@
                     </button>
                 </form>
 
+                <!-- ペアリングモード表示 -->
+                {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
+                {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
+                {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
+                <div class="text-center mt-2 w-100">
+                    {% if last_mode %}
+                    <small class="text-muted">{% if not has_ongoing_matches %}前回: {% endif %}
+                        <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }}">
+                            <i class="fa-solid {{ mode_icons.get(last_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(last_mode, last_mode) }}
+                        </span>
+                    </small>
+                    &nbsp;
+                    {% endif %}
+                    {% if not has_ongoing_matches %}
+                    <small class="text-muted">次回:
+                        <span class="badge bg-{{ mode_colors.get(next_mode, 'secondary') }}">
+                            <i class="fa-solid {{ mode_icons.get(next_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(next_mode, next_mode) }}
+                        </span>
+                    </small>
+                    {% endif %}
+                </div>
+
                 {% if has_ongoing_matches and current_user.administrator %}
                 <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
                 
@@ -335,9 +357,19 @@
             </div>
         </div>           
        
-        {% endif %}       
+        {% endif %}
 
-        
+        {% if not current_user.administrator and has_ongoing_matches and last_mode %}
+        {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
+        {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
+        {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
+        <div class="text-center mb-3">
+            <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }} fs-6">
+                <i class="fa-solid {{ mode_icons.get(last_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(last_mode, last_mode) }}
+            </span>
+        </div>
+        {% endif %}
+
             <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
                 
                 <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
@@ -884,7 +916,7 @@
             statusIntervalId = setInterval(() => {
                 checkForUpdates();
                 updateSkillScore();
-            }, 20000);  // 20秒
+            }, 25000);  // 25秒
         }
  
         function stopStatusPolling() {
