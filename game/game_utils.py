@@ -569,13 +569,16 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
 #     return pairs, matches, additional_waiting
 
 
-FULL_RANDOM_SWAP_THRESHOLD = 30
+FULL_RANDOM_SWAP_THRESHOLD = 20
 
 def generate_full_random_pairings(players, max_courts):
     """
     ペアも対戦相手も完全ランダムで決定する。
-    ただしdiffが閾値(30)以上のコートがあれば1回だけ選手交換で改善を試みる。
-    """    
+    ただしdiffが閾値(20)以上のコートがあれば、そのコート内で
+    全4通りの交換を試して最善の1交換を採用する。
+    """
+    import random
+    import copy
 
     shuffled = players.copy()
     random.shuffle(shuffled)
@@ -602,35 +605,29 @@ def generate_full_random_pairings(players, max_courts):
 
     if worst_diff >= FULL_RANDOM_SWAP_THRESHOLD:
         current_app.logger.info(
-            "[full_random] worst C%d diff=%.1f >= %d, trying swap",
+            "[full_random] worst C%d diff=%.1f >= %d, trying in-court swap",
             worst_idx + 1, worst_diff, FULL_RANDOM_SWAP_THRESHOLD
         )
 
-        best_matches = copy.deepcopy(matches)
-        best_total_diff = sum(court_diff(m) for m in matches)
+        best_match = copy.deepcopy(matches[worst_idx])
+        best_diff = worst_diff
 
-        for other_idx in range(len(matches)):
-            if other_idx == worst_idx:
-                continue
-            for wi in range(2):          # worst コートのチーム
-                for wj in range(2):      # worst チームの選手
-                    for oi in range(2):      # other コートのチーム
-                        for oj in range(2):  # other チームの選手
-                            trial = copy.deepcopy(matches)
-                            trial[worst_idx][wi][wj], trial[other_idx][oi][oj] = \
-                                trial[other_idx][oi][oj], trial[worst_idx][wi][wj]
-                            trial_diff = sum(court_diff(m) for m in trial)
-                            if trial_diff < best_total_diff:
-                                best_total_diff = trial_diff
-                                best_matches = trial
+        for wi in range(2):
+            for oi in range(2):
+                trial = copy.deepcopy(matches[worst_idx])
+                trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                d = court_diff(trial)
+                if d < best_diff:
+                    best_diff = d
+                    best_match = trial
 
-        new_worst = max(court_diff(m) for m in best_matches)
+        matches[worst_idx] = best_match
+        pairs = [team for match in matches for team in match]
+
         current_app.logger.info(
             "[full_random] after swap: worst diff=%.1f -> %.1f",
-            worst_diff, new_worst
+            worst_diff, best_diff
         )
-        matches = best_matches
-        pairs = [team for match in matches for team in match]
 
     else:
         current_app.logger.info(

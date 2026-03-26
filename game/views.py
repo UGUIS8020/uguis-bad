@@ -163,10 +163,10 @@ def court():
             ).get("Item", {}) or {}
             cycle_index = int(pairing_meta.get("cycle_index", 0))
             last_mode = pairing_meta.get("last_mode", None)
-            if cycle_index == 2:
-                next_mode = "ai"
-            elif cycle_index == 3:
+            if cycle_index == 1:
                 next_mode = "full_random"
+            elif cycle_index == 2:
+                next_mode = "ai"
             else:
                 next_mode = "random"
         except Exception:
@@ -3563,11 +3563,11 @@ def create_pairings():
 
         cycle_index = int(pairing_meta.get("cycle_index", 0))
 
-        if cycle_index == 2:
-            mode = "ai"
-            next_cycle_index = 3
-        elif cycle_index == 3:
+        if cycle_index == 1:
             mode = "full_random"
+            next_cycle_index = 2
+        elif cycle_index == 2:
+            mode = "ai"
             next_cycle_index = 0
         else:
             mode = "random"
