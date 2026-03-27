@@ -447,6 +447,44 @@
   </div>
 </div>
 
+<!-- 試合履歴 -->
+<div class="container pb-4">
+  <div class="card" style="box-shadow: var(--card-shadow);">
+    <div class="card-header" style="background: var(--bg-gradient); color: white;">
+      <h5 class="mb-0"><i class="fas fa-table-tennis me-2"></i>試合履歴（直近20試合）</h5>
+    </div>
+    <div class="card-body p-0">
+      <div id="matchHistoryLoading" class="text-center p-4">
+        <div class="spinner-border spinner-border-sm text-primary"></div> 読み込み中...
+      </div>
+      <div id="matchHistoryContent" class="d-none p-3"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 戦績ページアクセス履歴 -->
+<div class="container pb-5">
+  <div class="card" style="box-shadow: var(--card-shadow);">
+    <div class="card-header" style="background: var(--bg-gradient); color: white;">
+      <h5 class="mb-0"><i class="fas fa-eye me-2"></i>戦績ページ アクセス履歴</h5>
+    </div>
+    <div class="card-body p-0">
+      <div id="myStatsAccessLoading" class="text-center p-4">
+        <div class="spinner-border spinner-border-sm text-primary"></div> 読み込み中...
+      </div>
+      <table class="table table-hover mb-0 d-none" id="myStatsAccessTable">
+        <thead class="table-light">
+          <tr>
+            <th>名前</th>
+            <th>最終アクセス日時</th>
+          </tr>
+        </thead>
+        <tbody id="myStatsAccessBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   const userId = "{{ user_id }}";
@@ -797,6 +835,103 @@
   }
   
   main();
+})();
+</script>
+
+<script>
+// 試合履歴
+(async function(){
+  const modeLabels = { random: "バランスシャッフル", full_random: "完全シャッフル", ai: "AIペアリング" };
+  const modeColors = { random: "secondary", full_random: "info", ai: "primary" };
+  try {
+    const res = await fetch("{{ url_for('analytics.match_history') }}", { credentials: 'same-origin' });
+    const matches = await res.json();
+    const content = document.getElementById('matchHistoryContent');
+
+    if (matches.length === 0) {
+      content.innerHTML = '<p class="text-muted text-center">試合履歴なし</p>';
+    } else {
+      let lastDate = null;
+      matches.forEach(match => {
+        const mode = match.courts[0]?.pairing_mode || '';
+        const modeLabel = modeLabels[mode] || mode;
+        const modeColor = modeColors[mode] || 'secondary';
+        const playedAt = match.courts[0]?.played_at
+          ? new Date(match.courts[0].played_at).toLocaleString('ja-JP') : '';
+        const matchDate = match.courts[0]?.played_at
+          ? new Date(match.courts[0].played_at).toLocaleDateString('ja-JP') : null;
+        if (matchDate && matchDate !== lastDate) {
+          const isFirst = lastDate === null;
+          content.innerHTML += `${isFirst ? '' : '<hr class="my-3">'}<div class="text-muted small fw-bold mb-2">${matchDate}</div>`;
+        }
+        if (matchDate) lastDate = matchDate;
+
+        let html = `<div class="mb-4">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <strong class="text-muted small">${match.match_id}</strong>
+            ${modeLabel ? `<span class="badge bg-${modeColor}">${modeLabel}</span>` : ''}
+            ${playedAt ? `<span class="text-muted small">${playedAt}</span>` : ''}
+          </div>
+          <div class="row g-2">`;
+
+        match.courts.forEach(court => {
+          const toNames = team => (team || []).map(p => typeof p === 'object' ? (p.display_name || p.user_id) : p).join(' / ');
+          const bWins = court.winner === 'B';
+          const winNames  = toNames(bWins ? court.team_b : court.team_a);
+          const loseNames = toNames(bWins ? court.team_a : court.team_b);
+          const winScore  = bWins ? court.team2_score : court.team1_score;
+          const loseScore = bWins ? court.team1_score : court.team2_score;
+          html += `<div class="col-md-6 col-lg-4">
+            <div class="card border">
+              <div class="card-header py-1 px-2 bg-light small fw-bold">コート ${court.court_number}</div>
+              <div class="card-body py-2 px-3">
+                <div class="d-flex justify-content-between align-items-center">
+                  <span class="fw-bold text-success">${winNames}</span>
+                  <span class="badge bg-success ms-1">${winScore}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-1">
+                  <span>${loseNames}</span>
+                  <span class="badge bg-light text-dark ms-1">${loseScore}</span>
+                </div>
+              </div>
+            </div>
+          </div>`;
+        });
+
+        html += '</div></div>';
+        content.innerHTML += html;
+      });
+    }
+    document.getElementById('matchHistoryLoading').classList.add('d-none');
+    content.classList.remove('d-none');
+  } catch(e) {
+    document.getElementById('matchHistoryLoading').textContent = '取得に失敗しました';
+  }
+})();
+
+// 戦績ページアクセス履歴
+(async function(){
+  try {
+    const res = await fetch("{{ url_for('analytics.my_stats_access') }}", { credentials: 'same-origin' });
+    const items = await res.json();
+    const tbody = document.getElementById('myStatsAccessBody');
+    if (items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted">アクセス履歴なし</td></tr>';
+    } else {
+      items.forEach(item => {
+        const dt = item.last_visited_my_stats
+          ? new Date(item.last_visited_my_stats).toLocaleString('ja-JP')
+          : '-';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${item.display_name ?? '-'}</td><td>${dt}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    document.getElementById('myStatsAccessLoading').classList.add('d-none');
+    document.getElementById('myStatsAccessTable').classList.remove('d-none');
+  } catch(e) {
+    document.getElementById('myStatsAccessLoading').textContent = '取得に失敗しました';
+  }
 })();
 </script>
 </body>

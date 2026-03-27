@@ -295,6 +295,18 @@ def my_stats():
     my_uid = current_user.user_id
     current_app.logger.info("[my_stats] my_uid=%s", my_uid)
 
+    # アクセス日時を bad-users に記録
+    try:
+        from datetime import datetime, timezone
+        users_table = current_app.dynamodb.Table("bad-users")
+        users_table.update_item(
+            Key={"user#user_id": my_uid},
+            UpdateExpression="SET last_visited_my_stats = :ts",
+            ExpressionAttributeValues={":ts": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+        )
+    except Exception:
+        current_app.logger.exception("[my_stats] last_visited_my_stats 更新失敗")
+
     # bad-game-results を全スキャン（自分が含まれるレコードのみ）
     results_table = current_app.dynamodb.Table("bad-game-results")
     all_items = []

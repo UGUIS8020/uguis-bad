@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, abort, render_template  # ← render_template 追加
+from flask import Blueprint, request, jsonify, abort, render_template, current_app  # ← render_template 追加
 from flask_login import login_required, current_user
 from datetime import datetime, date, timedelta
 from dateutil import tz
@@ -488,6 +488,70 @@ def analytics_overall():
     })
 
 # ★ ルート装飾子を付与して公開
+@analytics.route("/admin/analytics/match_history", methods=["GET"])
+@login_required
+def match_history():
+    if not getattr(current_user, "administrator", False):
+        abort(403)
+    try:
+        results_table = current_app.dynamodb.Table("bad-game-results")
+        items = []
+        kwargs = {}
+        while True:
+            resp = results_table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            lek = resp.get("LastEvaluatedKey")
+            if not lek:
+                break
+            kwargs["ExclusiveStartKey"] = lek
+
+        # match_id でグループ化
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for item in items:
+            mid = item.get("match_id", "unknown")
+            grouped[mid].append({
+                "court_number": int(item.get("court_number", 0)),
+                "team_a": item.get("team_a", []),
+                "team_b": item.get("team_b", []),
+                "team1_score": int(item.get("team1_score", 0) or 0),
+                "team2_score": int(item.get("team2_score", 0) or 0),
+                "winner": item.get("winner", ""),
+                "pairing_mode": item.get("pairing_mode", ""),
+                "played_at": item.get("played_at") or item.get("created_at") or "",
+            })
+
+        # match_id 降順にソート
+        result_list = []
+        for mid, courts in sorted(grouped.items(), reverse=True):
+            courts.sort(key=lambda x: x["court_number"])
+            result_list.append({"match_id": mid, "courts": courts})
+
+        return jsonify(result_list[:20])  # 直近20試合
+    except Exception:
+        current_app.logger.exception("[match_history] 取得失敗")
+        return jsonify([])
+
+
+@analytics.route("/admin/analytics/my_stats_access", methods=["GET"])
+@login_required
+def my_stats_access():
+    if not getattr(current_user, "administrator", False):
+        abort(403)
+    try:
+        users_table = current_app.dynamodb.Table("bad-users")
+        resp = users_table.scan(
+            FilterExpression="attribute_exists(last_visited_my_stats)",
+            ProjectionExpression="display_name, last_visited_my_stats",
+        )
+        items = resp.get("Items", [])
+        items.sort(key=lambda x: x.get("last_visited_my_stats", ""), reverse=True)
+        return jsonify(items)
+    except Exception:
+        current_app.logger.exception("[my_stats_access] 取得失敗")
+        return jsonify([])
+
+
 @analytics.route("/analytics/<user_id>", methods=["GET"])
 @login_required
 def analytics_dashboard(user_id):
