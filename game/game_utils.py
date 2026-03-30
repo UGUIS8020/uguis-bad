@@ -319,7 +319,11 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 ]:
     """
     プレイヤー一覧からペアをランダムに作成し、スキルバランスが取れた試合を組む。
+    ただしdiffが閾値(20)以上のコートがあれば、そのコート内で
+    全4通りの交換を試して最善の1交換を採用する。
     """
+    import copy
+
     # ステップ①：まずランダムにペアを作る
     pairs, waiting_players = generate_random_pairs(players)
 
@@ -329,6 +333,43 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
     # ステップ③：使われなかったペアのメンバーも待機者として追加
     for pair in unused_pairs:
         waiting_players.extend(pair)
+
+    # ステップ④：極端な差のコートをコート内swapで補正
+    def court_diff(match):
+        sa = sum(p.skill_score for p in match[0])
+        sb = sum(p.skill_score for p in match[1])
+        return abs(sa - sb)
+
+    if matches:
+        worst_idx = max(range(len(matches)), key=lambda i: court_diff(matches[i]))
+        worst_diff = court_diff(matches[worst_idx])
+
+        if worst_diff >= FULL_RANDOM_SWAP_THRESHOLD:
+            logger = logging.getLogger(__name__)
+            logger.info(
+                "[random] worst C%d diff=%.1f >= %d, trying in-court swap",
+                worst_idx + 1, worst_diff, FULL_RANDOM_SWAP_THRESHOLD
+            )
+
+            best_match = copy.deepcopy(matches[worst_idx])
+            best_diff = worst_diff
+
+            for wi in range(2):
+                for oi in range(2):
+                    trial = copy.deepcopy(matches[worst_idx])
+                    trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                    d = court_diff(trial)
+                    if d < best_diff:
+                        best_diff = d
+                        best_match = trial
+
+            matches[worst_idx] = best_match
+            pairs = [team for match in matches for team in match]
+
+            logger.info(
+                "[random] after swap: worst diff=%.1f -> %.1f",
+                worst_diff, best_diff
+            )
 
     return pairs, matches, waiting_players
 
