@@ -2311,6 +2311,9 @@ def rest():
     try:
         current_entry = get_user_current_entry(current_user.get_id())
         if current_entry:
+            if current_entry.get('entry_status') == 'playing':
+                flash('試合中は休憩できません。', 'warning')
+                return redirect(url_for('game.court'))
             match_table.update_item(
                 Key={'entry_id': current_entry['entry_id']},
                 UpdateExpression='SET entry_status = :status, rest_started_at = :time',
