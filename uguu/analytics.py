@@ -9,6 +9,7 @@ from utils.db import get_schedules_with_formatting_all
 # 追加インポート
 import os
 import boto3
+from boto3.dynamodb.conditions import Attr
 from dateutil import parser as dtparser  # ← isoparse 用
 
 from .dynamo import DynamoDB
@@ -541,7 +542,7 @@ def my_stats_access():
     try:
         users_table = current_app.dynamodb.Table("bad-users")
         resp = users_table.scan(
-            FilterExpression="attribute_exists(last_visited_my_stats)",
+            FilterExpression=Attr("last_visited_my_stats").exists(),
             ProjectionExpression="display_name, last_visited_my_stats",
         )
         items = resp.get("Items", [])
