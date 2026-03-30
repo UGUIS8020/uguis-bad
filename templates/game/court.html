@@ -721,6 +721,11 @@
                     },
                     body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
                 });
+                // 他端末が先に終了済みの場合も正常扱いでリダイレクト
+                if (!res.ok && res.status === 400) {
+                    window.location.href = "/game/court";
+                    return;
+                }
                 const data = await res.json();
                 console.log("finish レスポンス:", data);
                 if (!res.ok || !data.success) throw new Error(data.error || "試合終了に失敗しました");
@@ -745,9 +750,16 @@
                 const sRes = await fetch(`/game/api/submission_status?match_id=${MATCH_ID}`);
                 if (!sRes.ok) return;
                 const sData = await sRes.json();
+
+                if (!sData.match_active) {
+                    console.log('⏹ 試合終了済み → スコアポーリング停止');
+                    stopScorePolling();
+                    return;
+                }
+
                 const submittedCourts = sData.submitted_courts || [];
                 const totalCourts = sData.total_courts || 0;
- 
+
                 console.log(`[updateScoreInputButton] 受信済みコート番号: ${submittedCourts.join(', ')} / 全${totalCourts}コート`);
  
                 submittedCourts.forEach(courtNum => {

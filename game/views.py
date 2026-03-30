@@ -2778,7 +2778,6 @@ def submit_score(match_id, court_number):
             "created_at": datetime.now(JST).isoformat(),
         }
 
-        result_table.put_item(Item=result_item)
         res = result_table.put_item(Item=result_item)
         current_app.logger.info(f"✅ [DEBUG] 保存完了レスポンス: {res.get('ResponseMetadata', {}).get('HTTPStatusCode')}")
         
