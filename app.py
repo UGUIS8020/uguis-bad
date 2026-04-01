@@ -1062,7 +1062,11 @@ def schedule_koyomi(year=None, month=None):
                         'is_today': d_obj == today_obj,
                         'is_other_month': False,
                         'schedules': day_schedules,
-                        'has_schedule': len(day_schedules) > 0
+                        'has_schedule': len(day_schedules) > 0,
+                        'has_full_schedule': all(
+                            s.get('participants_count', 0) >= (s.get('adjusted_max') or s.get('max_participants', 10))
+                            for s in day_schedules
+                        ) if day_schedules else False
                     })
             calendar_data.append(week_data)
 

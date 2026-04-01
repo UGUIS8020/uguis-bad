@@ -15,7 +15,7 @@
     }
     
     .calendar-day {
-        height: 90px;
+        height: 110px;
         vertical-align: top;
         padding: 5px;
         position: relative;
@@ -43,15 +43,31 @@
     }
     
     /* レスポンシブ対応 */
+    .cal-sched-item {
+        margin-top: 3px;
+        line-height: 1.3;
+    }
+    .cal-count {
+        font-size: 0.6rem;
+        color: #555;
+    }
+    .cal-join-btn {
+        font-size: 0.55rem;
+        padding: 1px 4px;
+        line-height: 1.3;
+        border-radius: 3px;
+    }
+
     @media (max-width: 768px) {
         .calendar-day {
-            height: 60px;
+            height: 72px;
             font-size: 0.8rem;
         }
-        
         .day-number {
             font-size: 0.9rem;
         }
+        .cal-count { font-size: 0.5rem; }
+        .cal-join-btn { font-size: 0.5rem; padding: 0px 2px; }
     }
     
     .accordion-button::after {
@@ -154,15 +170,35 @@
                                         </div>
                                         
                                         <!-- この日のスケジュール -->
-                                        {% if day.has_schedule %}
-                                        <div class="schedule-marker">
-                                            {% if day.has_full_schedule %}
-                                            <span class="badge bg-warning">満</span>
-                                            {% else %}
-                                            <span class="badge bg-success">募</span>
+                                        {% for s in day.schedules %}
+                                        {% set eff_max = s.adjusted_max if s.adjusted_max else s.max_participants %}
+                                        {% set is_full = s.participants_count >= eff_max %}
+                                        <div class="cal-sched-item">
+                                            <div class="cal-count">
+                                                {% if is_full %}
+                                                <span class="badge bg-warning text-dark" style="font-size:0.55rem;">満</span>
+                                                {% else %}
+                                                <span class="badge bg-success" style="font-size:0.55rem;">募</span>
+                                                {% endif %}
+                                            </div>
+                                            {% if current_user.is_authenticated %}
+                                            <button class="cal-join-btn btn
+                                                {% if is_full and current_user.id not in s.participants %}
+                                                    btn-secondary disabled
+                                                {% elif current_user.id in s.participants %}
+                                                    btn-danger
+                                                {% else %}
+                                                    btn-primary
+                                                {% endif %}"
+                                                data-schedule-id="{{ s.schedule_id }}"
+                                                data-schedule-date="{{ s.date }}"
+                                                onclick="joinSchedule(this)"
+                                                {% if is_full and current_user.id not in s.participants %}disabled{% endif %}>
+                                                {% if current_user.id in s.participants %}取消{% elif is_full %}満員{% else %}参加{% endif %}
+                                            </button>
                                             {% endif %}
                                         </div>
-                                        {% endif %}
+                                        {% endfor %}
                                         {% endif %}
                                     </td>
                                     {% endfor %}
@@ -404,7 +440,8 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                 },
                 body: JSON.stringify({ date: scheduleDate })
             });
@@ -445,11 +482,12 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                 },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     schedule_id: scheduleId,
-                    schedule_date: scheduleDate 
+                    schedule_date: scheduleDate
                 })
             });
 
