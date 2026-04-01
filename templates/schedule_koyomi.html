@@ -237,9 +237,9 @@
                                     
                                     <div>                                
 
-                                        募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}
+                                        募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
                                         <!-- 募集状態 -->
-                                        {% if schedule.participants_count >= schedule.max_participants %}
+                                        {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
                                             <div class="badge bg-warning text-dark">満員御礼</div>
                                         {% else %}
                                             <div class="badge bg-success">募集中</div>
@@ -253,7 +253,7 @@
                                         class="btn btn-sm join-button m-1 text-nowrap                                          
                                         {% if not current_user.is_authenticated %}
                                             btn-secondary disabled
-                                        {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
                                             btn-secondary disabled
                                         {% elif current_user.id in schedule.participants %}
                                             btn-danger
@@ -264,12 +264,12 @@
                                         data-schedule-date="{{ schedule.date }}" 
                                         onclick="joinSchedule(this)"
                                         {% if not current_user.is_authenticated or 
-                                            (schedule.participants_count >= schedule.max_participants and 
+                                            (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and 
                                             current_user.id not in schedule.participants) %}disabled{% endif %}>
                                         
                                         {% if not current_user.is_authenticated %}
                                             参加
-                                        {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
                                             満員御礼
                                         {% elif current_user.id in schedule.participants %}
                                             参加済

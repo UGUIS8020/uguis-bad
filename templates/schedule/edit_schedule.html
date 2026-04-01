@@ -43,6 +43,25 @@
             </div>
         </div>
 
+        <!-- 人数調整 -->
+        {% set current_count = schedule.participants|length %}
+        {% set is_full = current_count >= schedule.get('max_participants', 15) %}
+        <div class="mb-3">
+            <label for="adjusted_max" class="form-label">
+                人数調整（目標人数）
+                {% if is_full %}<span class="badge bg-warning text-dark ms-1">満員御礼中</span>{% endif %}
+            </label>
+            <input type="number" class="form-control" id="adjusted_max" name="adjusted_max"
+                   min="1" max="{{ schedule.get('max_participants', 15) }}"
+                   value="{{ schedule.get('adjusted_max', '') }}"
+                   placeholder="設定しない場合は空白のまま">
+            <div class="form-text">
+                満員御礼状態でキャンセルを待ちながら目標人数まで絞りたい場合に設定します。<br>
+                設定すると、参加者数がこの人数 <strong>未満</strong> になるまで満員御礼が維持されます。<br>
+                解除するには空白にして更新してください。
+            </div>
+        </div>
+
         <div class="mb-3">
             <label for="start_time">開始時間</label>
             {{ form.start_time(class="form-control", required=true) }}

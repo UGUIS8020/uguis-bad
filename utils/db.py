@@ -81,6 +81,7 @@ def get_schedules_with_formatting():
                     'venue': schedule.get('venue', ''),            
                     'court': schedule.get('court', ''),          
                     'max_participants': int(schedule.get('max_participants', 10)),
+                    'adjusted_max': int(schedule['adjusted_max']) if schedule.get('adjusted_max') else None,
                     'participants_count': len(participants),
                     'participants': participants,  # IDのみ保持
                     'status': schedule.get('status', 'active'),

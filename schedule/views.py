@@ -42,7 +42,7 @@ def leader_required(f):
 @bp.route("/admin/schedules", methods=['GET', 'POST'])
 @login_required
 def admin_schedules():
-    logger.info("🔐 スケジュール管理ページにアクセス")
+    logger.info("スケジュール管理ページにアクセス")
     
     # --- 1. 権限チェックの修正 ---
     # システム管理者（True）でもなく、かつ ロールも admin でない場合は追い返す
@@ -101,9 +101,10 @@ def admin_schedules():
                 if s.get('team_id') == current_user.team_id
             ]
 
-        # 日付順に並び替え
+        # 削除済みを除外して日付順に並び替え
+        active_schedules = [s for s in filtered_schedules if s.get('status') != 'deleted']
         schedules = sorted(
-            filtered_schedules,
+            active_schedules,
             key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d').date()
         )
 
@@ -116,6 +117,34 @@ def admin_schedules():
         logger.exception("❌ スケジュールの取得中にエラー発生")
         flash('スケジュールの取得中にエラーが発生しました', 'error')
         return redirect(url_for('index'))
+
+
+@bp.route("/admin/schedules/deleted", methods=['GET'])
+@login_required
+def deleted_schedules():
+    if not current_user.administrator and current_user.role != 'admin':
+        flash('この機能を利用する権限がありません', 'warning')
+        return redirect(url_for('index'))
+
+    try:
+        schedule_table = get_schedule_table()
+        response = schedule_table.scan()
+        all_schedules = response.get('Items', [])
+
+        if current_user.administrator:
+            filtered = all_schedules
+        else:
+            filtered = [s for s in all_schedules if s.get('team_id') == current_user.team_id]
+
+        deleted = [s for s in filtered if s.get('status') == 'deleted']
+        schedules = sorted(deleted, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d').date(), reverse=True)
+
+        return render_template("schedule/deleted_schedules.html", schedules=schedules)
+
+    except Exception as e:
+        logger.exception("❌ 削除済みスケジュールの取得中にエラー発生")
+        flash('スケジュールの取得中にエラーが発生しました', 'error')
+        return redirect(url_for('schedule.admin_schedules'))
 
 
 @bp.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
@@ -176,6 +205,9 @@ def edit_schedule(schedule_id):
                     new_date = form.date.data.strftime('%Y-%m-%d')
                     old_date = schedule['date']
 
+                    adjusted_max_raw = request.form.get('adjusted_max', '').strip()
+                    adjusted_max = int(adjusted_max_raw) if adjusted_max_raw else None
+
                     new_item = {
                         'schedule_id': schedule_id,
                         'date': new_date,
@@ -191,6 +223,8 @@ def edit_schedule(schedule_id):
                         'team_id': schedule.get('team_id', ''),
                         'created_at': schedule.get('created_at', ''),
                     }
+                    if adjusted_max is not None:
+                        new_item['adjusted_max'] = adjusted_max
 
                     if new_date != old_date:
                         # 日付が変わった場合：古いアイテム削除 → 新規作成
@@ -198,28 +232,36 @@ def edit_schedule(schedule_id):
                         table.put_item(Item=new_item)
                     else:
                         # 日付が変わらない場合：通常のupdate
+                        update_expr = (
+                            "SET day_of_week=:dow, venue=:v, start_time=:st, "
+                            "end_time=:et, max_participants=:mp, "
+                            "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an"
+                        )
+                        expr_values = {
+                            ':dow': form.day_of_week.data,
+                            ':v': form.venue.data,
+                            ':st': form.start_time.data,
+                            ':et': form.end_time.data,
+                            ':mp': form.max_participants.data,
+                            ':ua': datetime.now().isoformat(),
+                            ':s': form.status.data,
+                            ':c': request.form.get('comment', ''),
+                            ':an': current_user.display_name,
+                        }
+                        if adjusted_max is not None:
+                            update_expr += ", adjusted_max=:am"
+                            expr_values[':am'] = adjusted_max
+                        else:
+                            update_expr += " REMOVE adjusted_max"
+
                         table.update_item(
                             Key={'schedule_id': schedule_id, 'date': old_date},
-                            UpdateExpression=(
-                                "SET day_of_week=:dow, venue=:v, start_time=:st, "
-                                "end_time=:et, max_participants=:mp, "
-                                "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an"
-                            ),
+                            UpdateExpression=update_expr,
                             ExpressionAttributeNames={
                                 '#status': 'status',
                                 '#comment': 'comment'
                             },
-                            ExpressionAttributeValues={
-                                ':dow': form.day_of_week.data,
-                                ':v': form.venue.data,
-                                ':st': form.start_time.data,
-                                ':et': form.end_time.data,
-                                ':mp': form.max_participants.data,
-                                ':ua': datetime.now().isoformat(),
-                                ':s': form.status.data,
-                                ':c': request.form.get('comment', ''),
-                                ':an': current_user.display_name,
-                            }
+                            ExpressionAttributeValues=expr_values,
                         )
                     
                     flash('スケジュールを更新しました', 'success')

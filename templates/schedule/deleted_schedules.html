@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid px-2">
+    <div class="row mb-3">
+        <div class="col-12">
+            <h2 class="text-center">削除済みスケジュール一覧</h2>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-10">
+            <div class="card">
+                <div class="card-header py-2">
+                    <h3 class="card-title mb-0">削除済み（{{ schedules|length }}件）</h3>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="px-2">日付</th>
+                                <th class="px-2">曜日</th>
+                                <th class="px-2">体育館</th>
+                                <th class="px-2">コート</th>
+                                <th class="px-2">開始</th>
+                                <th class="px-2">終了</th>
+                                <th class="px-2">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for schedule in schedules %}
+                            <tr class="table-secondary">
+                                <td class="px-2">{{ schedule.date }}</td>
+                                <td class="px-2">{{ schedule.day_of_week }}</td>
+                                <td class="px-2">{{ schedule.venue }}</td>
+                                <td class="px-2">{{ schedule.court }}</td>
+                                <td class="px-2">{{ schedule.start_time }}</td>
+                                <td class="px-2">{{ schedule.end_time }}</td>
+                                <td class="px-2">
+                                    <a href="{{ url_for('schedule.edit_schedule', schedule_id=schedule.schedule_id) }}"
+                                       class="btn btn-sm btn-outline-primary py-0">編集</a>
+                                    <form method="POST"
+                                          action="{{ url_for('schedule.delete_schedule', schedule_id=schedule.schedule_id) }}"
+                                          style="display:inline;"
+                                          onsubmit="return confirm('完全に削除します。元に戻せません。よろしいですか？')">
+                                        {{ csrf_token() if csrf_token is defined else '' }}
+                                        <input type="hidden" name="date" value="{{ schedule.date }}">
+                                        <input type="hidden" name="delete_type" value="permanent">
+                                        <button type="submit" class="btn btn-sm btn-danger py-0">完全削除</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">削除済みのスケジュールはありません</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end align-items-center mt-3">
+                <a href="{{ url_for('schedule.admin_schedules') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> スケジュール管理へ戻る
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

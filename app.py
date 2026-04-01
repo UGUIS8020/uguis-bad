@@ -1177,6 +1177,12 @@ def join_schedule(schedule_id):
 
         # 参加登録（正式参加）
         else:
+            max_participants = int(schedule.get('max_participants') or 15)
+            adjusted_max = schedule.get('adjusted_max')
+            effective_max = int(adjusted_max) if adjusted_max else max_participants
+            if len(participants) >= effective_max:
+                return jsonify({'status': 'error', 'message': '満員のため参加できません。'}), 400
+
             participants.append(user_id)
             message = "参加登録が完了しました！"
             is_joining = True
