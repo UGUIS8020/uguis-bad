@@ -670,6 +670,15 @@
 {% if current_user.is_authenticated and current_user.administrator %}
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
+    <span>管理者メニュー</span>
+    <a href="{{ url_for('account', user_id=plain_user_id) }}" class="btn btn-sm btn-outline-primary">
+      <i class="fas fa-user-edit me-1"></i>アカウント更新
+    </a>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
     <span>管理者：ポイント付与</span>
     <small class="text-muted">60日ルールもここで延長されます</small>
   </div>
