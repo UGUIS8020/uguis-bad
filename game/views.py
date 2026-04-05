@@ -3309,11 +3309,11 @@ def clear_test_data():
     # 4. ペアリングログ全削除
     try:
         pairing_log_table = current_app.dynamodb.Table("bad-pairing-logs")
-        scan = pairing_log_table.scan(ProjectionExpression="match_id, #ts", ExpressionAttributeNames={"#ts": "timestamp"})
+        scan = pairing_log_table.scan(ProjectionExpression="match_id")
         targets = scan.get("Items", [])
         with pairing_log_table.batch_writer() as batch:
             for item in targets:
-                batch.delete_item(Key={"match_id": item["match_id"], "timestamp": item["timestamp"]})
+                batch.delete_item(Key={"match_id": item["match_id"]})
         current_app.logger.info(f"[clear_test_data] bad-pairing-logs 削除: {len(targets)}件")
         total_deleted += len(targets)
     except Exception as e:
