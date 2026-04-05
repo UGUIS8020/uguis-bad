@@ -506,9 +506,7 @@
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>ポイント支払い履歴</span>
-    <small class="text-muted">
-      直近 {{ point_spends|length }} 件 / 合計 {{ point_total_spent_recent|default(0) }}P
-    </small>
+    <small class="text-muted">直近5件 / 合計 {{ point_total_spent_recent|default(0) }}P</small>
   </div>
 
   <div class="table-responsive">
@@ -516,10 +514,10 @@
       
       {% for tx in point_spends %}
         <tr>
-          <td>             
-            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}          
+          <td>
+            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}
           </td>
-          <td class="fw-bold">-{{ tx.amount }}P</td>          
+          <td class="fw-bold">-{{ tx.amount }}P</td>
         </tr>
       {% else %}
         <tr>
@@ -529,6 +527,13 @@
       </tbody>
     </table>
   </div>
+  {% if point_spends_total > 5 %}
+  <div class="card-footer text-center">
+    <a href="{{ url_for('users.point_spends_list', user_id=plain_user_id) }}" class="text-decoration-none">
+      すべての履歴を見る（全{{ point_spends_total }}件）
+    </a>
+  </div>
+  {% endif %}
 </div>
 <!-- ▲ポイント支払い履歴（直近） -->
 

@@ -700,7 +700,7 @@ def my_stats_access():
         )
         items = resp.get("Items", [])
         items.sort(key=lambda x: x.get("last_visited_my_stats", ""), reverse=True)
-        return jsonify(items)
+        return jsonify(items[:20])
     except Exception:
         current_app.logger.exception("[my_stats_access] 取得失敗")
         return jsonify([])

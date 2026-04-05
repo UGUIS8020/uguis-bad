@@ -2976,7 +2976,83 @@ def reset_participants():
         current_app.logger.error(f"スタックトレース: {error_trace}")
         flash('リセット処理中にエラーが発生しました', 'danger')
 
+    # ランキング更新（バックグラウンド的に実行）
+    try:
+        _update_active_rankings()
+        current_app.logger.info("[reset] ランキング更新完了")
+    except Exception as e:
+        current_app.logger.error(f"[reset] ランキング更新失敗: {e}")
+
     return redirect(url_for('game.court'))
+
+
+def _update_active_rankings():
+    """
+    アクティブユーザー（直近90日に2回以上参加）のみでランキングを計算し
+    bad-users テーブルの rank / active_rank_total を更新する
+    """
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    today = date.today()
+    cutoff = (today - timedelta(days=90)).strftime("%Y-%m-%d")
+
+    # 1. bad-users-history から直近90日の参加回数を集計
+    history_table = dynamodb.Table("bad-users-history")
+    user_count = {}
+    kwargs = {"FilterExpression": Attr("date").gte(cutoff)}
+    while True:
+        resp = history_table.scan(**kwargs)
+        for item in resp.get("Items", []):
+            st = str(item.get("status", "")).lower()
+            if st.startswith("cancel"):
+                continue
+            uid = item.get("user_id", "")
+            if uid:
+                user_count[uid] = user_count.get(uid, 0) + 1
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+
+    # アクティブ判定（2回以上）
+    active_uids = {uid for uid, cnt in user_count.items() if cnt >= 2}
+
+    # 2. bad-users から skill_score を持つユーザーを取得
+    user_table = dynamodb.Table("bad-users")
+    all_users = []
+    kwargs2 = {"FilterExpression": Attr("skill_score").exists()}
+    while True:
+        resp = user_table.scan(**kwargs2)
+        all_users.extend(resp.get("Items", []))
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs2["ExclusiveStartKey"] = last
+
+    # アクティブユーザーのみ抽出してスコア降順ソート
+    active_users = [
+        u for u in all_users
+        if u.get("user#user_id") in active_uids
+        and not str(u.get("user#user_id", "")).startswith("test_user_")
+    ]
+    active_users.sort(key=lambda u: float(u.get("skill_score", 0)), reverse=True)
+    total = len(active_users)
+
+    # 3. 各ユーザーの rank を書き込む
+    for rank, u in enumerate(active_users, 1):
+        uid = u.get("user#user_id")
+        try:
+            user_table.update_item(
+                Key={"user#user_id": uid},
+                UpdateExpression="SET #r = :r, active_rank_total = :t",
+                ExpressionAttributeNames={"#r": "rank"},
+                ExpressionAttributeValues={":r": Decimal(rank), ":t": Decimal(total)},
+            )
+        except Exception as e:
+            current_app.logger.warning(f"[ranking] {uid} 更新失敗: {e}")
+
+    current_app.logger.info(f"[ranking] アクティブ {total} 人のランキング更新完了")
 
 
 def get_organized_match_data(match_id):
@@ -3163,54 +3239,60 @@ def create_test_data():
 @bp_game.route('/clear_test_data')
 @login_required
 def clear_test_data():
-    """開発用：test_user_ の削除 ＋ ローテーションと進行状況の完全リセット"""
-    from boto3.dynamodb.conditions import Attr
-    
+    """テストデータ削除 + 試合メタリセット"""
     if not current_user.administrator:
         return redirect(url_for('index'))
 
-    # 1. マッチエントリー（参加者）から削除
-    match_table = current_app.dynamodb.Table("bad-game-match_entries")
-    last_evaluated_key = None
-    while True:
-        scan_kwargs = {'FilterExpression': Attr('user_id').begins_with("test_user_")}
-        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-        response = match_table.scan(**scan_kwargs)
-        for item in response.get('Items', []):
-            match_table.delete_item(Key={'entry_id': item['entry_id']})
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key: break
+    TEST_KEYWORDS = ['テスト', '悟空', 'キャメロン', 'ロバート', 'ノーマン']
 
-    # 2. ユーザーテーブル（スキル等）から削除
-    user_table = current_app.dynamodb.Table("bad-users")
-    last_evaluated_key = None
-    while True:
-        scan_kwargs = {
-            'FilterExpression': Attr('user_id').begins_with("test_user_")
-        }
-        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-        response = user_table.scan(**scan_kwargs)
-        for item in response.get('Items', []):
-            user_table.delete_item(Key={'user#user_id': item['user#user_id']})
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key: break
+    def has_test_keyword(name):
+        return any(kw in (name or '') for kw in TEST_KEYWORDS)
 
-    # 3. bad-game-results から test_user_ 関連を削除
-    results_table = current_app.dynamodb.Table("bad-game-results")
-    last_evaluated_key = None
-    while True:
-        scan_kwargs = {
-            'FilterExpression': Attr('team_a').contains('test_user_') |
-                                Attr('team_b').contains('test_user_')
-        }
-        if last_evaluated_key: scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
-        response = results_table.scan(**scan_kwargs)
-        for item in response.get('Items', []):
-            results_table.delete_item(Key={'result_id': item['result_id']})
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key: break    
+    def scan_all(table, **kwargs):
+        items = []
+        resp = table.scan(**kwargs)
+        items.extend(resp.get('Items', []))
+        while 'LastEvaluatedKey' in resp:
+            resp = table.scan(ExclusiveStartKey=resp['LastEvaluatedKey'], **kwargs)
+            items.extend(resp.get('Items', []))
+        return items
 
-    # 5. メタデータ（進行状況とキュー）をリセット
+    total_deleted = 0
+
+    # 1. bad-game-results: team_a/team_b の display_name でキーワード判定
+    try:
+        results_table = current_app.dynamodb.Table("bad-game-results")
+        all_results = scan_all(results_table)
+        targets = [
+            item for item in all_results
+            if any(has_test_keyword(p.get('display_name', ''))
+                   for k in ['team_a', 'team_b']
+                   for p in item.get(k, []))
+        ]
+        for i in range(0, len(targets), 25):
+            with results_table.batch_writer() as bw:
+                for item in targets[i:i+25]:
+                    bw.delete_item(Key={'result_id': item['result_id']})
+        total_deleted += len(targets)
+        current_app.logger.info(f"[clear_test_data] bad-game-results 削除: {len(targets)}件")
+    except Exception as e:
+        current_app.logger.error(f"[clear_test_data] results削除失敗: {e}")
+
+    # 2. bad-game-match_entries: display_name でキーワード判定
+    try:
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        all_entries = scan_all(match_table)
+        targets = [item for item in all_entries if has_test_keyword(item.get('display_name', ''))]
+        for i in range(0, len(targets), 25):
+            with match_table.batch_writer() as bw:
+                for item in targets[i:i+25]:
+                    bw.delete_item(Key={'entry_id': item['entry_id']})
+        total_deleted += len(targets)
+        current_app.logger.info(f"[clear_test_data] bad-game-match_entries 削除: {len(targets)}件")
+    except Exception as e:
+        current_app.logger.error(f"[clear_test_data] entries削除失敗: {e}")
+
+    # 3. 試合メタデータリセット
     try:
         meta_table = current_app.dynamodb.Table("bad-game-matches")
         meta_table.update_item(
@@ -3220,11 +3302,13 @@ def clear_test_data():
             ExpressionAttributeValues={":idle": "idle"},
         )
         meta_table.delete_item(Key={"match_id": "rest_queue"})
-        current_app.logger.info("[clear_test_data] meta#current reset and rest_queue DELETED.")
+        current_app.logger.info("[clear_test_data] meta#current リセット完了")
     except Exception as e:
-        current_app.logger.error(f"[clear_test_data] Meta reset failed: {e}")
+        current_app.logger.error(f"[clear_test_data] metaリセット失敗: {e}")
 
-    return redirect(url_for('game.court'))
+    current_app.logger.info(f"[clear_test_data] 合計削除: {total_deleted}件")
+    flash(f'テストデータを削除しました（{total_deleted}件）', 'success')
+    return redirect(url_for('index'))
 
 
 @bp_game.route('/test_data_status')

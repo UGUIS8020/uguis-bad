@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app
+from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app, abort
 from flask_login import login_required, current_user
 from datetime import datetime
 import os
@@ -94,6 +94,7 @@ def user_profile(user_id):
         # 3. 参加履歴・ポイント履歴取得
         raw_history = db.get_user_participation_history_with_timestamp(user_id) or []
         point_spends = db.list_point_spends(user_id, limit=1000) or []
+        point_spends_preview = point_spends[:5]
 
         # 4. 統計計算（旧ルール計算結果を取得）
         user_stats = db.get_user_stats(user_id, raw_history=raw_history, spends=point_spends) or {}
@@ -212,7 +213,8 @@ def user_profile(user_id):
             admin_participation_dates=admin_participation_dates,
             days_until_reset=60 - days_since_last if not is_expired else 0, # 残り日数表示用
             upcoming_schedules=db.get_upcoming_schedules(),
-            point_spends=point_spends,
+            point_spends=point_spends_preview,
+            point_spends_total=len(point_spends),
             point_total_spent_recent=point_total_spent_recent,
             skill_score=skill_score,
             points_info=points_info,
@@ -226,6 +228,37 @@ def user_profile(user_id):
         return redirect(url_for('index'))
     
     
+@users.route('/user/<user_id>/point_spends')
+@login_required
+def point_spends_list(user_id):
+    """ポイント支払い履歴 全件ページ（20件ずつページネーション）"""
+    if not (current_user.administrator or current_user.id == user_id):
+        abort(403)
+
+    PAGE_SIZE = 20
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+
+    all_spends = db.list_point_spends(user_id, limit=1000) or []
+    total = len(all_spends)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(page, total_pages)
+    spends = all_spends[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+
+    user = db.get_user_by_id(user_id) or {}
+    return render_template(
+        'uguu/point_spends_list.html',
+        user=user,
+        plain_user_id=user_id,
+        spends=spends,
+        total=total,
+        page=page,
+        total_pages=total_pages,
+    )
+
+
 @users.route('/point-participation', methods=['POST'])
 @login_required
 def point_participation():
@@ -290,8 +323,6 @@ def point_participation():
 @users.route('/my_stats')
 @login_required
 def my_stats():
-    from boto3.dynamodb.conditions import Attr
-
     my_uid = current_user.user_id
     current_app.logger.info("[my_stats] my_uid=%s", my_uid)
 
@@ -417,49 +448,31 @@ def my_stats():
     current_app.logger.info("[my_stats] wins=%d losses=%d skill_history=%d recent=%d",
                             wins, losses, len(skill_history), len(recent_matches))
 
-    user_table = current_app.dynamodb.Table("bad-users")
-    all_users_resp = user_table.scan(
-        FilterExpression=Attr("skill_score").exists()
-    )
-    all_scores = sorted(
-        [float(u.get("skill_score", 0)) for u in all_users_resp.get("Items", [])
-         if not str(u.get("user#user_id", "")).startswith("test_user_")],
-        reverse=True
-    )
-
-    # --- ヘルパー関数の定義（他の関数と統一） ---
-    def _to_float_or_none(v):
-        try: return float(v) if v is not None else None
-        except: return None
-
     plain_user_id = current_user.user_id.replace('user#', '')
-    
-    # 2. DBから取得（user_profile と同じキー指定）
+
     bad_users_table = current_app.dynamodb.Table("bad-users")
     resp = bad_users_table.get_item(Key={"user#user_id": plain_user_id}, ConsistentRead=True)
     bad_user = resp.get("Item") or {}
 
-    # 3. ヘルパー関数で数値変換
     def _to_float_or_none(v):
         try: return float(v) if v is not None else None
         except: return None
-        
+
     skill_score = _to_float_or_none(bad_user.get("skill_score"))
 
-    # デバッグログ
-    current_app.logger.info("[my_stats] plain_id=%s skill_score=%s", plain_user_id, skill_score)
+    # 保存済みランクを使用（練習終了時に更新済み）
+    rank = int(bad_user["rank"]) if bad_user.get("rank") is not None else None
+    total_players = int(bad_user["active_rank_total"]) if bad_user.get("active_rank_total") is not None else None
 
-    # --- ランク計算（skill_score を使用） ---
-    rank = None
-    if skill_score is not None:
-        rank = next((i + 1 for i, s in enumerate(all_scores) if s <= skill_score + 0.01), len(all_scores))
+    current_app.logger.info("[my_stats] plain_id=%s skill_score=%s rank=%s/%s",
+                            plain_user_id, skill_score, rank, total_players)
 
     # --- テンプレートへ渡す（名前を skill_score に統一） ---
     return render_template(
         "uguu/my_stats.html",
         skill_score=skill_score,
         rank=rank,
-        total_players=len(all_scores),
+        total_players=total_players,
         wins=wins,
         losses=losses,
         win_rate=round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
