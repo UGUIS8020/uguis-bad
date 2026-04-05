@@ -322,8 +322,6 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
     ただしdiffが閾値(20)以上のコートがあれば、そのコート内で
     全4通りの交換を試して最善の1交換を採用する。
     """
-    import copy
-
     # ステップ①：まずランダムにペアを作る
     pairs, waiting_players = generate_random_pairs(players)
 
@@ -349,16 +347,16 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
                     "[random] C%d diff=%.1f >= %d, trying in-court swap",
                     idx + 1, diff_before, FULL_RANDOM_SWAP_THRESHOLD
                 )
-                best_match = copy.deepcopy(matches[idx])
+                best_match = [list(matches[idx][0]), list(matches[idx][1])]
                 best_diff = diff_before
                 for wi in range(2):
                     for oi in range(2):
-                        trial = copy.deepcopy(matches[idx])
+                        trial = [list(matches[idx][0]), list(matches[idx][1])]
                         trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
                         d = court_diff(trial)
                         if d < best_diff:
                             best_diff = d
-                            best_match = trial
+                            best_match = [list(trial[0]), list(trial[1])]
                 matches[idx] = best_match
                 logger.info(
                     "[random] C%d after swap: diff=%.1f -> %.1f",
