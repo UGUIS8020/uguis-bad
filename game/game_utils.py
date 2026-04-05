@@ -341,35 +341,30 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
         return abs(sa - sb)
 
     if matches:
-        worst_idx = max(range(len(matches)), key=lambda i: court_diff(matches[i]))
-        worst_diff = court_diff(matches[worst_idx])
-
-        if worst_diff >= FULL_RANDOM_SWAP_THRESHOLD:
-            logger = logging.getLogger(__name__)
-            logger.info(
-                "[random] worst C%d diff=%.1f >= %d, trying in-court swap",
-                worst_idx + 1, worst_diff, FULL_RANDOM_SWAP_THRESHOLD
-            )
-
-            best_match = copy.deepcopy(matches[worst_idx])
-            best_diff = worst_diff
-
-            for wi in range(2):
-                for oi in range(2):
-                    trial = copy.deepcopy(matches[worst_idx])
-                    trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
-                    d = court_diff(trial)
-                    if d < best_diff:
-                        best_diff = d
-                        best_match = trial
-
-            matches[worst_idx] = best_match
-            pairs = [team for match in matches for team in match]
-
-            logger.info(
-                "[random] after swap: worst diff=%.1f -> %.1f",
-                worst_diff, best_diff
-            )
+        logger = logging.getLogger(__name__)
+        for idx in range(len(matches)):
+            diff_before = court_diff(matches[idx])
+            if diff_before >= FULL_RANDOM_SWAP_THRESHOLD:
+                logger.info(
+                    "[random] C%d diff=%.1f >= %d, trying in-court swap",
+                    idx + 1, diff_before, FULL_RANDOM_SWAP_THRESHOLD
+                )
+                best_match = copy.deepcopy(matches[idx])
+                best_diff = diff_before
+                for wi in range(2):
+                    for oi in range(2):
+                        trial = copy.deepcopy(matches[idx])
+                        trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                        d = court_diff(trial)
+                        if d < best_diff:
+                            best_diff = d
+                            best_match = trial
+                matches[idx] = best_match
+                logger.info(
+                    "[random] C%d after swap: diff=%.1f -> %.1f",
+                    idx + 1, diff_before, best_diff
+                )
+        pairs = [team for match in matches for team in match]
 
     return pairs, matches, waiting_players
 
@@ -641,40 +636,38 @@ def generate_full_random_pairings(players, max_courts):
         sb = sum(p.skill_score for p in match[1])
         return abs(sa - sb)
 
-    worst_idx = max(range(len(matches)), key=lambda i: court_diff(matches[i]))
-    worst_diff = court_diff(matches[worst_idx])
+    swapped = False
+    for idx in range(len(matches)):
+        diff_before = court_diff(matches[idx])
+        if diff_before >= FULL_RANDOM_SWAP_THRESHOLD:
+            current_app.logger.info(
+                "[full_random] C%d diff=%.1f >= %d, trying in-court swap",
+                idx + 1, diff_before, FULL_RANDOM_SWAP_THRESHOLD
+            )
+            best_match = copy.deepcopy(matches[idx])
+            best_diff = diff_before
+            for wi in range(2):
+                for oi in range(2):
+                    trial = copy.deepcopy(matches[idx])
+                    trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                    d = court_diff(trial)
+                    if d < best_diff:
+                        best_diff = d
+                        best_match = trial
+            matches[idx] = best_match
+            swapped = True
+            current_app.logger.info(
+                "[full_random] C%d after swap: diff=%.1f -> %.1f",
+                idx + 1, diff_before, best_diff
+            )
 
-    if worst_diff >= FULL_RANDOM_SWAP_THRESHOLD:
-        current_app.logger.info(
-            "[full_random] worst C%d diff=%.1f >= %d, trying in-court swap",
-            worst_idx + 1, worst_diff, FULL_RANDOM_SWAP_THRESHOLD
-        )
-
-        best_match = copy.deepcopy(matches[worst_idx])
-        best_diff = worst_diff
-
-        for wi in range(2):
-            for oi in range(2):
-                trial = copy.deepcopy(matches[worst_idx])
-                trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
-                d = court_diff(trial)
-                if d < best_diff:
-                    best_diff = d
-                    best_match = trial
-
-        matches[worst_idx] = best_match
-        pairs = [team for match in matches for team in match]
-
-        current_app.logger.info(
-            "[full_random] after swap: worst diff=%.1f -> %.1f",
-            worst_diff, best_diff
-        )
-
-    else:
+    if not swapped:
+        worst_diff = max(court_diff(m) for m in matches)
         current_app.logger.info(
             "[full_random] diff=%.1f < threshold, no swap", worst_diff
         )
 
+    pairs = [team for match in matches for team in match]
     return pairs, matches, additional_waiting
 
 

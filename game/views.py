@@ -818,6 +818,24 @@ def entry():
     return redirect(url_for("game.court"))
 
 
+# ペアリングログ閲覧
+@bp_game.route("/admin/pairing_logs", methods=['GET'])
+@login_required
+def pairing_logs():
+    if not getattr(current_user, 'administrator', False):
+        flash('この機能を利用する権限がありません', 'warning')
+        return redirect(url_for('index'))
+    try:
+        table = dynamodb.Table("bad-pairing-logs")
+        response = table.scan()
+        logs = sorted(response.get('Items', []), key=lambda x: x.get('match_id', ''), reverse=True)
+        return render_template("game/pairing_logs.html", logs=logs)
+    except Exception as e:
+        current_app.logger.error("ペアリングログ取得失敗: %s", e)
+        flash('ログの取得中にエラーが発生しました', 'error')
+        return redirect(url_for('index'))
+
+
 # 管理者用エンドポイント
 @bp_game.route("/admin/cleanup_duplicates", methods=['POST'])
 @login_required
@@ -3685,11 +3703,20 @@ def create_pairings():
             return float(getattr(p1, "conservative", 0.0)) + float(getattr(p2, "conservative", 0.0))
 
         diffs = []
+        courts_log = []
         for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
             sa = _team_strength(a1, a2)
             sb = _team_strength(b1, b2)
             d = abs(sa - sb)
             diffs.append(d)
+            courts_log.append({
+                'court': str(i),
+                'a': [a1.name, a2.name],
+                'b': [b1.name, b2.name],
+                'a_strength': str(round(sa, 2)),
+                'b_strength': str(round(sb, 2)),
+                'diff': str(round(d, 2)),
+            })
             current_app.logger.info(
                 "[eval] C%d A_strength=%.2f B_strength=%.2f diff=%.2f",
                 i, sa, sb, d
@@ -3699,7 +3726,22 @@ def create_pairings():
             current_app.logger.info(
                 "[eval] diff_avg=%.2f diff_max=%.2f",
                 sum(diffs) / len(diffs), max(diffs)
-            )        
+            )
+            try:
+                from datetime import timezone
+                pairing_log_table = dynamodb.Table("bad-pairing-logs")
+                pairing_log_table.put_item(Item={
+                    'match_id': match_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'mode': mode,
+                    'participants_count': len(players),
+                    'waiting_count': len(waiting_players) + len(additional_waiting_players),
+                    'courts': courts_log,
+                    'diff_avg': str(round(sum(diffs) / len(diffs), 2)),
+                    'diff_max': str(round(max(diffs), 2)),
+                })
+            except Exception as e:
+                current_app.logger.warning("ペアリングログ保存失敗: %s", e)
 
         if additional_waiting_players:
             current_app.logger.info(

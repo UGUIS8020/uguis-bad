@@ -1616,9 +1616,8 @@ def login():
                 }
             )
 
-            print(f"Query response: {response}")
             items = response.get('Items', [])
-            print(f"Items found: {len(items)}")
+            app.logger.debug(f"Login query: {len(items)} item(s) found")
             
             items = response.get('Items', [])
             user_data = items[0] if items else None
@@ -2297,8 +2296,7 @@ def remove_participant_from_date():
             ReturnValues="UPDATED_NEW"
         )
         
-        print(f"DynamoDB更新完了: {update_response}")
-        print(f"削除成功: {user_id_to_remove} を {schedule_id} から削除")
+        app.logger.info(f"参加者削除完了: schedule_id={schedule_id}")
         
         return jsonify({
             "success": True, 

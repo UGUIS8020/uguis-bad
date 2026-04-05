@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+    <h2 class="text-center mb-4">ペアリングログ</h2>
+
+    {% if not logs %}
+    <p class="text-center text-muted">ログがありません</p>
+    {% endif %}
+
+    {% for log in logs %}
+    {% set match_dt = log.match_id[:8] ~ ' ' ~ log.match_id[9:11] ~ ':' ~ log.match_id[11:13] ~ ':' ~ log.match_id[13:15] %}
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-2">
+            <div>
+                <strong>{{ match_dt }}</strong>
+                <span class="ms-2
+                    {% if log.mode == 'ai' %}badge bg-primary
+                    {% elif log.mode == 'full_random' %}badge bg-warning text-dark
+                    {% else %}badge bg-secondary{% endif %}">
+                    {{ log.mode }}
+                </span>
+            </div>
+            <div class="text-muted small">
+                参加 {{ log.participants_count }}人 / 待機 {{ log.waiting_count }}人 &nbsp;|&nbsp;
+                avg <strong>{{ log.diff_avg }}</strong> &nbsp; max <strong>{{ log.diff_max }}</strong>
+            </div>
+        </div>
+        <div class="card-body p-2">
+            <table class="table table-sm table-bordered mb-0 text-center">
+                <thead class="table-dark">
+                    <tr>
+                        <th>コート</th>
+                        <th>Aチーム</th>
+                        <th>A強さ</th>
+                        <th>B強さ</th>
+                        <th>Bチーム</th>
+                        <th>差</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in log.courts %}
+                    <tr class="{% if c.diff | float >= 20 %}table-danger{% elif c.diff | float >= 10 %}table-warning{% endif %}" style="font-size:0.9rem;">
+                        <td>C{{ c.court }}</td>
+                        <td>{{ c.a | join(' / ') }}</td>
+                        <td>{{ c.a_strength }}</td>
+                        <td>{{ c.b_strength }}</td>
+                        <td>{{ c.b | join(' / ') }}</td>
+                        <td><strong>{{ c.diff }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="text-end mt-3">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">戻る</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,15 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-
-    <header id="page-header">
-        <div class="container my-3 py-3 bg-light">
-            <div class="row">
-                <div class="col-md-6 m-auto text-center">
-                    <h1>ユーザー管理</h1>
-                </div>
-            </div>
-        </div>
-    </header>
+    
 
     {% if current_user.is_authenticated and current_user.is_admin %}
     <section id="menu">
@@ -30,8 +21,11 @@
             <div class="row">
                 <div class="col-md-12">
                     <div class="card">
-                        <div class="card-header">
-                            <h4>最新のユーザー</h4>
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h4 class="mb-0">最新のユーザー <span class="text-muted fs-6" id="userCount"></span></h4>
+                            <input type="text" id="userSearch" class="form-control form-control-sm"
+                                   placeholder="名前・メール・電話で検索..." style="max-width:260px;"
+                                   oninput="filterUsers(this.value)">
                         </div>
                         <table class="table table-sm table-striped text-nowrap">
                             <thead class="table-dark">
@@ -75,7 +69,7 @@
                             </thead>
                             <tbody>
                                 {% for user in users %}
-                                <tr>
+                                <tr class="user-row" data-search="{{ [user.display_name, user.user_name, user.email, user.phone] | join(' ') | lower }}">
                                     <td>{{ '%06d' % loop.index }}</td>
                                     <td>
                                         <img src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}" 
@@ -137,5 +131,25 @@
 
   </ul>
 </nav>
+
+<script>
+function filterUsers(query) {
+    const q = query.trim().toLowerCase();
+    const rows = document.querySelectorAll('.user-row');
+    let visible = 0;
+    rows.forEach(row => {
+        const match = !q || row.dataset.search.includes(q);
+        row.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    document.getElementById('userCount').textContent = q ? `(${visible}件)` : '';
+}
+
+// 初期件数表示
+document.addEventListener('DOMContentLoaded', () => {
+    const total = document.querySelectorAll('.user-row').length;
+    document.getElementById('userCount').textContent = `(${total}件)`;
+});
+</script>
 
 {% endblock %}

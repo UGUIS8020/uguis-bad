@@ -745,6 +745,42 @@ class DynamoDB:
             traceback.print_exc()
             return False
         
+    def get_all_participations_with_timestamp(self, start_date=None, end_date=None):
+        """
+        bad-users-history テーブルを全スキャンして参加レコードを返す。
+        返却形式: [{"user_id": ..., "event_date": "YYYY-MM-DD", "status": ...}, ...]
+        """
+        items = []
+        kwargs = {}
+        while True:
+            resp = self.part_history.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+
+        result = []
+        for item in items:
+            try:
+                event_date = item.get("event_date") or item.get("date") or ""
+                if not event_date:
+                    continue
+                d = event_date[:10]
+                if start_date and d < start_date.strftime("%Y-%m-%d"):
+                    continue
+                if end_date and d > end_date.strftime("%Y-%m-%d"):
+                    continue
+                result.append({
+                    "user_id": item.get("user_id", ""),
+                    "event_date": d,
+                    "status": item.get("status", "active"),
+                    "schedule_id": item.get("schedule_id", ""),
+                })
+            except Exception:
+                continue
+        return result
+
     def get_user_participation_history_with_timestamp(self, user_id):
         """
         参加履歴をタイムスタンプ付きで取得（重複除外）
@@ -1775,13 +1811,10 @@ class DynamoDB:
         manual_points = self.get_manual_points(user_id)
 
         user_info = self.get_user_info(user_id)
-        print(f"[DBG] user_info={user_info}")
-
         birth_date_str = user_info.get("birth_date")
         gender = user_info.get("gender", "male")
 
         birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date() if birth_date_str else None
-        print(f"[DBG] calling get_point_multiplier birth={birth_date} gender={gender}")
         try:
             point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
         except Exception as e:

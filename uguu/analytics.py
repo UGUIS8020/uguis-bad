@@ -214,6 +214,159 @@ def analytics_retention():
     })
 
 
+@analytics.route("/admin/analytics/repeat_rate", methods=["GET"])
+@login_required
+def analytics_repeat_rate():
+    """
+    全体リピート率と月次継続率を返す
+    - 全体リピート率: 2回以上参加したメンバーの割合
+    - 月次継続率: 前月参加者が当月も参加した割合
+    """
+    if not getattr(current_user, "administrator", False):
+        abort(403)
+
+    today = datetime.now(tz=tz.gettz("Asia/Tokyo")).date()
+    # 全期間を対象に取得
+    all_start = date(2020, 1, 1)
+    rows = db.get_all_participations_with_timestamp(all_start, today) or []
+
+    # ユーザーごとの参加日セットを集計
+    user_dates = defaultdict(set)
+    monthly_users = defaultdict(set)
+
+    for r in rows:
+        try:
+            st = str(r.get("status", "active")).lower()
+            if st.startswith("cancel"):
+                continue
+            d = datetime.strptime(r["event_date"], "%Y-%m-%d").date()
+            uid = str(r["user_id"])
+            user_dates[uid].add(d)
+            monthly_users[d.strftime("%Y-%m")].add(uid)
+        except Exception:
+            continue
+
+    # 全体リピート率
+    total_users = len(user_dates)
+    repeat_users = sum(1 for dates in user_dates.values() if len(dates) >= 2)
+    overall_rate = round(repeat_users / total_users * 100, 1) if total_users else 0
+
+    # 月次継続率（前月→当月）
+    months_sorted = sorted(monthly_users.keys())
+    monthly_retention = []
+    for i in range(1, len(months_sorted)):
+        prev_m = months_sorted[i - 1]
+        cur_m  = months_sorted[i]
+        prev_set = monthly_users[prev_m]
+        cur_set  = monthly_users[cur_m]
+        retained = len(prev_set & cur_set)
+        rate = round(retained / len(prev_set) * 100, 1) if prev_set else None
+        monthly_retention.append({
+            "month": cur_m,
+            "prev_active": len(prev_set),
+            "retained": retained,
+            "rate": rate,
+        })
+
+    return jsonify({
+        "overall": {
+            "total_users": total_users,
+            "repeat_users": repeat_users,
+            "rate": overall_rate,
+        },
+        "monthly": monthly_retention,
+    })
+
+
+@analytics.route("/admin/analytics/member_health", methods=["GET"])
+@login_required
+def analytics_member_health():
+    """
+    離脱率・新規定着率・アクティブ率を返す
+    """
+    if not getattr(current_user, "administrator", False):
+        abort(403)
+
+    today = datetime.now(tz=tz.gettz("Asia/Tokyo")).date()
+    all_start = date(2020, 1, 1)
+    rows = db.get_all_participations_with_timestamp(all_start, today) or []
+
+    # ユーザーごとの参加日セット・月セットを集計
+    user_dates = defaultdict(set)   # user_id -> {date, ...}
+    monthly_users = defaultdict(set)  # "YYYY-MM" -> {user_id, ...}
+
+    for r in rows:
+        try:
+            st = str(r.get("status", "active")).lower()
+            if st.startswith("cancel"):
+                continue
+            d = datetime.strptime(r["event_date"], "%Y-%m-%d").date()
+            uid = str(r["user_id"])
+            user_dates[uid].add(d)
+            monthly_users[d.strftime("%Y-%m")].add(uid)
+        except Exception:
+            continue
+
+    three_months_ago = today - timedelta(days=90)
+
+    # --- 離脱率 ---
+    # 1回以上参加済みで、最終参加が3ヶ月以上前のユーザー
+    total_users   = len(user_dates)
+    churned_users = sum(
+        1 for dates in user_dates.values()
+        if max(dates) < three_months_ago
+    )
+    churn_rate = round(churned_users / total_users * 100, 1) if total_users else 0
+
+    # --- 新規定着率 ---
+    # 初参加から3回以上来たユーザーの割合
+    retained_new = sum(1 for dates in user_dates.values() if len(dates) >= 3)
+    retention_rate = round(retained_new / total_users * 100, 1) if total_users else 0
+
+    # --- アクティブ率 ---
+    # 直近3ヶ月以内に2回以上参加したユーザー / 全メンバー
+    active_users = sum(
+        1 for dates in user_dates.values()
+        if sum(1 for d in dates if d >= three_months_ago) >= 2
+    )
+    active_rate = round(active_users / total_users * 100, 1) if total_users else 0
+
+    # --- 月次データ（グラフ用）---
+    months_sorted = sorted(monthly_users.keys())
+    # 全ユーザーの初参加月を記録
+    user_first_month = {}
+    for uid, dates in user_dates.items():
+        first = min(dates).strftime("%Y-%m")
+        user_first_month[uid] = first
+
+    monthly_data = []
+    cumulative_users = set()
+    for m in months_sorted:
+        users_this_month = monthly_users[m]
+        cumulative_users |= users_this_month
+
+        # 新規（このサークル初参加）
+        new_this_month = sum(1 for uid in users_this_month if user_first_month.get(uid) == m)
+
+        # アクティブ率（累積ユーザー中の当月参加者）
+        act_rate = round(len(users_this_month) / len(cumulative_users) * 100, 1) if cumulative_users else 0
+
+        monthly_data.append({
+            "month": m,
+            "active_users": len(users_this_month),
+            "cumulative_users": len(cumulative_users),
+            "active_rate": act_rate,
+            "new_members": new_this_month,
+        })
+
+    return jsonify({
+        "churn":     {"rate": churn_rate,     "churned": churned_users,  "total": total_users},
+        "retention": {"rate": retention_rate, "retained": retained_new,  "total": total_users},
+        "active":    {"rate": active_rate,    "active": active_users,    "total": total_users},
+        "monthly":   monthly_data,
+    })
+
+
 @analytics.route("/admin/analytics/user/<user_id>/participation", methods=["GET"])
 @login_required
 def analytics_user_participation(user_id):
