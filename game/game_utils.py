@@ -334,8 +334,8 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 
     # ステップ④：極端な差のコートをコート内swapで補正
     def court_diff(match):
-        sa = sum(p.skill_score for p in match[0])
-        sb = sum(p.skill_score for p in match[1])
+        sa = sum(float(getattr(p, "conservative", 0.0)) for p in match[0])
+        sb = sum(float(getattr(p, "conservative", 0.0)) for p in match[1])
         return abs(sa - sb)
 
     if matches:
@@ -630,8 +630,8 @@ def generate_full_random_pairings(players, max_courts):
         matches.append([list(pairs[i]), list(pairs[i + 1])])
 
     def court_diff(match):
-        sa = sum(p.skill_score for p in match[0])
-        sb = sum(p.skill_score for p in match[1])
+        sa = sum(float(getattr(p, "conservative", 0.0)) for p in match[0])
+        sb = sum(float(getattr(p, "conservative", 0.0)) for p in match[1])
         return abs(sa - sb)
 
     swapped = False

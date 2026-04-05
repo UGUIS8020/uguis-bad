@@ -3306,6 +3306,19 @@ def clear_test_data():
     except Exception as e:
         current_app.logger.error(f"[clear_test_data] metaリセット失敗: {e}")
 
+    # 4. ペアリングログ全削除
+    try:
+        pairing_log_table = current_app.dynamodb.Table("bad-pairing-logs")
+        scan = pairing_log_table.scan(ProjectionExpression="match_id, #ts", ExpressionAttributeNames={"#ts": "timestamp"})
+        targets = scan.get("Items", [])
+        with pairing_log_table.batch_writer() as batch:
+            for item in targets:
+                batch.delete_item(Key={"match_id": item["match_id"], "timestamp": item["timestamp"]})
+        current_app.logger.info(f"[clear_test_data] bad-pairing-logs 削除: {len(targets)}件")
+        total_deleted += len(targets)
+    except Exception as e:
+        current_app.logger.error(f"[clear_test_data] pairing-logs削除失敗: {e}")
+
     current_app.logger.info(f"[clear_test_data] 合計削除: {total_deleted}件")
     flash(f'テストデータを削除しました（{total_deleted}件）', 'success')
     return redirect(url_for('index'))
