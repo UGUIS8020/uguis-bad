@@ -189,6 +189,14 @@
                     困ったときのボタン
                 </button>
             </form>
+
+            <!-- 前回スコア修正ボタン（idle時のみ） -->
+            {% if last_match_id_for_correction %}
+            <a href="{{ url_for('game.correct_last_score') }}"
+               class="btn btn-outline-secondary fw-bold px-4 py-2">
+                前回スコア修正
+            </a>
+            {% endif %}
         </div>
         {% endif %}
 
