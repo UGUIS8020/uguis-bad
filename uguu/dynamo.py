@@ -939,21 +939,27 @@ class DynamoDB:
                     if status == "cancelled":
                         cancelled_count += 1
 
+                    schedule_id = item.get("schedule_id") or ""
+                    # schedule_id があれば「同日別セッション」を別カウント
+                    # schedule_id がない（古いレコード）は日付のみで重複排除
+                    dedup_key = f"{event_date_str}#{schedule_id}" if schedule_id else event_date_str
+
                     new_rec = {
                         "event_date": event_date_str,
                         "registered_at_dt": registered_at,
                         "status": status,
                         "action": action,
                         "iso_source": iso_source,
+                        "schedule_id": schedule_id,
                     }
 
-                    if event_date_str not in date_records:
-                        date_records[event_date_str] = new_rec
+                    if dedup_key not in date_records:
+                        date_records[dedup_key] = new_rec
                         processed_count += 1
                     else:
-                        existing = date_records[event_date_str]
+                        existing = date_records[dedup_key]
                         if better_local(new_rec, existing):
-                            date_records[event_date_str] = new_rec
+                            date_records[dedup_key] = new_rec
 
                     # ここから下は詳細時のみ
                     if DEBUG_DETAIL:
@@ -973,6 +979,16 @@ class DynamoDB:
                         traceback.print_exc()
                     continue
 
+            # schedule_id ありのエントリが存在する日付を収集
+            # → その日付の schedule_idなし（古いレコード）エントリは除外する
+            dates_with_schedule_id = {
+                key.split("#")[0] for key in date_records if "#" in key
+            }
+            date_records = {
+                k: v for k, v in date_records.items()
+                if "#" in k or k not in dates_with_schedule_id
+            }
+
             # event_date順に整列
             records_all_raw = sorted(date_records.values(), key=lambda x: x["event_date"])
 
@@ -984,6 +1000,7 @@ class DynamoDB:
                     "event_date": r["event_date"],
                     "registered_at": r["registered_at_dt"].strftime("%Y-%m-%d %H:%M:%S"),
                     "status": r["status"],
+                    "schedule_id": r.get("schedule_id", ""),
                 }
                 for r in kept_raw
             ]
@@ -1897,9 +1914,17 @@ class DynamoDB:
         else:
             print(f"\n[DEBUG] 連続参加チェック（全スケジュール）")
 
+        # 連続参加は「日単位」で判定するため、同日複数スケジュールは1日1件に集約
+        seen_streak_dates: set = set()
+        all_schedules_for_streak = []
+        for s in all_schedules:
+            if s["date"] not in seen_streak_dates:
+                seen_streak_dates.add(s["date"])
+                all_schedules_for_streak.append(s)
+
         streak_points, current_streak_count, max_streak, current_streak_start = calc_streak_points(
             records_for_points=records_for_points,
-            all_schedules=all_schedules,
+            all_schedules=all_schedules_for_streak,
             rules=rules,
             point_multiplier=point_multiplier,
         )
