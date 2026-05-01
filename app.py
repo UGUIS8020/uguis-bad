@@ -1116,6 +1116,46 @@ def day_of_participants():
         return render_template("day_of_participants.html", participants=[], date="未定", location="未定")
 
 
+@app.route('/schedule/<string:schedule_id>/<string:date>')
+def schedule_detail(schedule_id, date):
+    """練習予定の個別ページ（URLシェア用）"""
+    try:
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        resp = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
+        schedule = resp.get('Item')
+        if not schedule:
+            flash('指定された練習予定が見つかりません。', 'warning')
+            return redirect(url_for('index'))
+
+        # 参加者情報（管理者のみ）
+        participants_info = []
+        if current_user.is_authenticated and current_user.administrator:
+            participants_info = get_participants_info(schedule)
+
+        # 参加状態
+        is_joined = current_user.is_authenticated and current_user.id in schedule.get('participants', [])
+        is_tara   = current_user.is_authenticated and current_user.id in schedule.get('tara_participants', [])
+
+        max_p = int(schedule.get('adjusted_max') or schedule.get('max_participants') or 0)
+        count = int(schedule.get('participants_count') or len(schedule.get('participants', [])))
+        is_full = count >= max_p
+
+        return render_template(
+            'schedule_detail.html',
+            schedule=schedule,
+            participants_info=participants_info,
+            is_joined=is_joined,
+            is_tara=is_tara,
+            is_full=is_full,
+            max_p=max_p,
+            count=count,
+        )
+    except Exception as e:
+        app.logger.error(f'[schedule_detail] error: {e}')
+        flash('ページの読み込みに失敗しました。', 'danger')
+        return redirect(url_for('index'))
+
+
 @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
 @login_required
 def join_schedule(schedule_id):

@@ -75,13 +75,12 @@
         <!-- ★ コメント入力欄を追加 -->
         <div class="mb-3">
             <label for="comment" class="form-label">コメント・注意書き</label>
-            <input type="text" 
-                   class="form-control" 
-                   id="comment" 
-                   name="comment" 
-                   maxlength="100" 
-                   placeholder="持ち物、注意事項など（100文字以内）"
-                   value="{{ schedule.get('comment', '') }}">
+            <textarea class="form-control"
+                      id="comment"
+                      name="comment"
+                      rows="3"
+                      maxlength="300"
+                      placeholder="持ち物、注意事項など">{{ schedule.get('comment', '') }}</textarea>
             <div class="form-text">参加者への連絡事項があれば入力してください</div>
         </div>
 

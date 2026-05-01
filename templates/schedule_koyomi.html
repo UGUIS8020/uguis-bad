@@ -233,10 +233,7 @@
                         <!-- イベント個別コメント・注意書き（中央揃え・暖色） -->
                         {% if schedule.comment %}
                             <div class="mb-2 text-center">
-                                <div class="fw-bold text-warning">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    {{ schedule.comment }}
-                                </div>
+                                <div class="fw-bold text-warning" style="white-space: pre-line;"><i class="fas fa-info-circle me-1"></i>{{ schedule.comment }}</div>
                             </div>
                         {% endif %}
                                     
@@ -338,6 +335,13 @@
                                         たら
                                     </button>
                                 {% endif %}
+
+                                <!-- 個別URLリンク -->
+                                <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
+                                   class="btn btn-sm btn-outline-secondary text-nowrap"
+                                   title="この練習のURLをシェア">
+                                  🔗
+                                </a>
                             </h2>
                             
                             {% if current_user.is_authenticated and current_user.administrator %}
