@@ -229,8 +229,8 @@
 
 
                     <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
-                    <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}"> 
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 px-2 pt-2">
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}" style="flex:1; min-width:0;">
 
                         {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %} 
                         

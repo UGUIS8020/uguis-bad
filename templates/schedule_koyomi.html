@@ -257,7 +257,7 @@
                                         style="width: auto; box-shadow: none; cursor: default;">
                                 {% endif %}
                                     
-                                <div class="d-flex align-items-center flex-nowrap w-100">
+                                <div class="d-flex align-items-center flex-wrap w-100" style="row-gap:6px; column-gap:4px;">
                                     <div class="d-flex align-items-center flex-grow-1">
                                         <span class="me-2">{{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                         {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
@@ -280,10 +280,10 @@
                                     </div>
                             
                                     
-                                    <!-- 時間と参加ボタン -->
-                                    
+                                    <!-- 操作ボタン群 -->
+                                    <div class="d-flex gap-1 align-items-center ms-auto flex-shrink-0">
                                         <button
-                                        class="btn btn-sm join-button m-1 text-nowrap                                          
+                                        class="btn btn-sm join-button text-nowrap                                          
                                         {% if not current_user.is_authenticated %}
                                             btn-secondary disabled
                                         {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
@@ -342,6 +342,7 @@
                                    title="この練習のURLをシェア">
                                   🔗
                                 </a>
+                                    </div>{# /操作ボタン群 #}
                             </h2>
                             
                             {% if current_user.is_authenticated and current_user.administrator %}
