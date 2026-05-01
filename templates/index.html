@@ -210,28 +210,29 @@
 
                     {% if schedule.comment %}
                     <div class="mb-2 text-center">
-                        <div class="fw-bold text-warning">
+                        <div class="fw-bold text-warning" style="white-space: pre-line;">
                         <i class="fas fa-info-circle me-1"></i>{{ schedule.comment }}
                         </div>
                     </div>
-                    {% endif %}
+                    {% endif %}  
 
-
-
-                               
-                                
-                                
-
-
-
+                    {% if schedule.team_id != 't000' %}
+                        <div class="d-flex align-items-center flex-wrap gap-2 px-3 pt-2">
+                            <span class="badge rounded-pill bg-dark text-white fw-bold" style="font-size: 1rem;">
+                                {{ schedule.team_name }}
+                            </span>
+                            <span class="text-muted small fw-bold">
+                                管理者：{{ schedule.display_name }}
+                            </span>
+                        </div>
+                    {% endif %}               
 
 
                     <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
                     <div class="d-flex align-items-center justify-content-between flex-nowrap gap-2 px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">                   
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}"> 
 
-
-                        {% if current_user.is_authenticated and current_user.administrator %}  
+                        {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %} 
                         
                         <button class="accordion-button collapsed py-2 px-2"
                                 type="button"
@@ -242,20 +243,23 @@
                                 style="box-shadow:none;">
                         <div class="d-flex w-100 align-items-center justify-content-between gap-2">
                             <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
-                            <span class="me-2">
+                            <span class="me-2">                                
+
                                 {{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                 {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
                                 {{ schedule.venue }}{{ schedule.court }}   
 
                             </div>
+                            
                             <div class="text-end">
-                            募集 {{ schedule.participants_count }}/{{ schedule.max_participants }}
-                            {% if schedule.participants_count >= schedule.max_participants %}
+                            募集 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
+                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
                                 <span class="badge bg-warning text-dark">満員御礼</span>
                             {% else %}
                                 <span class="badge bg-success">募集中</span>
                             {% endif %}
                             </div>
+
                         </div>
                         </button>
                         {% else %}
@@ -270,8 +274,8 @@
                             </span>
                             </div>
                             <div class="text-end">
-                            募集人数 {{ schedule.participants_count }}/{{ schedule.max_participants }}
-                            {% if schedule.participants_count >= schedule.max_participants %}
+                            募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
+                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
                                 <span class="badge bg-warning text-dark">満員御礼</span>
                             {% else %}
                                 <span class="badge bg-success">募集中</span>
@@ -289,7 +293,7 @@
                         class="btn btn-sm join-button text-nowrap
                             {% if not current_user.is_authenticated %}
                             btn-secondary
-                            {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
                             btn-secondary
                             {% elif current_user.id in schedule.participants %}
                             btn-danger
@@ -297,14 +301,14 @@
                             btn-primary
                             {% endif %}"
                         {% if not current_user.is_authenticated or
-                                (schedule.participants_count >= schedule.max_participants and
+                                (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and
                                 current_user.id not in schedule.participants) %}disabled{% endif %}
                         data-schedule-id="{{ schedule.schedule_id }}"
                         data-schedule-date="{{ schedule.date }}"
                         onclick="joinSchedule(this)">
                         {% if not current_user.is_authenticated %}
                             参加
-                        {% elif schedule.participants_count >= schedule.max_participants and current_user.id not in schedule.participants %}
+                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
                             満員御礼
                         {% elif current_user.id in schedule.participants %}
                             参加済
@@ -329,6 +333,13 @@
                         {% else %}
                         <button class="btn btn-sm text-nowrap btn-secondary" disabled>たら</button>
                         {% endif %}
+
+                        <!-- 個別URLコピー -->
+                        <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
+                           class="btn btn-sm btn-outline-secondary text-nowrap"
+                           title="この練習のURLをシェア">
+                          🔗
+                        </a>
                     </div>
                    
                     </div>
@@ -356,7 +367,8 @@
                             {% endif %}
                             {% endif %}
 
-                    {% if current_user.is_authenticated and current_user.administrator %}
+                    {# 判定：システム管理者、または、この予定のチーム管理者である場合 #}
+                    {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %}
                     <div id="collapse{{ schedule.schedule_id }}"
                         class="accordion-collapse collapse"
                         aria-labelledby="heading{{ schedule.schedule_id }}"
@@ -430,13 +442,26 @@
                         {% endif %}
                         </div>
 
-                        <div>
+                        <div class="mt-4 d-flex align-items-center justify-content-end gap-2 no-print border-top pt-3">
+    
+                        {# チーム管理者またはシステム管理者の場合のみ「編集」を表示 #}
+                        {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %}
+                            
+                            <a href="{{ url_for('schedule.edit_schedule', schedule_id=schedule.schedule_id) }}" 
+                            class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-pencil-square"></i> 編集
+                            </a>
+
+                        {% endif %}
+
+                        {# 印刷ボタンは共通で表示 #}
                         <button type="button"
-                                class="btn btn-sm btn-outline-secondary no-print"
+                                class="btn btn-sm btn-outline-secondary"
                                 onclick="printParticipantsTable('{{ schedule.date }}', 'participants-{{ schedule.schedule_id }}')">
-                        印刷
+                            <i class="bi bi-printer"></i> 印刷
                         </button>
-                        </div>
+                        
+                    </div>
                         
                     </div>
                     </div>
@@ -458,7 +483,7 @@
                             <div class="col-12 col-md-8 text-center">  
                                 <div>
                                     <h3>参加費</h3>
-                                    <p>初回1200円、2回目以降 1000円<br>                                        
+                                    <p>初回500円,2回目以降 1000円<br>                                        
                                     
                                 </div>
                                 <h3>練習場所</h3>

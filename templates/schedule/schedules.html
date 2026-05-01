@@ -86,8 +86,9 @@
     <div class="row justify-content-center"> <!-- 中央寄せを追加 -->
         <div class="col-10"> <!-- col-10から col-11 に変更してサイズを少し大きく -->
             <div class="card">
-                <div class="card-header py-2"> <!-- ヘッダーの余白を縮小 -->
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
                     <h3 class="card-title mb-0">全スケジュール一覧</h3>
+                    <a href="{{ url_for('schedule.deleted_schedules') }}" class="btn btn-sm btn-outline-danger">削除済み一覧</a>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-striped mb-0"> <!-- テーブルの下margin削除 -->

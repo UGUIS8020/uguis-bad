@@ -155,16 +155,6 @@
             <h3 class="text-success fw-bold mb-0">
                 本日の試合（{{ court_data|length }}面）
             </h3>
-            <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="input-group input-group-lg">
-                    <label class="input-group-text" for="score_format">試合点数</label>
-                    <select class="form-select form-select-lg" name="score_format" id="score_format" onchange="this.form.submit()">
-                        <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
-                        <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
-                    </select>
-                </div>
-            </form>
         </div>
     </div>
 
@@ -268,8 +258,8 @@
                 </div>
             </div>
         </div>
-        {% endif %}
-        {% endfor %}
+        {% endif %} 
+    {% endfor %} 
     {% else %}
         <div class="col-12">
             <div class="alert alert-warning">
@@ -278,6 +268,7 @@
         </div>
     {% endif %}
 </div>
+
 
     <!-- 試合終了ボタン -->
     <form method="POST" action="{{ url_for('game.finish_current_match') }}">
@@ -295,11 +286,9 @@
     </div>
 </div>
 
-
 <script>
   const TOTAL_COURTS = {{ match_courts | length }};
 </script>
-
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -398,6 +387,11 @@ document.addEventListener("DOMContentLoaded", function () {
         const text = await res.text();
         try {
           const data = JSON.parse(text);
+          // auto時: 他端末が先に終了済みの場合は正常扱いでリダイレクト
+          if (!res.ok && auto && res.status === 400) {
+            window.location.href = "/game/court";
+            return null;
+          }
           if (!res.ok) throw new Error(data.error || "試合終了に失敗しました");
           return data;
         } catch {
@@ -406,9 +400,10 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       })
       .then((data) => {
+        if (data === null) return;  // リダイレクト済み
         if (data && data.success) {
           window.location.href = "/game/court";
-          return;          
+          return;
         }
         finishInFlight = false;
         if (window._startPolling) window._startPolling();
@@ -417,7 +412,7 @@ document.addEventListener("DOMContentLoaded", function () {
         alert((data && data.error) || "試合終了に失敗しました");
       })
       .catch((err) => {
-        finishInFlight = false;  
+        finishInFlight = false;
         if (window._startPolling) window._startPolling();
         if (auto) finishTriggered = false;
         restoreEndButton();
@@ -431,15 +426,18 @@ document.addEventListener("DOMContentLoaded", function () {
     finishMatchAjax({ auto: true });
   }
 
-   // 管理者用：サーバーポーリングで完了検知
+  // 管理者用ポーリング
   {% if current_user.administrator %}
   let pollingTimer = null;
-
   function pollSubmissionStatus() {
     fetch(`/game/api/submission_status?match_id={{ match_id }}`)
       .then(r => r.json())
       .then(data => {
         console.log(`[poll] submitted=${data.submitted_count}/${TOTAL_COURTS}`);
+        if (!data.match_active) {
+          stopPolling();
+          return;
+        }
         if (data.submitted_count >= TOTAL_COURTS) {
           stopPolling();
           onAllSubmitted();
@@ -447,23 +445,14 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .catch(err => console.error("[poll] error:", err));
   }
-
   function startPolling() {
     if (pollingTimer) return;
     pollingTimer = setInterval(pollSubmissionStatus, 3000);
   }
-
   function stopPolling() {
-    if (pollingTimer) {
-      clearInterval(pollingTimer);
-      pollingTimer = null;
-    }
+    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
   }
-
-  // ページ読み込み時にポーリング開始
   startPolling();
-
-  // finishMatchAjax から参照できるように
   window._startPolling = startPolling;
   window._stopPolling = stopPolling;
   {% endif %}
@@ -526,7 +515,7 @@ document.addEventListener("DOMContentLoaded", function () {
           formStatus[formId].inFlight = false;
           submittedCount++;
 
-          // ↓ここを追加
+          // 管理者以外は送信後すぐにcourtへ移動
           {% if not current_user.administrator %}
             window.location.href = "/game/court";
             return;
@@ -536,15 +525,7 @@ document.addEventListener("DOMContentLoaded", function () {
             onAllSubmitted();
           } else {
             disableEndButton();
-          }
-        })
-
-          // 管理者は全コート完了で自動終了
-          if (submittedCount === TOTAL_COURTS) {
-            onAllSubmitted();
-          } else {
-            disableEndButton();
-          }
+          }          
         })
         .catch((error) => {
           formStatus[formId].inFlight = false;
@@ -563,10 +544,10 @@ document.addEventListener("DOMContentLoaded", function () {
     endButton.addEventListener("click", function (e) {
       e.preventDefault();
 
-      if (submittedCount !== TOTAL_COURTS) {  // ← totalForms から TOTAL_COURTS に変更
-        alert(`未送信のコートがあります（${submittedCount}/${TOTAL_COURTS}）`);
-        return;
-      }
+      if (submittedCount !== TOTAL_COURTS) {
+    alert(`未送信のコートがあります（${submittedCount}/${TOTAL_COURTS}）`);
+    return;
+  }
       if (finishInFlight) return;
       finishMatchAjax({ auto: false });
     });

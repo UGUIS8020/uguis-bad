@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}練習予定 {{ schedule.date | format_date }}{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 640px;">
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+
+      {# ── タイトル ── #}
+      <h4 class="fw-bold mb-1">
+        {{ schedule.date | format_date }}({{ schedule.day_of_week }})
+      </h4>
+      <p class="text-muted mb-3">
+        {{ schedule.start_time }} 〜 {{ schedule.end_time }}
+      </p>
+
+      {# ── コメント・お知らせ ── #}
+      {% if schedule.comment %}
+      <div class="alert alert-warning py-2 mb-3" style="white-space: pre-line;">{{ schedule.comment }}</div>
+      {% endif %}
+
+      {# ── 詳細情報 ── #}
+      <table class="table table-sm mb-3">
+        <tbody>
+          <tr>
+            <th class="text-muted fw-normal" style="width:6rem;">場所</th>
+            <td>{{ schedule.venue }}{% if schedule.court %} {{ schedule.court }}{% endif %}</td>
+          </tr>
+          {% if schedule.get('note') %}
+          <tr>
+            <th class="text-muted fw-normal">備考</th>
+            <td>{{ schedule.note }}</td>
+          </tr>
+          {% endif %}
+          <tr>
+            <th class="text-muted fw-normal">募集状況</th>
+            <td>
+              {{ count }} / {{ max_p }} 人
+              {% if is_full %}
+                <span class="badge bg-warning text-dark ms-1">満員御礼</span>
+              {% else %}
+                <span class="badge bg-success ms-1">募集中</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {# ── 参加ボタン ── #}
+      {% if current_user.is_authenticated %}
+        {% if is_joined %}
+          <button class="btn btn-danger w-100 mb-2 join-button"
+                  data-schedule-id="{{ schedule.schedule_id }}"
+                  data-schedule-date="{{ schedule.date }}"
+                  onclick="joinSchedule(this)">
+            参加済み（タップでキャンセル）
+          </button>
+        {% elif is_full %}
+          <button class="btn btn-secondary w-100 mb-2" disabled>満員御礼</button>
+        {% else %}
+          <button class="btn btn-primary w-100 mb-2 join-button"
+                  data-schedule-id="{{ schedule.schedule_id }}"
+                  data-schedule-date="{{ schedule.date }}"
+                  onclick="joinSchedule(this)">
+            参加する
+          </button>
+        {% endif %}
+
+        {# たら #}
+        <button class="btn w-100 mb-3 text-nowrap
+                  {% if is_tara %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                data-schedule-id="{{ schedule.schedule_id }}"
+                data-schedule-date="{{ schedule.date }}"
+                onclick="taraSchedule(this)">
+          {% if is_tara %}たら済み ✓{% else %}たら参加{% endif %}
+        </button>
+
+      {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-primary w-100 mb-2">
+          ログインして参加する
+        </a>
+        <a href="{{ url_for('temp_register') }}" class="btn btn-outline-secondary w-100 mb-3">
+          仮登録（初めての方）
+        </a>
+      {% endif %}
+
+      {# ── URLコピー ── #}
+      <div class="input-group mb-3">
+        <input type="text" class="form-control form-control-sm text-muted"
+               id="shareUrl" readonly
+               value="{{ request.url }}">
+        <button class="btn btn-outline-secondary btn-sm" onclick="copyUrl()">
+          コピー
+        </button>
+      </div>
+      <p class="text-muted small text-center">このURLをLINEなどで共有できます</p>
+
+      {# ── 参加者一覧（管理者のみ） ── #}
+      {% if current_user.is_authenticated and current_user.administrator and participants_info %}
+      <hr>
+      <p class="text-muted small mb-2">参加予定 ({{ count }}人)</p>
+      <div class="d-flex flex-wrap gap-2">
+        {% for p in participants_info %}
+        <div class="text-center" style="width:48px;">
+          <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+               alt="{{ p.display_name }}"
+               width="40" height="40"
+               class="rounded-circle border"
+               style="object-fit:cover;"
+               onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+          <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
+            {{ p.display_name }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+  <div class="text-center mt-3 d-flex justify-content-center align-items-center gap-3">
+    <a href="{{ url_for('index') }}" class="btn btn-link text-muted">← 練習予定一覧へ</a>
+    {% if current_user.is_authenticated and (current_user.administrator or current_user.role == 'admin') %}
+    <a href="{{ url_for('schedule.edit_schedule', schedule_id=schedule.schedule_id) }}"
+       class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-pencil-square"></i> 編集
+    </a>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+function copyUrl() {
+  const el = document.getElementById('shareUrl');
+  navigator.clipboard.writeText(el.value).then(() => {
+    const btn = el.nextElementSibling;
+    btn.textContent = 'コピー完了 ✓';
+    btn.classList.replace('btn-outline-secondary', 'btn-success');
+    setTimeout(() => {
+      btn.textContent = 'コピー';
+      btn.classList.replace('btn-success', 'btn-outline-secondary');
+    }, 2000);
+  });
+}
+</script>
+{% endblock %}

@@ -11,6 +11,7 @@ from typing import Optional
 from decimal import Decimal
 from trueskill import Rating, rate
 from typing import Optional, List
+import copy
 
 # 環境設定
 env = TrueSkill(draw_probability=0.0)  # 引き分けなし
@@ -103,13 +104,6 @@ def finish_match_meta(match_id: str):
             return False
         raise
 
-def normalize_user_pk(uid: str) -> str:
-    if uid is None:
-        raise ValueError("uid is None")
-    s = str(uid).strip()
-    if not s:
-        raise ValueError("uid is empty")
-    return s if s.startswith("user#") else f"user#{s}"
 
 def update_trueskill_for_players_and_return_updates(result_item):
     """
@@ -325,6 +319,8 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
 ]:
     """
     プレイヤー一覧からペアをランダムに作成し、スキルバランスが取れた試合を組む。
+    ただしdiffが閾値(20)以上のコートがあれば、そのコート内で
+    全4通りの交換を試して最善の1交換を採用する。
     """
     # ステップ①：まずランダムにペアを作る
     pairs, waiting_players = generate_random_pairs(players)
@@ -335,6 +331,38 @@ def generate_balanced_pairs_and_matches(players: List[Player], max_courts: int) 
     # ステップ③：使われなかったペアのメンバーも待機者として追加
     for pair in unused_pairs:
         waiting_players.extend(pair)
+
+    # ステップ④：極端な差のコートをコート内swapで補正
+    def court_diff(match):
+        sa = sum(float(getattr(p, "conservative", 0.0)) for p in match[0])
+        sb = sum(float(getattr(p, "conservative", 0.0)) for p in match[1])
+        return abs(sa - sb)
+
+    if matches:
+        logger = logging.getLogger(__name__)
+        for idx in range(len(matches)):
+            diff_before = court_diff(matches[idx])
+            if diff_before >= FULL_RANDOM_SWAP_THRESHOLD:
+                logger.info(
+                    "[random] C%d diff=%.1f >= %d, trying in-court swap",
+                    idx + 1, diff_before, FULL_RANDOM_SWAP_THRESHOLD
+                )
+                best_match = [list(matches[idx][0]), list(matches[idx][1])]
+                best_diff = diff_before
+                for wi in range(2):
+                    for oi in range(2):
+                        trial = [list(matches[idx][0]), list(matches[idx][1])]
+                        trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                        d = court_diff(trial)
+                        if d < best_diff:
+                            best_diff = d
+                            best_match = [list(trial[0]), list(trial[1])]
+                matches[idx] = best_match
+                logger.info(
+                    "[random] C%d after swap: diff=%.1f -> %.1f",
+                    idx + 1, diff_before, best_diff
+                )
+        pairs = [team for match in matches for team in match]
 
     return pairs, matches, waiting_players
 
@@ -425,21 +453,48 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
 #     return matches, unused_pairs
 
 
+#スキル優先でペアリングされて強いペアが余ってしまう。旧コードはペアの重複を避けるための工夫が足りなかったため、以下の新コードではまず必要な人数分をランダムに選び、その中でスキルバランスを取る方式に変更しました。
+# def generate_matches_by_pair_skill_balance(pairs, max_courts):
+#     # スキル合計でソート
+#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+#     scored.sort(key=lambda x: x[1])
+
+#     matches = []    
+#     for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+#         matches.append((scored[i][0], scored[i+1][0]))
+    
+#     used_count = len(matches) * 2
+#     unused_pairs = [p[0] for p in scored[used_count:]]
+    
+#     return matches, unused_pairs
+
+
+#ペアの重複を避けるための新コード。
+
 def generate_matches_by_pair_skill_balance(pairs, max_courts):
-    # スキル合計でソート
-    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
+    """
+    ペアからスキルが近い同士でマッチを組む。
+    余りが出る場合はランダムに選出する（強いペアが毎回余るのを防ぐ）。
+    """
+    num_courts = min(max_courts, len(pairs) // 2)
+    needed = num_courts * 2
+
+    if len(pairs) <= needed:
+        selected = pairs[:]
+        unused_pairs = []
+    else:
+        shuffled = pairs[:]
+        random.shuffle(shuffled)
+        selected = shuffled[:needed]
+        unused_pairs = shuffled[needed:]
+
+    scored = [(pair, pair_strength(pair[0], pair[1])) for pair in selected]
     scored.sort(key=lambda x: x[1])
 
     matches = []
-    # シンプルに、実力が近い隣り合わせのペア同士で試合を組む
-    # こうすることで、極端に強いペアは、次に強いペアと当たりやすくなる
-    for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
+    for i in range(0, len(scored) - 1, 2):
         matches.append((scored[i][0], scored[i+1][0]))
 
-    # 余ったペアを待機リストへ
-    used_count = len(matches) * 2
-    unused_pairs = [p[0] for p in scored[used_count:]]
-    
     return matches, unused_pairs
 
 
@@ -521,6 +576,97 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
             best_waiting = current_waiting
 
     return best_matches, best_waiting
+
+
+# def generate_full_random_pairings(players, max_courts):
+#     """
+#     ペアも対戦相手も完全ランダムで決定する。
+#     スキルスコアを一切考慮しない。
+#     """
+#     import random
+
+#     shuffled = players.copy()
+#     random.shuffle(shuffled)
+
+#     num_courts = min(max_courts, len(shuffled) // 4)
+#     active = shuffled[:num_courts * 4]
+#     additional_waiting = shuffled[num_courts * 4:]
+
+#     pairs = []
+#     for i in range(0, len(active), 2):
+#         pairs.append((active[i], active[i + 1]))
+
+#     matches = []
+#     for i in range(0, len(pairs), 2):
+#         matches.append((pairs[i], pairs[i + 1]))
+
+#     return pairs, matches, additional_waiting
+
+
+FULL_RANDOM_SWAP_THRESHOLD = 20
+
+def generate_full_random_pairings(players, max_courts):
+    """
+    ペアも対戦相手も完全ランダムで決定する。
+    ただしdiffが閾値(20)以上のコートがあれば、そのコート内で
+    全4通りの交換を試して最善の1交換を採用する。
+    """
+    import random
+    import copy
+
+    shuffled = players.copy()
+    random.shuffle(shuffled)
+
+    num_courts = min(max_courts, len(shuffled) // 4)
+    active = shuffled[:num_courts * 4]
+    additional_waiting = shuffled[num_courts * 4:]
+
+    pairs = []
+    for i in range(0, len(active), 2):
+        pairs.append([active[i], active[i + 1]])
+
+    matches = []
+    for i in range(0, len(pairs), 2):
+        matches.append([list(pairs[i]), list(pairs[i + 1])])
+
+    def court_diff(match):
+        sa = sum(float(getattr(p, "conservative", 0.0)) for p in match[0])
+        sb = sum(float(getattr(p, "conservative", 0.0)) for p in match[1])
+        return abs(sa - sb)
+
+    swapped = False
+    for idx in range(len(matches)):
+        diff_before = court_diff(matches[idx])
+        if diff_before >= FULL_RANDOM_SWAP_THRESHOLD:
+            current_app.logger.info(
+                "[full_random] C%d diff=%.1f >= %d, trying in-court swap",
+                idx + 1, diff_before, FULL_RANDOM_SWAP_THRESHOLD
+            )
+            best_match = copy.deepcopy(matches[idx])
+            best_diff = diff_before
+            for wi in range(2):
+                for oi in range(2):
+                    trial = copy.deepcopy(matches[idx])
+                    trial[0][wi], trial[1][oi] = trial[1][oi], trial[0][wi]
+                    d = court_diff(trial)
+                    if d < best_diff:
+                        best_diff = d
+                        best_match = trial
+            matches[idx] = best_match
+            swapped = True
+            current_app.logger.info(
+                "[full_random] C%d after swap: diff=%.1f -> %.1f",
+                idx + 1, diff_before, best_diff
+            )
+
+    if not swapped:
+        worst_diff = max(court_diff(m) for m in matches)
+        current_app.logger.info(
+            "[full_random] diff=%.1f < threshold, no swap", worst_diff
+        )
+
+    pairs = [team for match in matches for team in match]
+    return pairs, matches, additional_waiting
 
 
 # =========================================================

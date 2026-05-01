@@ -164,19 +164,32 @@ body {
                     <a class="nav-link" href="{{ url_for('uguis2026_tournament') }}">鶯杯2026</a>
                 </li>
 
-                {% if current_user.is_authenticated and current_user.administrator %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('user_maintenance') }}">登録者</a>
-                </li>    
+                {% if current_user.is_authenticated %}
+    
+                {# 1. 練習予定（システム管理者 または チーム管理者） #}
+                {% if current_user.administrator or current_user.role == 'admin' %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('schedule.admin_schedules') }}">練習予定</a>
                 </li>
+                {% endif %}
+
+                {# 2. 登録者（システム管理者のみ） #}
+                {% if current_user.administrator %}
                 <li class="nav-item">
-                  <a class="nav-link" href="{{ url_for('analytics.analytics_dashboard', user_id=current_user.id) }}">
-                    分析
-                  </a>
+                    <a class="nav-link" href="{{ url_for('user_maintenance') }}">登録者</a>
                 </li>
-                {% endif %}                
+                {% endif %}
+
+                {# 3. 分析（システム管理者のみ） #}
+                {% if current_user.administrator %}
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('analytics.analytics_dashboard', user_id=current_user.id) }}">
+                        分析
+                    </a>
+                </li>
+                {% endif %}
+
+            {% endif %}            
             </ul>
 
             {% if current_user.is_authenticated and current_user.administrator %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width: 700px;">
+  <h4 class="mb-3">前回試合スコア修正</h4>
+  <p class="text-muted small">試合ID: {{ match_id }}</p>
+
+  {% if not results %}
+    <div class="alert alert-warning">前回試合のスコアデータが見つかりません。</div>
+    <a href="{{ url_for('game.court') }}" class="btn btn-secondary">戻る</a>
+  {% else %}
+  <form method="POST" action="{{ url_for('game.correct_last_score') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {% for result in results %}
+    <div class="card mb-3">
+      <div class="card-header fw-bold">コート {{ result.court_number }}</div>
+      <div class="card-body">
+        <div class="row text-center mb-2">
+          <div class="col-5">
+            <div class="fw-bold text-primary">Aチーム</div>
+            {% for p in result.team_a %}
+              <div class="small">{{ p.display_name }}</div>
+            {% endfor %}
+            <div class="text-muted small">{{ result.team1_score }}点</div>
+          </div>
+          <div class="col-2 d-flex align-items-center justify-content-center text-muted">vs</div>
+          <div class="col-5">
+            <div class="fw-bold text-danger">Bチーム</div>
+            {% for p in result.team_b %}
+              <div class="small">{{ p.display_name }}</div>
+            {% endfor %}
+            <div class="text-muted small">{{ result.team2_score }}点</div>
+          </div>
+        </div>
+
+        <hr class="my-2">
+        <div class="row align-items-center justify-content-center g-2 mb-2">
+          <div class="col-auto">
+            <label class="form-label small mb-0 text-primary fw-bold">Aチーム点数</label>
+            <input type="number" class="form-control form-control-sm text-center" style="width:70px"
+                   name="score_a_{{ result.court_number }}"
+                   value="{{ result.team1_score }}" min="0" max="99">
+          </div>
+          <div class="col-auto pt-3 fw-bold text-muted">-</div>
+          <div class="col-auto">
+            <label class="form-label small mb-0 text-danger fw-bold">Bチーム点数</label>
+            <input type="number" class="form-control form-control-sm text-center" style="width:70px"
+                   name="score_b_{{ result.court_number }}"
+                   value="{{ result.team2_score }}" min="0" max="99">
+          </div>
+        </div>
+        <div class="d-flex justify-content-center gap-4">
+          <div class="form-check">
+            <input class="form-check-input" type="radio"
+                   name="winner_{{ result.court_number }}"
+                   id="winner_A_{{ result.court_number }}"
+                   value="A"
+                   {{ 'checked' if result.winner == 'A' }}>
+            <label class="form-check-label text-primary fw-bold" for="winner_A_{{ result.court_number }}">
+              Aチーム勝利
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio"
+                   name="winner_{{ result.court_number }}"
+                   id="winner_B_{{ result.court_number }}"
+                   value="B"
+                   {{ 'checked' if result.winner == 'B' }}>
+            <label class="form-check-label text-danger fw-bold" for="winner_B_{{ result.court_number }}">
+              Bチーム勝利
+            </label>
+          </div>
+        </div>
+        {% if result.get('corrected') %}
+        <div class="text-center mt-1"><span class="badge bg-warning text-dark">修正済み</span></div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-warning fw-bold"
+              onclick="return confirm('スコアを修正してスキルスコアを再計算します。よろしいですか？')">
+        修正して再計算
+      </button>
+      <a href="{{ url_for('game.court') }}" class="btn btn-secondary">キャンセル</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

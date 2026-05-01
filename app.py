@@ -555,7 +555,7 @@ class User(UserMixin):
     def __init__(self, user_id, display_name, user_name, furigana, email, password_hash,
                  gender, date_of_birth, post_code, address, phone, guardian_name, emergency_phone, badminton_experience,
                  organization='other', administrator=False, 
-                 created_at=None, updated_at=None, profile_image_url=None):
+                 created_at=None, updated_at=None, profile_image_url=None, role=None, team_id=None):
         super().__init__()
         self.id = user_id
         self.user_id = user_id  
@@ -577,7 +577,8 @@ class User(UserMixin):
         self.created_at = created_at or datetime.now().isoformat()        
         self.updated_at = updated_at or datetime.now().isoformat()
         self.profile_image_url = profile_image_url
-
+        self.role = role
+        self.team_id = team_id
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)  # _password_hashを使用
 
@@ -613,7 +614,9 @@ class User(UserMixin):
             administrator=bool(get_value('administrator', False)),
             created_at=get_value('created_at'),
             updated_at=get_value('updated_at'),
-            profile_image_url=get_value('profile_image_url')
+            profile_image_url=get_value('profile_image_url'),
+            role=get_value('role'),
+            team_id=get_value('team_id')
         )
 
     def to_dynamodb_item(self):
@@ -626,97 +629,6 @@ class User(UserMixin):
             item['date_of_birth'] = {"S": str(self.date_of_birth)}
         
         return item
-        
-
-# @cache.memoize(timeout=600)
-# def get_participants_info(schedule):     
-#     participants_info = []
-
-#     try:
-#         user_table = app.dynamodb.Table(app.table_name)
-
-#         if 'participants' in schedule and schedule['participants']:            
-#             for participant_id in schedule['participants']:
-#                 try:
-#                     response = user_table.scan(
-#                         FilterExpression='contains(#uid, :pid)',
-#                         ExpressionAttributeNames={'#uid': 'user#user_id'},
-#                         ExpressionAttributeValues={':pid': participant_id}
-#                     )
-#                     if response.get('Items'):
-#                         user = response['Items'][0]                        
-                        
-#                         raw_score = user.get('skill_score')
-#                         if isinstance(raw_score, Decimal):
-#                             skill_score = int(raw_score)
-#                         elif isinstance(raw_score, (int, float)):
-#                             skill_score = int(raw_score)
-#                         else:
-#                             skill_score = None
-
-#                         participants_info.append({                            
-#                             'user_id': user.get('user#user_id'),
-#                             'display_name': user.get('display_name', '名前なし'),
-#                             'skill_score': skill_score
-#                         })
-#                     else:
-#                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
-#                 except Exception as e:
-#                     app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
-
-#     except Exception as e:
-#         app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
-
-#     return participants_info
-
-
-# 緊急修正版: scanをget_itemに変更
-# @cache.memoize(timeout=600)
-# def get_participants_info(schedule):     
-#     participants_info = []
-
-#     try:
-#         user_table = app.dynamodb.Table(app.table_name)
-
-#         if 'participants' in schedule and schedule['participants']:            
-#             for participant_id in schedule['participants']:
-#                 try:
-#                     # scanを削除してget_itemに変更
-#                     response = user_table.get_item(
-#                         Key={'user#user_id': participant_id}
-#                     )
-                    
-#                     if 'Item' in response:
-#                         user = response['Item']                        
-                        
-#                         raw_score = user.get('skill_score')
-#                         if isinstance(raw_score, Decimal):
-#                             skill_score = int(raw_score)
-#                         elif isinstance(raw_score, (int, float)):
-#                             skill_score = int(raw_score)
-#                         else:
-#                             skill_score = None
-
-#                         # 参加回数（practice_count）を取得
-#                         raw_practice = user.get('practice_count')
-#                         join_count = int(raw_practice) if isinstance(raw_practice, (Decimal, int, float)) else None
-
-#                         participants_info.append({                            
-#                             'user_id': user.get('user#user_id'),
-#                             'display_name': user.get('display_name', '名前なし'),
-#                             'skill_score': skill_score,
-#                             'join_count': join_count
-#                         })
-#                     else:
-#                         logger.warning(f"[参加者ID: {participant_id}] ユーザーが見つかりませんでした。")
-#                 except Exception as e:
-#                     app.logger.error(f"参加者情報の取得中にエラー（ID: {participant_id}）: {str(e)}")
-
-#     except Exception as e:
-#         app.logger.error(f"参加者情報の全体取得中にエラー: {str(e)}")
-
-#     return participants_info
-
 
 def get_participants_info(schedule):
     participants_info = []
@@ -865,157 +777,7 @@ def format_date(value, fmt='%m/%d'):
 @app.route('/schedules')
 def get_schedules():
     schedules = get_schedules_with_formatting()
-    return jsonify(schedules)     
-
-# @app.route("/", methods=['GET'])
-# @app.route("/index", methods=['GET'])
-# def index():
-#     try:
-#         start_time = time.time()
-        
-#         # 軽量なスケジュール情報のみ取得
-#         schedules = get_schedules_with_formatting()
-
-#         # DynamoDB ユーザーテーブル
-#         user_table = current_app.dynamodb.Table(app.table_name)
-
-#         db_access_count = 0  # DynamoDBアクセス回数をカウント
-#         total_users = 0  # 取得したユーザー数
-        
-#         for schedule in schedules:
-#             # --- 参加者 ---
-#             participants_info = []
-#             raw_participants = schedule.get("participants", [])
-#             user_ids = []
-
-#             # 参加者IDの抽出（複数形式に対応）
-#             for item in raw_participants:
-#                 if isinstance(item, dict) and "S" in item:
-#                     user_ids.append(item["S"])
-#                 elif isinstance(item, dict) and "user_id" in item:
-#                     user_ids.append(item["user_id"])
-#                 elif isinstance(item, str):
-#                     user_ids.append(item)
-
-#             # ユーザー詳細を取得
-#             db_start = time.time()
-#             for uid in user_ids:
-#                 try:
-#                     res = user_table.get_item(Key={"user#user_id": uid})
-#                     db_access_count += 1  # アクセスカウント
-#                     user = res.get("Item")
-#                     if not user:
-#                         continue
-
-#                     total_users += 1
-
-#                     # 画像URLは複数候補からフォールバック
-#                     url = (user.get("profile_image_url")
-#                            or user.get("profileImageUrl")
-#                            or user.get("large_image_url")
-#                            or "")
-#                     url = url.strip() if isinstance(url, str) else None
-
-#                     raw_practice = user.get("practice_count")
-#                     try:
-#                         join_count = int(raw_practice) if raw_practice is not None else 0
-#                     except (ValueError, TypeError):
-#                         join_count = 0
-
-#                     participants_info.append({
-#                         "user_id": user["user#user_id"],
-#                         "display_name": user.get("display_name", "不明"),
-#                         "profile_image_url": url if url and url.lower() != "none" else None,
-#                         "is_admin": bool(user.get("administrator")),
-#                         "join_count": join_count,
-#                     })
-#                 except Exception as e:
-#                     logger.error(f"参加者取得エラー ({uid}): {e}")
-#                     pass
-
-#             # 管理者を先頭にソート
-#             participants_info.sort(
-#                 key=lambda x: (not x.get("is_admin", False), (x.get("join_count") or 0), x.get("display_name",""))
-#             )
-#             schedule["participants_info"] = participants_info
-
-#             # --- たら参加者 ---
-#             tara_participants_info = []
-#             raw_tara = schedule.get("tara_participants", [])
-#             tara_ids = []
-
-#             for item in raw_tara:
-#                 if isinstance(item, dict) and "S" in item:
-#                     tara_ids.append(item["S"])
-#                 elif isinstance(item, dict) and "user_id" in item:
-#                     tara_ids.append(item["user_id"])
-#                 elif isinstance(item, str):
-#                     tara_ids.append(item)
-
-#             for uid in tara_ids:
-#                 try:
-#                     res = user_table.get_item(Key={"user#user_id": uid})
-#                     db_access_count += 1  # アクセスカウント
-#                     user = res.get("Item")
-#                     if not user:
-#                         continue
-
-#                     total_users += 1
-
-#                     url = (user.get("profile_image_url")
-#                            or user.get("profileImageUrl")
-#                            or user.get("large_image_url")
-#                            or "")
-#                     url = url.strip() if isinstance(url, str) else None
-
-#                     tara_participants_info.append({
-#                         "user_id": user["user#user_id"],
-#                         "display_name": user.get("display_name", "不明"),
-#                         "profile_image_url": url if url and url.lower() != "none" else None,
-#                         "is_admin": bool(user.get("administrator")),
-#                     })
-#                 except Exception as e:
-#                     logger.error(f"たら参加者取得エラー ({uid}): {e}")
-#                     pass
-
-#             tara_participants_info.sort(key=lambda x: not x.get("is_admin", False))
-#             schedule["tara_participants_info"] = tara_participants_info
-#             schedule["tara_participants"] = tara_ids
-#             schedule["tara_count"] = len(tara_ids)
-
-#         total_time = time.time() - start_time
-        
-#         # ★ パフォーマンスログ（旧方式）
-#         logger.info(f"[index:旧方式] DynamoDBアクセス回数: {db_access_count}回")
-#         logger.info(f"[index:旧方式] 取得ユーザー数: {total_users}人")
-#         logger.info(f"[index:旧方式] 合計処理時間: {total_time:.3f}秒")
-#         logger.info(f"[index:旧方式] 平均アクセス時間: {(total_time/db_access_count):.3f}秒/回" if db_access_count > 0 else "[index:旧方式] アクセスなし")
-
-#         # トップ画像
-#         image_files = [
-#             'images/top001.jpg',
-#             'images/top002.jpg',  # ★ typo修正
-#             'images/top003.jpg',
-#             'images/top004.jpg',
-#             'images/top005.jpg'
-#         ]
-#         selected_image = random.choice(image_files)
-
-#         return render_template(
-#             "index.html",
-#             schedules=schedules,
-#             selected_image=selected_image,
-#             canonical=url_for('index', _external=True)
-#         )
-
-#     except Exception as e:
-#         logger.error(f"[index] スケジュール取得エラー: {e}")
-#         flash('スケジュールの取得中にエラーが発生しました', 'error')
-#         return render_template(
-#             "index.html",
-#             schedules=[],
-#             selected_image='images/default.jpg'
-#         )
+    return jsonify(schedules)  
 
 
 @app.route("/", methods=["GET"])
@@ -1153,10 +915,13 @@ def index():
                     continue
 
                 participants_info.append({
-                    "user_id": user.get("user#user_id"),  # 値はUUID
+                    "user_id": user.get("user#user_id"),
                     "display_name": user.get("display_name", "不明"),
                     "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
+                    "role": user.get("role"),        # ★ 追加：ロール情報を取得
+                    "team_id": user.get("team_id"),  # ★ 追加：所属チームIDを取得
+                    "organization": user.get("organization"), # ★ 追加：組織名（鶯など）を取得
                     "join_count": _to_int(user.get("practice_count"), 0),
                 })           
 
@@ -1297,7 +1062,11 @@ def schedule_koyomi(year=None, month=None):
                         'is_today': d_obj == today_obj,
                         'is_other_month': False,
                         'schedules': day_schedules,
-                        'has_schedule': len(day_schedules) > 0
+                        'has_schedule': len(day_schedules) > 0,
+                        'has_full_schedule': all(
+                            s.get('participants_count', 0) >= (s.get('adjusted_max') or s.get('max_participants', 10))
+                            for s in day_schedules
+                        ) if day_schedules else False
                     })
             calendar_data.append(week_data)
 
@@ -1345,6 +1114,46 @@ def day_of_participants():
         logger.error(f"[day_of_participants] エラー: {e}")
         flash("参加者情報の取得中にエラーが発生しました", "danger")
         return render_template("day_of_participants.html", participants=[], date="未定", location="未定")
+
+
+@app.route('/schedule/<string:schedule_id>/<string:date>')
+def schedule_detail(schedule_id, date):
+    """練習予定の個別ページ（URLシェア用）"""
+    try:
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        resp = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
+        schedule = resp.get('Item')
+        if not schedule:
+            flash('指定された練習予定が見つかりません。', 'warning')
+            return redirect(url_for('index'))
+
+        # 参加者情報（管理者のみ）
+        participants_info = []
+        if current_user.is_authenticated and current_user.administrator:
+            participants_info = get_participants_info(schedule)
+
+        # 参加状態
+        is_joined = current_user.is_authenticated and current_user.id in schedule.get('participants', [])
+        is_tara   = current_user.is_authenticated and current_user.id in schedule.get('tara_participants', [])
+
+        max_p = int(schedule.get('adjusted_max') or schedule.get('max_participants') or 0)
+        count = int(schedule.get('participants_count') or len(schedule.get('participants', [])))
+        is_full = count >= max_p
+
+        return render_template(
+            'schedule_detail.html',
+            schedule=schedule,
+            participants_info=participants_info,
+            is_joined=is_joined,
+            is_tara=is_tara,
+            is_full=is_full,
+            max_p=max_p,
+            count=count,
+        )
+    except Exception as e:
+        app.logger.error(f'[schedule_detail] error: {e}')
+        flash('ページの読み込みに失敗しました。', 'danger')
+        return redirect(url_for('index'))
 
 
 @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
@@ -1412,6 +1221,12 @@ def join_schedule(schedule_id):
 
         # 参加登録（正式参加）
         else:
+            max_participants = int(schedule.get('max_participants') or 15)
+            adjusted_max = schedule.get('adjusted_max')
+            effective_max = int(adjusted_max) if adjusted_max else max_participants
+            if len(participants) >= effective_max:
+                return jsonify({'status': 'error', 'message': '満員のため参加できません。'}), 400
+
             participants.append(user_id)
             message = "参加登録が完了しました！"
             is_joining = True
@@ -1841,9 +1656,8 @@ def login():
                 }
             )
 
-            print(f"Query response: {response}")
             items = response.get('Items', [])
-            print(f"Items found: {len(items)}")
+            app.logger.debug(f"Login query: {len(items)} item(s) found")
             
             items = response.get('Items', [])
             user_data = items[0] if items else None
@@ -2522,8 +2336,7 @@ def remove_participant_from_date():
             ReturnValues="UPDATED_NEW"
         )
         
-        print(f"DynamoDB更新完了: {update_response}")
-        print(f"削除成功: {user_id_to_remove} を {schedule_id} から削除")
+        app.logger.info(f"参加者削除完了: schedule_id={schedule_id}")
         
         return jsonify({
             "success": True, 
@@ -3181,6 +2994,7 @@ def show_routes():
         output.append(line)
     
     return '<br>'.join(sorted(output))
+
 
 @app.route('/schedule/<string:schedule_id>/participant/<string:user_id>/remove', methods=['POST'])
 @login_required

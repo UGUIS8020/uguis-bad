@@ -18,110 +18,93 @@ def init_app(app, db, cache):
     # ここでapp, db, cacheに依存する初期化を行う
     pass
 
+def leader_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 1. ログインしているか（current_userが有効か）
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        
+        # 2. 管理者(administrator=True) または roleがstaffなら許可
+        # getattrを使うことで、属性が存在しない場合でもエラーにならず安全に判定できます
+        is_admin = getattr(current_user, 'administrator', False)
+        is_staff = getattr(current_user, 'role', '') == 'staff'
+        
+        if not (is_admin or is_staff):
+            # 権限がない場合は403エラーを出すか、メッセージを出してリダイレクト
+            flash('リーダーまたは管理者権限が必要です', 'danger')
+            return redirect(url_for('main.index')) # メインページなどへ
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 @bp.route("/admin/schedules", methods=['GET', 'POST'])
 @login_required
 def admin_schedules():
-    logger.info("🔐 スケジュール管理ページにアクセス")
+    logger.info("スケジュール管理ページにアクセス")
     
-    if not current_user.administrator:
-        flash('管理者権限が必要です', 'warning')
+    # --- 1. 権限チェックの修正 ---
+    # システム管理者（True）でもなく、かつ ロールも admin でない場合は追い返す
+    if not current_user.administrator and current_user.role != 'admin':
+        flash('この機能を利用する権限がありません', 'warning')
         return redirect(url_for('index'))
 
     form = ScheduleForm()
-    logger.debug(f"📝 フォーム初期化: {form}")
-
-    # ★★★ 緊急追加: POSTリクエストの場合のログ出力 ★★★
-    if request.method == 'POST':
-        print("=" * 60)  # print を使って確実に出力
-        print("🚨 緊急デバッグ: POSTリクエスト受信")
-        print(f"📋 フォームデータ: {dict(request.form)}")
-        print(f"🔍 court フィールド: '{request.form.get('court')}'")
-        print(f"🔍 venue フィールド: '{request.form.get('venue')}'")
-        print(f"🔍 date フィールド: '{request.form.get('date')}'")
-        
-        # フォームエラーを事前チェック
-        form_valid = form.validate()
-        print(f"🔍 form.validate(): {form_valid}")
-        
-        if not form_valid:
-            print("❌ フォームエラー:")
-            for field, errors in form.errors.items():
-                print(f"   {field}: {errors}")
-        
-        # courtフィールドが存在するかチェック
-        if hasattr(form, 'court'):
-            print(f"courtフィールド存在: {form.court}")
-            print(f"courtフィールド値: '{form.court.data}'")
-            print(f"courtフィールド選択肢: {form.court.choices}")
-        else:
-            print("❌ courtフィールドが存在しません！")
-        
-        print("=" * 60)
-
+    
     if form.validate_on_submit():
         logger.info("フォームバリデーション成功")
         try:
             schedule_table = get_schedule_table()
-            if not schedule_table:
-                raise ValueError("Schedule table is not initialized")
-
             schedule_id = str(uuid.uuid4())
 
-            # ★ court フィールドの安全な取得
-            court_value = ''
-            if hasattr(form, 'court') and form.court.data:
-                court_value = form.court.data
-            else:
-                # court フィールドがない場合のフォールバック
-                court_value = request.form.get('court', 'unknown')
-            comment_value = request.form.get('comment', '').strip()
-
+            # --- 2. 保存データに team_id を追加 ---
             schedule_data = {
                 'schedule_id': schedule_id,
+                'team_id': current_user.team_id, 
+                'display_name': current_user.display_name,
                 'date': form.date.data.isoformat(),
                 'day_of_week': form.day_of_week.data,
                 'venue': form.venue.data,
-                'court': form.court.data,   # ★ 安全に取得
+                'court': form.court.data,
                 'start_time': form.start_time.data,
                 'end_time': form.end_time.data,
                 'max_participants': form.max_participants.data,
-                'comment': comment_value,
+                'comment': request.form.get('comment', '').strip(),
                 'created_at': datetime.now().isoformat(),
                 'participants_count': 0,
                 'status': form.status.data
             }
 
-            logger.info(f"🗂️ 登録データ: {schedule_data}")
-            print(f"🗂️ 登録データ: {schedule_data}")  # print でも出力
-
             schedule_table.put_item(Item=schedule_data)
-            logger.info(f"スケジュール登録成功（ID: {schedule_id}）")
-            print(f"スケジュール登録成功（ID: {schedule_id}）")
             flash('スケジュールが登録されました', 'success')
             return redirect(url_for('schedule.admin_schedules'))
 
         except Exception as e:
             logger.exception("❌ スケジュール登録時にエラー発生")
-            print(f"❌ スケジュール登録時にエラー発生: {e}")
             flash('スケジュールの登録中にエラーが発生しました', 'error')
-    else:
-        if request.method == 'POST':
-            logger.debug("⚠️ フォームバリデーション失敗")
-            print("⚠️ フォームバリデーション失敗")
-            for field, errors in form.errors.items():
-                logger.debug(f"❌ {field}: {errors}")
-                print(f"❌ {field}: {errors}")
 
+    # --- 3. 表示データの取得とフィルタリング ---
     try:
         schedule_table = get_schedule_table()
         response = schedule_table.scan()
         all_schedules = response.get('Items', [])
 
-        logger.info(f"スケジュール取得件数: {len(all_schedules)} 件")
+        # 権限に応じて表示するデータを分ける
+        if current_user.administrator:
+            # 渋谷さん（システム管理者）は全部見れる
+            filtered_schedules = all_schedules
+        else:
+            # チーム管理者は自分の team_id の予定だけ
+            filtered_schedules = [
+                s for s in all_schedules 
+                if s.get('team_id') == current_user.team_id
+            ]
 
+        # 削除済みを除外して日付順に並び替え
+        active_schedules = [s for s in filtered_schedules if s.get('status') != 'deleted']
         schedules = sorted(
-            all_schedules,
+            active_schedules,
             key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d').date()
         )
 
@@ -136,11 +119,41 @@ def admin_schedules():
         return redirect(url_for('index'))
 
 
+@bp.route("/admin/schedules/deleted", methods=['GET'])
+@login_required
+def deleted_schedules():
+    if not current_user.administrator and current_user.role != 'admin':
+        flash('この機能を利用する権限がありません', 'warning')
+        return redirect(url_for('index'))
+
+    try:
+        schedule_table = get_schedule_table()
+        response = schedule_table.scan()
+        all_schedules = response.get('Items', [])
+
+        if current_user.administrator:
+            filtered = all_schedules
+        else:
+            filtered = [s for s in all_schedules if s.get('team_id') == current_user.team_id]
+
+        deleted = [s for s in filtered if s.get('status') == 'deleted']
+        schedules = sorted(deleted, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d').date(), reverse=True)
+
+        return render_template("schedule/deleted_schedules.html", schedules=schedules)
+
+    except Exception as e:
+        logger.exception("❌ 削除済みスケジュールの取得中にエラー発生")
+        flash('スケジュールの取得中にエラーが発生しました', 'error')
+        return redirect(url_for('schedule.admin_schedules'))
+
+
 @bp.route("/edit_schedule/<schedule_id>", methods=['GET', 'POST'])
 @login_required
 def edit_schedule(schedule_id):
-    if not current_user.administrator:
-        flash('管理者権限が必要です', 'warning')
+    # --- 1. アクセス権限のチェック ---
+    # システム管理者でもなく、チーム管理者でもない場合は追い返す
+    if not current_user.administrator and current_user.role != 'admin':
+        flash('編集権限が必要です', 'warning')
         return redirect(url_for('index'))
 
     logging.debug(f"Fetching schedule for ID: {schedule_id}")
@@ -148,71 +161,83 @@ def edit_schedule(schedule_id):
     table = get_schedule_table()
 
     try:
-        # スケジュールの取得（スキャンではなくGetItemを使用）
-        schedule = None
+        # スケジュールの取得
         schedules = table.query(
             KeyConditionExpression='schedule_id = :sid',
-            ExpressionAttributeValues={
-                ':sid': schedule_id
-            }
+            ExpressionAttributeValues={':sid': schedule_id}
         ).get('Items', [])
         
-        if schedules:
-            schedule = schedules[0]
-        else:
+        if not schedules:
             flash('スケジュールが見つかりません', 'error')
             return redirect(url_for('index'))
         
+        schedule = schedules[0]
+
+        # --- 2. チーム管理者の場合、自分のチームの予定かチェック ---
+        # システム管理者（渋谷さん）はスルー、チーム管理者はID一致を必須に
+        if not current_user.administrator:
+            if schedule.get('team_id') != current_user.team_id:
+                flash('他チームの予定を編集することはできません', 'danger')
+                return redirect(url_for('schedule.admin_schedules'))
+
         if request.method == 'GET':
+            # 日付の初期値をセット
             form.date.data = datetime.strptime(schedule['date'], '%Y-%m-%d').date()
-            form.day_of_week.data = schedule['day_of_week']
-            form.venue.data = schedule['venue']
-            form.start_time.data = schedule['start_time']
-            form.end_time.data = schedule['end_time']
+            
+            # --- ここから追記：会場や時間をセットして「空欄」を防ぐ ---
+            form.venue.data = schedule.get('venue', '')           # 会場
+            form.court.data = schedule.get('court', '')           # コート
+            form.start_time.data = schedule.get('start_time', '') # 開始時間
+            form.end_time.data = schedule.get('end_time', '')     # 終了時間
+            form.max_participants.data = int(schedule.get('max_participants', 10))
+            form.day_of_week.data = schedule.get('day_of_week', '')
             form.status.data = schedule.get('status', 'active')
-            form.max_participants.data = schedule.get('max_participants', 10)
-            # ★ コメントの初期値設定を追加
+            
+            # 備考（もしフォームに項目があれば）
             if hasattr(form, 'comment'):
                 form.comment.data = schedule.get('comment', '')
             
         elif request.method == 'POST':
-            print("=" * 60)  # デバッグ用
-            print("🚨 編集画面POSTリクエスト受信")
-            print(f"📋 フォームデータ: {dict(request.form)}")
-            print(f"🔍 comment フィールド: '{request.form.get('comment')}'")
-            print("=" * 60)
-            
             if form.validate_on_submit():
                 try:
-                    # 参加者数のチェック
-                    current_participants = schedule.get('participants', [])
-                    if len(current_participants) > form.max_participants.data:
-                        flash('参加人数制限は現在の参加者数より少なく設定できません。', 'error')
-                        return render_template(
-                            'schedule/edit_schedule.html',
-                            form=form,
-                            schedule=schedule,
-                            schedule_id=schedule_id
-                        )
+                    # （中略：バリデーションと更新処理...）
 
-                    # ★ コメントの取得
-                    comment_value = ''
-                    if hasattr(form, 'comment') and form.comment.data:
-                        comment_value = form.comment.data.strip()
+                    new_date = form.date.data.strftime('%Y-%m-%d')
+                    old_date = schedule['date']
+
+                    adjusted_max_raw = request.form.get('adjusted_max', '').strip()
+                    adjusted_max = int(adjusted_max_raw) if adjusted_max_raw else None
+
+                    new_item = {
+                        'schedule_id': schedule_id,
+                        'date': new_date,
+                        'day_of_week': form.day_of_week.data,
+                        'venue': form.venue.data,
+                        'start_time': form.start_time.data,
+                        'end_time': form.end_time.data,
+                        'max_participants': form.max_participants.data,
+                        'status': form.status.data,
+                        'comment': request.form.get('comment', ''),
+                        'updated_at': datetime.now().isoformat(),
+                        'updated_by': current_user.display_name,
+                        'team_id': schedule.get('team_id', ''),
+                        'created_at': schedule.get('created_at', ''),
+                    }
+                    if adjusted_max is not None:
+                        new_item['adjusted_max'] = adjusted_max
+
+                    if new_date != old_date:
+                        # 日付が変わった場合：古いアイテム削除 → 新規作成
+                        table.delete_item(Key={'schedule_id': schedule_id, 'date': old_date})
+                        table.put_item(Item=new_item)
                     else:
-                        # フォームにcommentフィールドがない場合の安全な取得
-                        comment_value = request.form.get('comment', '').strip()
-
-                    # UpdateItemを使用して特定のフィールドを更新（コメントを追加）
-                    table.update_item(
-                        Key={
-                            'schedule_id': schedule_id,
-                            'date': schedule['date']  # DynamoDBのプライマリーキー
-                        },
-                        UpdateExpression="SET day_of_week = :dow, venue = :v, start_time = :st, "
-                                       "end_time = :et, max_participants = :mp, "
-                                       "updated_at = :ua, #status = :s, #comment = :c",  # ★ commentを追加
-                        ExpressionAttributeValues={
+                        # 日付が変わらない場合：通常のupdate
+                        update_expr = (
+                            "SET day_of_week=:dow, venue=:v, start_time=:st, "
+                            "end_time=:et, max_participants=:mp, "
+                            "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an"
+                        )
+                        expr_values = {
                             ':dow': form.day_of_week.data,
                             ':v': form.venue.data,
                             ':st': form.start_time.data,
@@ -220,17 +245,28 @@ def edit_schedule(schedule_id):
                             ':mp': form.max_participants.data,
                             ':ua': datetime.now().isoformat(),
                             ':s': form.status.data,
-                            ':c': comment_value  # ★ コメント値を追加
-                        },
-                        ExpressionAttributeNames={
-                            '#status': 'status',  # statusは予約語なので別名を使用
-                            '#comment': 'comment'  # ★ commentも予約語なので別名を追加
+                            ':c': request.form.get('comment', ''),
+                            ':an': current_user.display_name,
                         }
-                    )                    
+                        if adjusted_max is not None:
+                            update_expr += ", adjusted_max=:am"
+                            expr_values[':am'] = adjusted_max
+                        else:
+                            update_expr += " REMOVE adjusted_max"
+
+                        table.update_item(
+                            Key={'schedule_id': schedule_id, 'date': old_date},
+                            UpdateExpression=update_expr,
+                            ExpressionAttributeNames={
+                                '#status': 'status',
+                                '#comment': 'comment'
+                            },
+                            ExpressionAttributeValues=expr_values,
+                        )
                     
-                    print(f"スケジュール更新成功（ID: {schedule_id}）")
                     flash('スケジュールを更新しました', 'success')
-                    return redirect(url_for('index'))
+                    # 編集後は一覧画面（admin_schedules）に戻るのが親切です
+                    return redirect(url_for('schedule.admin_schedules'))
                     
                 except ClientError as e:
                     print(f"❌ DynamoDB更新エラー: {e}")
@@ -261,7 +297,7 @@ def edit_schedule(schedule_id):
 def delete_schedule(schedule_id):    
     from flask import current_app
     
-    if not current_user.administrator:
+    if not current_user.administrator and current_user.role != 'admin':
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'success': False, 'message': '管理者権限が必要です'})
         flash('管理者権限が必要です', 'warning')

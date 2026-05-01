@@ -108,7 +108,7 @@
         display: flex;
         gap: 2rem;
         align-items: flex-start;
-        margin-bottom: 2rem;
+        margin-bottom: 0.5rem;
     }
     
     @media (max-width: 768px) {
@@ -137,40 +137,7 @@
     }
 </style>
 
-<!-- プロフィール画像（本人はクリックで編集ページへ） -->
-<div class="profile-avatar-container text-center">
-  {% if current_user.is_authenticated and current_user.id == plain_user_id %}
-    <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}"
-       class="profile-avatar-link" aria-label="プロフィール画像を変更">
-      <span class="profile-avatar">
-        <img
-          src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-          alt="{{ user.display_name }}さんのプロフィール画像"
-          loading="lazy" decoding="async"
-          onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-      </span>
-      <span class="camera-icon" aria-hidden="true">
-        <i class="fas fa-camera"></i>
-      </span>
-    </a>
-  {% else %}
-    <span class="profile-avatar">
-      <img
-        src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-        alt="{{ user.display_name }}さんのプロフィール画像"
-        loading="lazy" decoding="async"
-        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-    </span>
-  {% endif %}  
-</div>
-
-<!-- 名前を表示 -->
-<div class="profile-name" style="text-align: center; font-size: 1.5rem; margin-top: 1rem; font-weight: 600;">
-  {{ user.display_name }}
-</div>
-  
-
-        <style>
+<style>
 
         .profile-name {
         text-align: center;
@@ -296,52 +263,105 @@
         }
         </style>
 
-                
-                <!-- 本人の場合：編集ボタン -->
+                <!-- プロフィール画像（本人はクリックで編集ページへ） -->
+                <div class="profile-avatar-container text-center">
+                  {% if current_user.is_authenticated and current_user.id == plain_user_id %}
+                    <a href="{{ url_for('profile_image_edit', user_id=user['user#user_id']) }}"
+                      class="profile-avatar-link" aria-label="プロフィール画像を変更">
+                      <span class="profile-avatar">
+                        <img
+                          src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                          alt="{{ user.display_name }}さんのプロフィール画像"
+                          loading="lazy" decoding="async"
+                          onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                      </span>
+                      <span class="camera-icon" aria-hidden="true">
+                        <i class="fas fa-camera"></i>
+                      </span>
+                    </a>
+                  {% else %}
+                    <span class="profile-avatar">
+                      <img
+                        src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                        alt="{{ user.display_name }}さんのプロフィール画像"
+                        loading="lazy" decoding="async"
+                        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                    </span>
+                  {% endif %}  
+                </div>
+
+                <!-- 名前を表示 -->
+                <div class="profile-name" style="text-align: center; font-size: 1.5rem; margin-top: 0.2rem; margin-bottom: 0; font-weight: 600;">
+                  {{ user.display_name }}
+                </div>
+
+                  <div class="profile-info" style="display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 1rem; color: #666; margin-top: 0;">
+                    
+                    {% if user.role == 'super' or user.role == 'admin' %}
+                      <span class="role-badge" style="padding: 2px 8px; background-color: #ffd700; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: #333; white-space: nowrap;">
+                        {% if user.role == 'super' %}
+                          管理者
+                        {% else %}
+                          所属チーム
+                        {% endif %}
+                      </span>
+                    {% endif %}
+
+                    {% if user.organization %}
+                      <span class="org-name" style="font-weight: 500;">
+                        {{ user.organization }}
+                      </span>
+                    {% endif %}
+                  </div>        
+
                 {% if current_user.is_authenticated and current_user.id == plain_user_id %}
                 <div class="text-center">
-                    <div class="profile-actions">
+                    <div class="profile-actions mt-2">
+                        <a href="{{ url_for('users.my_stats') }}" 
+                          class="btn btn-outline-primary btn-sm d-block mb-2">
+                            <i class="fas fa-chart-line me-1"></i>マイ成績
+                        </a>
                         <a href="{{ url_for('account', user_id=user['user#user_id']) }}" 
-                        class="btn btn-outline-secondary btn-sm d-block mb-3">
+                          class="btn btn-outline-secondary btn-sm d-block mb-2">
                             <i class="fas fa-edit me-1"></i>プロフィールを編集
                         </a>
                         <a href="{{ url_for('logout') }}" 
-                        class="btn btn-outline-danger btn-sm d-block"
-                        onclick="return confirm('ログアウトしますか？')">
+                          class="btn btn-outline-danger btn-sm d-block"
+                          onclick="return confirm('ログアウトしますか？')">
                             <i class="fas fa-sign-out-alt me-1"></i>
                             ログアウト
                         </a>
                     </div>
                 </div>
-                {% else %}
-                <!-- 他人の場合：フォローボタン（将来実装） -->
-                <button class="btn btn-primary btn-sm" disabled>
-                    <i class="fas fa-user-plus me-1"></i>フォロー
-                </button>
-                {% endif %}
-            </div>           
+                {% endif %}                    
             
             <p class="card-text mt-3 text-center">
-          <strong class="d-block mb-2">戦闘力</strong>
+              <strong class="d-block mb-2">戦闘力</strong>
 
-          {% set is_me = (current_user.is_authenticated and current_user.id == plain_user_id) %}
+              {# 今ログインしている人が管理者（adminかsuper）かどうかを変数に入れる #}
+              {% set is_manager = current_user.is_authenticated and (current_user.role == 'admin' or current_user.role == 'super') %}
 
-          <span id="skill-badge-profile"
-                class="badge {% if skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} editable-badge fs-4 fw-bold d-inline-block"
-                {% if is_me %}
-                  onclick="editSkillScore('{{ user['user#user_id'] }}', '{{ user['user#user_id'] }}')"
-                  title="クリックして編集"
-                  style="cursor: pointer; padding: 0.6em 1em;"
-                {% else %}
-                  style="padding: 0.6em 1em;"
-                {% endif %}>
-            {% if skill_score is not none %}
-             {{ (skill_score|float)|round(2) }}
-            {% else %}
-              未設定
-            {% endif %}
-          </span>
-        </p>
+              <span id="skill-badge-profile"
+                    class="badge {% if skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} 
+                          {% if is_manager %}editable-badge{% endif %} 
+                          fs-4 fw-bold d-inline-block"
+                    
+                    {# 管理者の場合のみクリックイベントとカーソル変更を付与 #}
+                    {% if is_manager %}
+                      onclick="editSkillScore('{{ user['user#user_id'] }}', '{{ user['user#user_id'] }}')"
+                      title="クリックして戦闘力を編集"
+                      style="cursor: pointer; padding: 0.6em 1em;"
+                    {% else %}
+                      style="padding: 0.6em 1em;"
+                    {% endif %}>
+
+                  {% if skill_score is not none %}
+                      {{ (skill_score|float)|round(2) }}
+                  {% else %}
+                      未設定
+                  {% endif %}
+              </span>
+            </p>
 
 
             
@@ -486,9 +506,7 @@
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>ポイント支払い履歴</span>
-    <small class="text-muted">
-      直近 {{ point_spends|length }} 件 / 合計 {{ point_total_spent_recent|default(0) }}P
-    </small>
+    <small class="text-muted">直近5件 / 合計 {{ point_total_spent_recent|default(0) }}P</small>
   </div>
 
   <div class="table-responsive">
@@ -496,10 +514,10 @@
       
       {% for tx in point_spends %}
         <tr>
-          <td>             
-            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}          
+          <td>
+            {{ (tx.event_date or tx.created_at) | format_date('%Y年%m月%d日') }}
           </td>
-          <td class="fw-bold">-{{ tx.amount }}P</td>          
+          <td class="fw-bold">-{{ tx.amount }}P</td>
         </tr>
       {% else %}
         <tr>
@@ -509,6 +527,13 @@
       </tbody>
     </table>
   </div>
+  {% if point_spends_total > 5 %}
+  <div class="card-footer text-center">
+    <a href="{{ url_for('users.point_spends_list', user_id=plain_user_id) }}" class="text-decoration-none">
+      すべての履歴を見る（全{{ point_spends_total }}件）
+    </a>
+  </div>
+  {% endif %}
 </div>
 <!-- ▲ポイント支払い履歴（直近） -->
 
@@ -650,6 +675,15 @@
 {% if current_user.is_authenticated and current_user.administrator %}
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
+    <span>管理者メニュー</span>
+    <a href="{{ url_for('account', user_id=plain_user_id) }}" class="btn btn-sm btn-outline-primary">
+      <i class="fas fa-user-edit me-1"></i>アカウント更新
+    </a>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
     <span>管理者：ポイント付与</span>
     <small class="text-muted">60日ルールもここで延長されます</small>
   </div>
@@ -709,7 +743,7 @@
 <div class="card mt-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <strong>参加日一覧（管理者のみ）</strong>
-    <span class="text-muted small">件数: {{ admin_participation_dates|length }}</span>
+    <span class="text-muted small">件数: {{ admin_participation_dates|length }}
   </div>
   <div class="card-body">
     <ul class="list-unstyled mb-0" style="font-size: 1.2rem; line-height: 1.9;">

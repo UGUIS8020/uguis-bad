@@ -27,7 +27,13 @@ def get_schedule_table():
         return table
     except Exception as e:
         logger.error(f"Error getting schedule table: {e}")
-        raise    
+        raise 
+
+TEAM_MAP = {
+    't000': '鶯',
+    't001': 'はねふわ',
+    't999': 'かわせみバド倶楽部'
+}   
 
 def get_schedules_with_formatting():
     """スケジュール一覧を取得してフォーマットする（最適化版）"""
@@ -59,8 +65,13 @@ def get_schedules_with_formatting():
                 # 軽量化: 参加者の詳細情報は取得せず、カウントのみ
                 participants = schedule.get('participants', [])
                 
+                # ★ team_idを取得
+                tid = schedule.get('team_id', 't000')
+                
                 formatted_schedule = {
                     'schedule_id': schedule.get('schedule_id'),
+                    'team_id': schedule.get('team_id') or 't000',
+                    'team_name': TEAM_MAP.get(tid, '未設定'),
                     'title': schedule.get('title'),
                     'date': schedule.get('date'),
                     'day_of_week': schedule.get('day_of_week'),
@@ -70,13 +81,16 @@ def get_schedules_with_formatting():
                     'venue': schedule.get('venue', ''),            
                     'court': schedule.get('court', ''),          
                     'max_participants': int(schedule.get('max_participants', 10)),
+                    'adjusted_max': int(schedule['adjusted_max']) if schedule.get('adjusted_max') else None,
                     'participants_count': len(participants),
                     'participants': participants,  # IDのみ保持
                     'status': schedule.get('status', 'active'),
                     'description': schedule.get('description', ''),
                     'comment': schedule.get('comment', ''),
                     'tara_participants': schedule.get('tara_participants', []),
-                    'tara_count': len(schedule.get('tara_participants', []))
+                    'tara_count': len(schedule.get('tara_participants', [])),
+                    'display_name': schedule.get('display_name', '管理者'),
+                    
                 }
                 
                 formatted_schedules.append(formatted_schedule)
@@ -125,7 +139,11 @@ def get_schedules_with_formatting_all():
                 'participants_count': len(schedule.get('participants', [])),
                 'participants': schedule.get('participants', []),
                 'status': schedule.get('status', 'active'),
-                'description': schedule.get('description', '')
+                'description': schedule.get('description', ''),
+                'comment': schedule.get('comment', ''),
+                'tara_participants': schedule.get('tara_participants', []),
+                'tara_count': len(schedule.get('tara_participants', [])),
+                'display_name': schedule.get('display_name', '管理者'),
             })
 
         return formatted_schedules

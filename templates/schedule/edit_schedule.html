@@ -43,6 +43,25 @@
             </div>
         </div>
 
+        <!-- 人数調整 -->
+        {% set current_count = schedule.participants|length %}
+        {% set is_full = current_count >= schedule.get('max_participants', 15) %}
+        <div class="mb-3">
+            <label for="adjusted_max" class="form-label">
+                人数調整（目標人数）
+                {% if is_full %}<span class="badge bg-warning text-dark ms-1">満員御礼中</span>{% endif %}
+            </label>
+            <input type="number" class="form-control" id="adjusted_max" name="adjusted_max"
+                   min="1" max="{{ schedule.get('max_participants', 15) }}"
+                   value="{{ schedule.get('adjusted_max', '') }}"
+                   placeholder="設定しない場合は空白のまま">
+            <div class="form-text">
+                満員御礼状態でキャンセルを待ちながら目標人数まで絞りたい場合に設定します。<br>
+                設定すると、参加者数がこの人数 <strong>未満</strong> になるまで満員御礼が維持されます。<br>
+                解除するには空白にして更新してください。
+            </div>
+        </div>
+
         <div class="mb-3">
             <label for="start_time">開始時間</label>
             {{ form.start_time(class="form-control", required=true) }}
@@ -56,13 +75,12 @@
         <!-- ★ コメント入力欄を追加 -->
         <div class="mb-3">
             <label for="comment" class="form-label">コメント・注意書き</label>
-            <input type="text" 
-                   class="form-control" 
-                   id="comment" 
-                   name="comment" 
-                   maxlength="100" 
-                   placeholder="持ち物、注意事項など（100文字以内）"
-                   value="{{ schedule.get('comment', '') }}">
+            <textarea class="form-control"
+                      id="comment"
+                      name="comment"
+                      rows="3"
+                      maxlength="300"
+                      placeholder="持ち物、注意事項など">{{ schedule.get('comment', '') }}</textarea>
             <div class="form-text">参加者への連絡事項があれば入力してください</div>
         </div>
 
@@ -84,12 +102,16 @@
             {% endif %}
         </div>
 
-        <div class="btn-group">
-            <button type="submit" class="btn btn-primary">更新</button>        
-            <a href="{{ url_for('index') }}" class="btn btn-secondary">戻る</a>
+        <div class="container mt-4">
+            <h2>スケジュール編集</h2>
+            <form method="post">
+                {{ form.csrf_token }}
+
+                <div class="btn-group">
+                    <button type="submit" class="btn btn-primary">更新</button>
+                </div>
+            </form>
         </div>
-    </form>
-</div>
 
 <!-- 削除機能を追加 -->
 <hr class="mt-4 mb-4">
@@ -119,7 +141,13 @@
                 </div>
             </div>
             
-            <button type="button" class="btn btn-danger" onclick="confirmDelete()">削除する</button>
+            <form action="{{ url_for('schedule.delete_schedule', schedule_id=schedule_id) }}" method="post" id="deleteForm">
+                {{ form.csrf_token }}
+                
+                <input type="hidden" name="date" value="{{ schedule.date }}">
+                
+                <button type="button" class="btn btn-danger" onclick="confirmDelete()">削除する</button>
+            </form>
         </form>
     </div>
 </div>

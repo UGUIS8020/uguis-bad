@@ -1,10 +1,9 @@
-from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app
+from flask import Blueprint, render_template, flash, redirect, url_for, jsonify, request, current_app, abort
 from flask_login import login_required, current_user
 from datetime import datetime
 import os
 import boto3
 from typing import Any, cast
-from game.game_utils import normalize_user_pk
 
 users = Blueprint('users', __name__)
 
@@ -95,6 +94,7 @@ def user_profile(user_id):
         # 3. 参加履歴・ポイント履歴取得
         raw_history = db.get_user_participation_history_with_timestamp(user_id) or []
         point_spends = db.list_point_spends(user_id, limit=1000) or []
+        point_spends_preview = point_spends[:5]
 
         # 4. 統計計算（旧ルール計算結果を取得）
         user_stats = db.get_user_stats(user_id, raw_history=raw_history, spends=point_spends) or {}
@@ -213,7 +213,8 @@ def user_profile(user_id):
             admin_participation_dates=admin_participation_dates,
             days_until_reset=60 - days_since_last if not is_expired else 0, # 残り日数表示用
             upcoming_schedules=db.get_upcoming_schedules(),
-            point_spends=point_spends,
+            point_spends=point_spends_preview,
+            point_spends_total=len(point_spends),
             point_total_spent_recent=point_total_spent_recent,
             skill_score=skill_score,
             points_info=points_info,
@@ -227,6 +228,37 @@ def user_profile(user_id):
         return redirect(url_for('index'))
     
     
+@users.route('/user/<user_id>/point_spends')
+@login_required
+def point_spends_list(user_id):
+    """ポイント支払い履歴 全件ページ（20件ずつページネーション）"""
+    if not (current_user.administrator or current_user.id == user_id):
+        abort(403)
+
+    PAGE_SIZE = 20
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+
+    all_spends = db.list_point_spends(user_id, limit=1000) or []
+    total = len(all_spends)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(page, total_pages)
+    spends = all_spends[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+
+    user = db.get_user_by_id(user_id) or {}
+    return render_template(
+        'uguu/point_spends_list.html',
+        user=user,
+        plain_user_id=user_id,
+        spends=spends,
+        total=total,
+        page=page,
+        total_pages=total_pages,
+    )
+
+
 @users.route('/point-participation', methods=['POST'])
 @login_required
 def point_participation():
@@ -286,6 +318,169 @@ def point_participation():
         print(f"[ERROR] ポイント支払いエラー: {e}")
         import traceback; traceback.print_exc()
         return jsonify({'error': '内部エラー'}), 500
+    
+
+@users.route('/my_stats')
+@login_required
+def my_stats():
+    my_uid = current_user.user_id
+    current_app.logger.info("[my_stats] my_uid=%s", my_uid)
+
+    # アクセス日時を bad-users に記録
+    try:
+        from datetime import datetime, timezone
+        users_table = current_app.dynamodb.Table("bad-users")
+        users_table.update_item(
+            Key={"user#user_id": my_uid},
+            UpdateExpression="SET last_visited_my_stats = :ts",
+            ExpressionAttributeValues={":ts": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+        )
+    except Exception:
+        current_app.logger.exception("[my_stats] last_visited_my_stats 更新失敗")
+
+    # bad-game-results を全スキャン（自分が含まれるレコードのみ）
+    results_table = current_app.dynamodb.Table("bad-game-results")
+    all_items = []
+    kwargs = {}
+    while True:
+        resp = results_table.scan(**kwargs)
+        all_items.extend(resp.get("Items", []))
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            break
+        kwargs["ExclusiveStartKey"] = lek
+
+    # Pythonで自分が含まれるレコードだけ絞り込む
+    def contains_me(team):
+        if not isinstance(team, list):
+            return False
+        return any(
+            isinstance(p, dict) and p.get("user_id") == my_uid
+            for p in team
+        )
+
+    items = [r for r in all_items if contains_me(r.get("team_a")) or contains_me(r.get("team_b"))]
+    current_app.logger.info("[my_stats] 全件=%d 自分含む=%d", len(all_items), len(items))
+    if items:
+        sample = items[0]
+        current_app.logger.info("[my_stats] サンプル team_a type=%s value=%s",
+                                type(sample.get("team_a")).__name__,
+                                sample.get("team_a"))
+        current_app.logger.info("[my_stats] サンプル team_b type=%s value=%s",
+                                type(sample.get("team_b")).__name__,
+                                sample.get("team_b"))
+    else:
+        # 件数0の場合、contains なしで1件だけ取ってフォーマット確認
+        probe = results_table.scan(Limit=1)
+        probe_items = probe.get("Items", [])
+        if probe_items:
+            p = probe_items[0]
+            current_app.logger.info("[my_stats] probe team_a type=%s value=%s",
+                                    type(p.get("team_a")).__name__,
+                                    p.get("team_a"))
+            current_app.logger.info("[my_stats] probe team_b type=%s value=%s",
+                                    type(p.get("team_b")).__name__,
+                                    p.get("team_b"))
+
+    # match_id + court_number でソート
+    items.sort(key=lambda x: (x.get("match_id", ""), int(x.get("court_number", 0))))
+
+    wins = 0
+    losses = 0
+    skill_history = []
+    seen_match_ids = set()
+    recent_matches = []
+
+    for r in items:
+        team_a = r.get("team_a", [])
+        team_b = r.get("team_b", [])
+        winner = r.get("winner", "")
+
+        in_a = any(
+            (p.get("user_id") == my_uid if isinstance(p, dict) else False)
+            for p in (team_a if isinstance(team_a, list) else [])
+        )
+        my_team = "A" if in_a else "B"
+        won = (winner == my_team)
+
+        if won:
+            wins += 1
+        else:
+            losses += 1
+
+        # スキル履歴（skill_snapshot から・match_id重複除去）
+        snap = r.get("skill_snapshot", {})
+        mid = r.get("match_id", "")
+        if isinstance(snap, dict) and my_uid in snap and mid not in seen_match_ids:
+            s = snap[my_uid]
+            score = float(s.get("skill_score", 0)) if isinstance(s, dict) else None
+            if score:
+                skill_history.append({
+                    "match_id": mid,
+                    "date": r.get("created_at", "")[:10],
+                    "score": round(score, 1),
+                })
+                seen_match_ids.add(mid)
+
+        opponent_team = team_b if in_a else team_a
+        partners = [
+            p.get("display_name", "?")
+            for p in (team_a if in_a else team_b)
+            if isinstance(p, dict) and p.get("user_id") != my_uid
+        ]
+        opponents = [
+            p.get("display_name", "?")
+            for p in opponent_team
+            if isinstance(p, dict)
+        ]
+        recent_matches.append({
+            "match_id": r.get("match_id", ""),
+            "date": r.get("created_at", "")[:10],
+            "court": r.get("court_number", "?"),
+            "mode": r.get("pairing_mode", ""),
+            "won": won,
+            "score_my":  r.get("team1_score" if my_team == "A" else "team2_score", "?"),
+            "score_opp": r.get("team2_score" if my_team == "A" else "team1_score", "?"),
+            "partners":  partners,
+            "opponents": opponents,
+        })
+
+    current_app.logger.info("[my_stats] wins=%d losses=%d skill_history=%d recent=%d",
+                            wins, losses, len(skill_history), len(recent_matches))
+
+    plain_user_id = current_user.user_id.replace('user#', '')
+
+    bad_users_table = current_app.dynamodb.Table("bad-users")
+    resp = bad_users_table.get_item(Key={"user#user_id": plain_user_id}, ConsistentRead=True)
+    bad_user = resp.get("Item") or {}
+
+    def _to_float_or_none(v):
+        try: return float(v) if v is not None else None
+        except: return None
+
+    skill_score = _to_float_or_none(bad_user.get("skill_score"))
+
+    # 保存済みランクを使用（練習終了時に更新済み）
+    rank = int(bad_user["rank"]) if bad_user.get("rank") is not None else None
+    total_players = int(bad_user["active_rank_total"]) if bad_user.get("active_rank_total") is not None else None
+
+    current_app.logger.info("[my_stats] plain_id=%s skill_score=%s rank=%s/%s",
+                            plain_user_id, skill_score, rank, total_players)
+
+    # --- テンプレートへ渡す（名前を skill_score に統一） ---
+    return render_template(
+        "uguu/my_stats.html",
+        skill_score=skill_score,
+        rank=rank,
+        total_players=total_players,
+        wins=wins,
+        losses=losses,
+        win_rate=round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
+        skill_history=skill_history,
+        recent_matches=list(reversed(recent_matches)),
+        user=current_user,
+        my_score=skill_score  # 念のため my_score という名前も残しておく（互換性のため）
+    )
     
 
     

@@ -146,6 +146,14 @@
             border-radius: 10px;
             text-align: center;
         }
+
+        /* コート固定色 */
+        .bg-court-1 { background-color: #e74c3c; }  /* 赤 */
+        .bg-court-2 { background-color: #2980b9; }  /* 青 */
+        .bg-court-3 { background-color: #27ae60; }  /* 緑 */
+        .bg-court-4 { background-color: #8e44ad; }  /* 紫 */
+        .bg-court-5 { background-color: #e67e22; }  /* オレンジ */
+        .bg-court-6 { background-color: #16a085; }  /* ティール */
     </style>
   
 <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -181,6 +189,14 @@
                     困ったときのボタン
                 </button>
             </form>
+
+            <!-- 前回スコア修正ボタン（idle時のみ） -->
+            {% if last_match_id_for_correction %}
+            <a href="{{ url_for('game.correct_last_score') }}"
+               class="btn btn-outline-secondary fw-bold px-4 py-2">
+                前回スコア修正
+            </a>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -271,6 +287,7 @@
             </div>
         </div>
 
+        {% if current_user.administrator or not has_ongoing_matches %}
         <div class="card-header bg-primary text-white d-flex justify-content-center align-items-center gap-4 py-2">
             <h5 class="mb-0">
                 <i class="fas fa-list"></i> 待機中 ({{ pending_players|length }}人)
@@ -278,7 +295,8 @@
             <h5 class="mb-0">
                 <i class="fas fa-list"></i> 休憩中 ({{ resting_players|length }}人)
             </h5>
-             </div>
+        </div>
+        {% endif %}
 
 
 
@@ -289,7 +307,7 @@
             <div class="card-body">
                 <!-- 進行中の試合がある場合の表示 -->                
                 
-                <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
+                <div class="d-flex justify-content-center align-items-center flex-wrap gap-2">
 
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -312,6 +330,28 @@
                     </button>
                 </form>
 
+                <!-- ペアリングモード表示 -->
+                    {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
+                    {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
+                    {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
+                    <div class="text-center mt-1 w-100">
+                        {% if last_mode %}
+                        <span class="text-muted" style="font-size: 0.9rem;">{% if not has_ongoing_matches %}前回: {% endif %}
+                            <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }}" style="font-size: 0.9rem; padding: 5px 10px;">
+                                <i class="fa-solid {{ mode_icons.get(last_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(last_mode, last_mode) }}
+                            </span>
+                        </span>
+                        &nbsp;
+                        {% endif %}
+                        {% if not has_ongoing_matches %}
+                        <span class="text-muted" style="font-size: 0.9rem;">次回:
+                            <span class="badge bg-{{ mode_colors.get(next_mode, 'secondary') }}" style="font-size: 0.9rem; padding: 5px 10px;">
+                                <i class="fa-solid {{ mode_icons.get(next_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(next_mode, next_mode) }}
+                            </span>
+                        </span>
+                        {% endif %}
+                    </div>
+
                 {% if has_ongoing_matches and current_user.administrator %}
                 <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
                 
@@ -327,88 +367,142 @@
             </div>
         </div>           
        
-        {% endif %}       
-
-        
-            <div class="d-flex justify-content-center align-items-center gap-3 mb-3 flex-wrap">
-                
-                <form method="post" action="{{ url_for('game.set_score_format') }}" class="mb-0">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="input-group">
-                        <label class="input-group-text" for="score_format">試合点数</label>
-                        <select class="form-select" name="score_format" id="score_format" onchange="this.form.submit()">
-                            <option value="15" {% if session.get('score_format') == '15' %}selected{% endif %}>15点</option>
-                            <option value="21" {% if session.get('score_format') == '21' %}selected{% endif %}>21点</option>
-                        </select>
-                    </div>
-                </form>
-            </div>
-        
-
-        
-                       
-        {% set user_court = namespace(found=false) %}
-
-        {% for court in match_courts.values() %}
-            {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
-            {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
-            {% set show_court = current_user.administrator or in_team_a or in_team_b %}
-
-            {% if show_court %}
-                {% set user_court.found = true %}
-                <div class="col">
-                    <div class="card h-100 shadow-sm">
-                        <div class="card-header text-white text-center
-                            {% if in_team_a %}bg-danger
-                            {% elif in_team_b %}bg-primary
-                            {% else %}bg-success{% endif %}">
-                            <h4 class="mb-0">
-                                コート{{ court.court_number }}
-                                {% if in_team_a %}<span class="badge bg-white text-danger ms-2 fs-6">あなたはAチーム</span>{% endif %}
-                                {% if in_team_b %}<span class="badge bg-white text-primary ms-2 fs-6">あなたはBチーム</span>{% endif %}
-                            </h4>
-                        </div>
-                        <div class="card-body">
-                            <form class="score-form" 
-                                data-court-number="{{ court.court_number }}"
-                                action="{{ url_for('game.submit_score', match_id=match_id, court_number=court.court_number) }}">
-                                
-                                <div class="d-flex justify-content-center align-items-center mb-3">               
-                                    <div class="me-2">
-                                        <span class="badge bg-danger me-2 fs-4">A</span>
-                                        <span class="fs-4 fw-bold">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
-                                    </div>                    
-                                </div>
-
-                                <div class="d-flex justify-content-center align-items-center mb-3">
-                                    <div class="me-2">
-                                        <span class="badge bg-primary me-2 fs-4">B</span>
-                                        <span class="fs-4 fw-bold">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
-                                    </div>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            {% endif %}
-        {% endfor %}
-        
-        {% if current_user.is_authenticated and has_ongoing_matches and (current_user.administrator or user_court.found) %}
-            <form method="POST" action="{{ url_for('game.score_input') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="text-center my-2">
-                    <button type="submit" class="btn btn-danger btn-lg">スコア入力</button>
-                </div>
-            </form>
         {% endif %}
 
-        {% if not current_user.administrator and not user_court.found and match_courts %}
+        {% if not current_user.administrator and has_ongoing_matches and last_mode %}
+        {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
+        {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
+        {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
+        <div class="text-center mb-1">
+            <span class="badge bg-{{ mode_colors.get(last_mode, 'secondary') }} fs-5">
+                <i class="fa-solid {{ mode_icons.get(last_mode, 'fa-question') }} me-1"></i>{{ mode_labels.get(last_mode, last_mode) }}
+            </span>
+        </div>
+        {% endif %}
+
+        
+
+        {% set user_in_match = namespace(found=false) %}
+        {% for court in match_courts.values() %}
+            {% if current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+                {% set user_in_match.found = true %}
+            {% endif %}
+            {% if current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+                {% set user_in_match.found = true %}
+            {% endif %}
+        {% endfor %}
+
+        {% if has_ongoing_matches and match_courts %}
+        <div class="row row-cols-1 g-3 mt-2">
+            {% for court_num, court in match_courts.items() %}
+                {% set in_team_a = current_user.user_id in court.team_a | map(attribute='user_id') | list %}
+                {% set in_team_b = current_user.user_id in court.team_b | map(attribute='user_id') | list %}
+                {% set show = current_user.administrator or in_team_a or in_team_b %}
+                {% if show %}
+                <div class="col">
+                    <div class="card shadow-sm">
+                        {% set court_colors = ['bg-court-1', 'bg-court-2', 'bg-court-3', 'bg-court-4', 'bg-court-5', 'bg-court-6'] %}
+                        {% set color_index = (court_num | int - 1) % court_colors | length %}
+                        <div class="card-header text-white text-center {{ court_colors[color_index] }}">
+                            {% set court_colors = ['#e74c3c', '#2980b9', '#27ae60', '#8e44ad', '#e67e22', '#16a085'] %}
+                            {% set color_index = (court_num | int - 1) % court_colors | length %}
+                            {% set court_color = court_colors[color_index] %}
+
+                            <div class="card-header text-white text-center" style="background-color: {{ court_color }};">
+                                <h5 class="mb-0">
+                                    コート{{ court_num }}
+                                    {% if in_team_a %}
+                                        <span class="badge bg-white ms-2" style="color: {{ court_color }};">あなたはAチーム</span>
+                                    {% endif %}
+                                    {% if in_team_b %}
+                                        <span class="badge bg-white ms-2" style="color: {{ court_color }};">あなたはBチーム</span>
+                                    {% endif %}
+                                </h5> 
+                             </div>
+                        
+                        <div class="card-body" id="court-body-{{ court_num }}">
+                            {% if court.score_submitted %}
+                                <div class="text-center py-3">
+                                    <span class="btn btn-secondary btn-lg disabled">
+                                        <i class="fas fa-check me-2"></i>
+                                        {% if current_user.administrator %}受信済み{% else %}送信済み{% endif %}
+                                    </span>
+                                </div>
+                            {% else %}
+                                <form class="court-score-form"
+                                    data-court-number="{{ court_num }}"
+                                    action="{{ url_for('game.submit_score', match_id=match_id, court_number=court_num) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded">
+                                        <div class="flex-grow-1 me-2" style="min-width: 0;">
+                                            <span class="badge bg-danger me-2 fs-5">A</span>
+                                            <span class="fw-bold fs-5 text-dark">{{ court.team_a | map(attribute='display_name') | join(' & ') }}</span>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
+                                            <input type="text" name="team1_score"
+                                                class="form-control score-input text-center"
+                                                value="21"
+                                                inputmode="numeric" pattern="[0-9]*"
+                                                data-min="0" data-max="99" data-step="1"
+                                                style="width:80px; font-size:1.8rem; font-weight:bold;">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, 1)">＋</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded">
+                                        <div class="flex-grow-1 me-2" style="min-width: 0;">
+                                            <span class="badge bg-primary me-2 fs-5 ">B</span>
+                                            <span class="fw-bold fs-5 text-dark">{{ court.team_b | map(attribute='display_name') | join(' & ') }}</span>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, -1)">－</button>
+                                            <input type="text" name="team2_score"
+                                                class="form-control score-input text-center"
+                                                value="21"
+                                                inputmode="numeric" pattern="[0-9]*"
+                                                data-min="0" data-max="99" data-step="1"
+                                                style="width:80px; font-size:1.8rem; font-weight:bold;">
+                                            <button type="button" class="btn btn-outline-secondary score-step-btn" onclick="stepScore(this, 1)">＋</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="text-center">
+                                        <button type="submit" class="btn btn-warning btn-lg w-100 fw-bold">
+                                            <i class="fas fa-trophy me-2"></i>スコア送信
+                                        </button>
+                                    </div>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        {# 管理者用：試合終了ボタン #}
+        {% if current_user.administrator %}
+        <div class="text-center mt-4 mb-5">
+            <button id="finishMatchBtn"
+                    class="btn btn-secondary btn-lg px-5 py-3 fs-4"
+                    disabled>
+                <i class="fas fa-flag-checkered me-2"></i>試合終了
+            </button>
+        </div>
+        {% endif %}
+
+        {# 一般参加者：お休みメッセージ #}
+        {% if not current_user.administrator and not user_in_match.found %}
         <div class="alert alert-warning text-center mt-3 mx-3">
             <i class="fas fa-couch fa-2x mb-2 d-block"></i>
             <strong>今回はお休みです。次の試合をお待ちください。</strong>
         </div>
         {% endif %}
-        </div>
+
+        {% endif %}
+
 
 
 
@@ -490,205 +584,434 @@
 
 
     <script>
-        let lastUpdateTime = new Date();
-        let currentPendingCount = {{ pending_players|length }};
-        let currentRestingCount = {{ resting_players|length }};
-        let emptyStartTime = null; // 0人チェック用
-
-        // 管理者用: プレイヤーの状態切り替え
-        async function togglePlayerStatus(playerId, currentStatus) {
-            {% if not current_user.administrator %}
-            return; // 管理者でない場合は何もしない
-            {% endif %}
-
-            console.log('デバッグ: playerId =', playerId, 'currentStatus =', currentStatus);
-
-            if (!playerId || playerId === '') {
-                alert('エラー: プレイヤーIDが取得できませんでした');
-                console.error('プレイヤーIDが空です');
-                return;
-            }
-
-            const playerElement = document.querySelector(`[data-player-id="${playerId}"]`);
-            if (!playerElement) {
-            alert('エラー: プレイヤー要素が見つかりませんでした');
-            return;
-            }
-            const playerName = playerElement.getAttribute('data-player-name') || 'プレイヤー';
-            const actionText = currentStatus === 'pending' ? '休憩' : '参加'; //
-            
-            
-            // ローディング表示
-            document.getElementById('loadingOverlay').style.display = 'flex';
-
-            try {
-                const response = await fetch('/game/api/toggle_player_status', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || ''
-                    },
-                    body: JSON.stringify({
-                        player_id: playerId,
-                        current_status: currentStatus
-                    })
+    let lastUpdateTime = new Date();
+    let currentPendingCount = {{ pending_players|length }};
+    let currentRestingCount = {{ resting_players|length }};
+    let emptyStartTime = null;
+    let finishInFlight = false;
+    let finishTriggered = false;
+ 
+    const MATCH_ID = {{ match_id | tojson }};
+ 
+    // ===== スコア入力値の自動保存・復元 =====
+    function getScoreKey(courtNum, teamName) {
+        return `uguis_score_${MATCH_ID}_court${courtNum}_${teamName}`;
+    }
+ 
+    function bindScoreSave() {
+        document.querySelectorAll('.court-score-form').forEach(form => {
+            const courtNum = form.dataset.courtNumber;
+            form.querySelectorAll('.score-input').forEach(input => {
+                input.addEventListener('input', () => {
+                    localStorage.setItem(getScoreKey(courtNum, input.name), input.value);
                 });
-
-                const text = await response.text();
-                console.log('サーバー生レスポンス:', text);
-                const result = JSON.parse(text);  // これだけ、response.json()は削除
-                console.log('サーバー応答:', result);
-
-                if (result.success) {
-                    console.log(`${playerName}さんの状態を${actionText}に変更しました`);
-                    location.reload();
-                } else {
-                    console.error('エラー詳細:', result);
-                    alert(`エラー: ${result.message}`);
-                }
-            } catch (error) {
-                console.error('⚠️ 状態変更エラー詳細:', error);
-                console.error('エラータイプ:', error.constructor.name);
-                console.error('エラーメッセージ:', error.message);
-                alert('状態変更に失敗しました: ' + error.message);
-            } finally {
-                document.getElementById('loadingOverlay').style.display = 'none';
-            }
-        }
-
-        function updateTimestamp() {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('ja-JP');
-            const updateEl = document.getElementById('lastUpdate');
-            if (updateEl) updateEl.textContent = timeString;
-        }
-
-        function rotateRefreshIcon() {
-            const icon = document.getElementById('refreshIcon');
-            if (!icon) return;
-            icon.classList.add('spinning');
-            setTimeout(() => icon.classList.remove('spinning'), 500);
-        }
-
-        function updateSkillScore() {
-            fetch("/game/api/skill_score")
-                .then(response => response.json())
-                .then(data => {
-                    const scoreElement = document.getElementById("skillScoreBadge");
-                    console.log("[スキルスコア更新] 応答:", data);
-
-                    if (scoreElement && data.skill_score !== undefined) {
-                        scoreElement.textContent = `戦闘力: ${data.skill_score.toFixed(2)}`;
-                    }
-                })
-                .catch(err => console.error("⚠️ スキルスコア取得エラー:", err));
-        }
-
-        async function checkForUpdates() {
-            try {
-                rotateRefreshIcon();
-                const response = await fetch('/game/api/waiting_status');
-                if (response.ok) {
-                    const data = await response.json();
-                    
-                    // 参加者0人チェック
-                    const totalCount = data.pending_count + data.resting_count;
-                    if (totalCount === 0) {
-                        if (emptyStartTime === null) {
-                            emptyStartTime = Date.now();
-                            console.log('エントリー者が0人になりました');
-                        } else {
-                            const emptyDuration = Date.now() - emptyStartTime;
-                            const fiveMinutes = 5 * 60 * 1000;
-                            
-                            if (emptyDuration >= fiveMinutes) {
-                                console.log('5分間エントリー者がいないため、自動的にトップページへ移動');
-                                window.location.href = '/';
-                                return;
-                            }
-                        }
-                    } else {
-                        emptyStartTime = null;
-                    }
-                    
-                    // 新しいペアリングが利用可能な場合
-                    if (data.new_pairing_available) {
-                        console.log('🔄 新しいペアリングが利用可能 → ページ更新');
-                        window.location.href = '/game/court';
-                        return;
-                    }
-                    
-                    // 参加待ちまたは休憩中の人数が変更された場合
-                    if (data.pending_count !== currentPendingCount ||
-                        data.resting_count !== currentRestingCount) {
-                        console.log(`🔄 人数変更: 待機${currentPendingCount}→${data.pending_count}, 休憩${currentRestingCount}→${data.resting_count}`);
-                        currentPendingCount = data.pending_count;
-                        currentRestingCount = data.resting_count;
-                        location.reload();
-                        return;
-                    }
-                }
-
-                lastUpdateTime = new Date();
-                updateTimestamp();
-            } catch (error) {
-                console.error('⚠️ 更新チェックでエラー:', error);
-                lastUpdateTime = new Date();
-                updateTimestamp();
-            }
-        }
-
-        document.addEventListener("DOMContentLoaded", function () {
-            console.log('📱 コート画面初期化完了');
-            updateTimestamp();
-            updateSkillScore();
-
-            // ポーリング管理
-            let intervalId = null;
-
-            function startPolling() {
-                if (intervalId) return;
-                intervalId = setInterval(() => {
-                    checkForUpdates();
-                    updateSkillScore();
-                }, 25000);  // 25秒
-            }
-
-            function stopPolling() {
-                if (intervalId) {
-                    clearInterval(intervalId);
-                    intervalId = null;
-                }
-            }
-
-            window._stopPolling = stopPolling;
-            window._startPolling = startPolling;
-
-            // タブの表示/非表示を検知
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden) {
-                    stopPolling();
-                    console.log('⏸ タブ非表示 → ポーリング停止');
-                } else {
-                    console.log('▶ タブ復帰 → 即時更新');
-                    checkForUpdates();
-                    updateSkillScore();
-                    startPolling();
+            });
+        });
+    }
+ 
+    function restoreScoreInputs() {
+        if (!MATCH_ID) return;
+        document.querySelectorAll('.court-score-form').forEach(form => {
+            const courtNum = form.dataset.courtNumber;
+            form.querySelectorAll('.score-input').forEach(input => {
+                const saved = localStorage.getItem(getScoreKey(courtNum, input.name));
+                if (saved !== null) {
+                    input.value = saved;
+                    console.log(`💾 スコア復元: コート${courtNum} ${input.name} = ${saved}`);
                 }
             });
-
-            // 初期起動
-            startPolling();
-
-            const refreshButton = document.getElementById('manualRefreshBtn');
-            if (refreshButton) {
-                refreshButton.addEventListener('click', function () {
-                    console.log('🔄 手動更新実行');
-                    checkForUpdates();
-                    updateSkillScore();
+        });
+    }
+ 
+    function clearSavedScores(courtNum) {
+        ['team1_score', 'team2_score'].forEach(name => {
+            localStorage.removeItem(getScoreKey(courtNum, name));
+        });
+        console.log(`🗑️ スコアキャッシュ削除: コート${courtNum}`);
+    }
+    // ===== ここまで =====
+ 
+    async function togglePlayerStatus(playerId, currentStatus) {
+        {% if not current_user.administrator %}
+        return;
+        {% endif %}
+ 
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.style.display = 'flex';
+ 
+        try {
+            const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            const res = await fetch("/game/api/toggle_player_status", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": CSRF_TOKEN,
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({
+                    player_id: playerId,
+                    current_status: currentStatus
+                })
+            });
+ 
+            const data = await res.json();
+ 
+            if (!res.ok || !data.success) {
+                throw new Error(data.message || "状態の変更に失敗しました");
+            }
+            location.reload();
+ 
+        } catch (err) {
+            console.error("❌ togglePlayerStatus エラー:", err);
+            alert(err.message);
+            if (overlay) overlay.style.display = 'none';
+        }
+    }
+ 
+    function updateTimestamp() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('ja-JP');
+        const updateEl = document.getElementById('lastUpdate');
+        if (updateEl) updateEl.textContent = timeString;
+    }
+ 
+    function rotateRefreshIcon() {
+        const icon = document.getElementById('refreshIcon');
+        if (!icon) return;
+        icon.classList.add('spinning');
+        setTimeout(() => icon.classList.remove('spinning'), 500);
+    }
+ 
+    function updateSkillScore() {
+        fetch("/game/api/skill_score")
+            .then(response => response.json())
+            .then(data => {
+                const scoreElement = document.getElementById("skillScoreBadge");
+                if (scoreElement && data.skill_score !== undefined) {
+                    scoreElement.textContent = `戦闘力: ${data.skill_score.toFixed(2)}`;
+                }
+            })
+            .catch(err => console.error("⚠️ スキルスコア取得エラー:", err));
+    }
+ 
+    function stepScore(btn, deltaSign) {
+        const wrapper = btn.closest('.d-flex');
+        const input = wrapper.querySelector('input.score-input');
+        const step = parseInt(input.dataset.step || '1', 10);
+        const min  = parseInt(input.dataset.min  || '0', 10);
+        const max  = parseInt(input.dataset.max  || '99', 10);
+        let v = parseInt(input.value || '0', 10);
+        if (Number.isNaN(v)) v = 0;
+        v = Math.min(max, Math.max(min, v + deltaSign * step));
+        input.value = String(v);
+        input.dispatchEvent(new Event('input'));
+    }
+ 
+    {% if current_user.administrator %}
+        async function finishMatch() {
+            if (finishInFlight) return;
+            finishInFlight = true;
+            console.log("🏁 finishMatch() 開始");
+ 
+            const finishBtn = document.getElementById("finishMatchBtn");
+            const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+ 
+            if (finishBtn) {
+                finishBtn.disabled = true;
+                finishBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>処理中...';
+            }
+            try {
+                const res = await fetch("/game/finish_current_match", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": CSRF_TOKEN,
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
                 });
+                // 他端末が先に終了済みの場合も正常扱いでリダイレクト
+                if (!res.ok && res.status === 400) {
+                    window.location.href = "/game/court";
+                    return;
+                }
+                const data = await res.json();
+                console.log("finish レスポンス:", data);
+                if (!res.ok || !data.success) throw new Error(data.error || "試合終了に失敗しました");
+                window.location.href = "/game/court";
+            } catch (err) {
+                console.error("❌ finishMatch エラー:", err.message);
+                finishInFlight = false;
+                if (finishBtn) {
+                    finishBtn.disabled = false;
+                    finishBtn.innerHTML = '<i class="fas fa-flag-checkered me-2"></i>試合終了';
+                }
+                alert(err.message);
+            }
+        }
+ 
+        async function updateScoreInputButton() {
+            if (!MATCH_ID) {
+                console.warn("⚠️ MATCH_IDがnullのためスキップ");
+                return;
+            }
+            try {
+                const sRes = await fetch(`/game/api/submission_status?match_id=${MATCH_ID}`);
+                if (!sRes.ok) return;
+                const sData = await sRes.json();
+
+                if (!sData.match_active) {
+                    console.log('⏹ 試合終了済み → スコアポーリング停止');
+                    stopScorePolling();
+                    return;
+                }
+
+                const submittedCourts = sData.submitted_courts || [];
+                const totalCourts = sData.total_courts || 0;
+
+                console.log(`[updateScoreInputButton] 受信済みコート番号: ${submittedCourts.join(', ')} / 全${totalCourts}コート`);
+ 
+                submittedCourts.forEach(courtNum => {
+                    const body = document.getElementById(`court-body-${courtNum}`);
+                    if (body && body.querySelector('.court-score-form')) {
+                        body.innerHTML = `
+                            <div class="text-center py-3">
+                                <span class="btn btn-secondary btn-lg disabled">
+                                    <i class="fas fa-check me-2"></i>受信済み
+                                </span>
+                            </div>`;
+                    }
+                });
+ 
+                if (totalCourts > 0 && submittedCourts.length >= totalCourts) {
+                    if (finishTriggered) {          // ★ 追加
+                        console.log("⏭ 既にfinish実行済みのためスキップ");  // ★ 追加
+                        return;                     // ★ 追加
+                    }                               // ★ 追加
+                    finishTriggered = true;         // ★ 追加
+                    console.log("全コート受信済み → 試合終了自動実行");
+                    await finishMatch();
+                }
+            } catch (err) {
+                console.error("[updateScoreInputButton] error:", err);
+            }
+        }
+    {% endif %}
+ 
+    // ★ submission_status は含めない（専用タイマーで処理）
+    async function checkForUpdates() {
+        try {
+            rotateRefreshIcon();
+            const response = await fetch('/game/api/waiting_status');
+            if (response.ok) {
+                const data = await response.json();
+ 
+                const totalCount = data.pending_count + data.resting_count;
+                if (totalCount === 0) {
+                    if (emptyStartTime === null) {
+                        emptyStartTime = Date.now();
+                    } else {
+                        if (Date.now() - emptyStartTime >= 5 * 60 * 1000) {
+                            window.location.href = '/';
+                            return;
+                        }
+                    }
+                } else {
+                    emptyStartTime = null;
+                }
+ 
+                if (data.new_pairing_available) {
+                    window.location.href = '/game/court';
+                    return;
+                }
+ 
+                if (data.pending_count !== currentPendingCount ||
+                    data.resting_count !== currentRestingCount) {
+                    currentPendingCount = data.pending_count;
+                    currentRestingCount = data.resting_count;
+                    location.reload();
+                    return;
+                }
+            }
+ 
+            lastUpdateTime = new Date();
+            updateTimestamp();
+        } catch (error) {
+            console.error('⚠️ 更新チェックでエラー:', error);
+            lastUpdateTime = new Date();
+            updateTimestamp();
+        }
+    }
+ 
+    document.addEventListener("DOMContentLoaded", function () {
+        console.log('📱 コート画面初期化完了');
+        updateTimestamp();
+        updateSkillScore();
+ 
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const IS_ADMIN = {{ 'true' if current_user.administrator else 'false' }};
+ 
+        restoreScoreInputs();
+        bindScoreSave();
+ 
+        {% if current_user.administrator %}
+        updateScoreInputButton();
+        {% endif %}
+ 
+        // コートスコアフォーム送信
+        document.querySelectorAll(".court-score-form").forEach(form => {
+            form.addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const courtNum = form.dataset.courtNumber;
+                const team1Score = Number(form.querySelector('[name="team1_score"]').value);
+                const team2Score = Number(form.querySelector('[name="team2_score"]').value);
+ 
+                if (team1Score === team2Score) {
+                    alert("スコアが同点です。勝者を決めてください。");
+                    return;
+                }
+ 
+                const submitBtn = form.querySelector("button[type='submit']");
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>送信中...';
+ 
+                try {
+                    const formData = new FormData(form);
+                    const res = await fetch(form.getAttribute("action"), {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": CSRF_TOKEN,
+                            "X-Requested-With": "XMLHttpRequest"
+                        },
+                        body: formData,
+                    });
+                    if (!res.ok) throw new Error(await res.text());
+ 
+                    clearSavedScores(courtNum);
+ 
+                    document.getElementById(`court-body-${courtNum}`).innerHTML = `
+                        <div class="text-center py-3">
+                            <span class="btn btn-secondary btn-lg disabled">
+                                <i class="fas fa-check me-2"></i>${IS_ADMIN ? '受信済み' : '送信済み'}
+                            </span>
+                        </div>`;
+ 
+                    if (IS_ADMIN) {
+                        setTimeout(async () => {
+                            console.log(`[submit_score] 待機終了。最終チェックを実行します...`);
+                            await updateScoreInputButton();
+                        }, 1000);
+                    }
+ 
+                } catch (err) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-trophy me-2"></i>スコア送信';
+                    alert(err.message || "送信に失敗しました");
+                }
+            });
+        });
+ 
+        // 試合終了ボタン（手動用）
+        const finishBtn = document.getElementById("finishMatchBtn");
+        if (finishBtn) {
+            finishBtn.addEventListener("click", async function () {
+                await finishMatch();
+            });
+        }
+ 
+        // =========================================================
+        // ★ ポーリング管理（2本化）
+        //   ① statusInterval  : waiting_status + skill_score → 20秒
+        //   ② scoreInterval   : submission_status → 10秒（管理者・試合中のみ）
+        // =========================================================
+        let statusIntervalId = null;
+        let scoreIntervalId  = null;
+ 
+        function startStatusPolling() {
+            if (statusIntervalId) return;
+            statusIntervalId = setInterval(() => {
+                checkForUpdates();
+                updateSkillScore();
+            }, 20000);  // 20秒
+        }
+ 
+        function stopStatusPolling() {
+            if (statusIntervalId) {
+                clearInterval(statusIntervalId);
+                statusIntervalId = null;
+            }
+        }
+ 
+        {% if current_user.administrator %}
+        function startScorePolling() {
+            if (scoreIntervalId || !MATCH_ID) return;
+            scoreIntervalId = setInterval(async () => {
+                await updateScoreInputButton();
+            }, 10000);  // 10秒
+            console.log('🔄 スコアポーリング開始 (10秒)');
+        }
+ 
+        function stopScorePolling() {
+            if (scoreIntervalId) {
+                clearInterval(scoreIntervalId);
+                scoreIntervalId = null;
+                console.log('⏹ スコアポーリング停止');
+            }
+        }
+        {% endif %}
+ 
+        // 外部公開（デバッグ用）
+        window._stopStatusPolling = stopStatusPolling;
+        window._startStatusPolling = startStatusPolling;
+ 
+        // ★ スコア入力中はステータスポーリングを停止
+        document.addEventListener('focusin', (e) => {
+            if (e.target.classList.contains('score-input')) {
+                stopStatusPolling();
+                console.log('⏸ スコア入力中 → ステータスポーリング停止');
             }
         });
-    </script>
+        document.addEventListener('focusout', (e) => {
+            if (e.target.classList.contains('score-input')) {
+                startStatusPolling();
+                console.log('▶ フォーカス解除 → ステータスポーリング再開');
+            }
+        });
+ 
+        // ★ タブ非表示中はポーリング停止
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopStatusPolling();
+                {% if current_user.administrator %}
+                stopScorePolling();
+                {% endif %}
+            } else {
+                checkForUpdates();
+                updateSkillScore();
+                startStatusPolling();
+                {% if current_user.administrator %}
+                startScorePolling();
+                {% endif %}
+            }
+        });
+ 
+        // 起動
+        startStatusPolling();
+        {% if current_user.administrator %}
+        startScorePolling();
+        {% endif %}
+ 
+        const refreshButton = document.getElementById('manualRefreshBtn');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', function () {
+                checkForUpdates();
+                updateSkillScore();
+                {% if current_user.administrator %}
+                updateScoreInputButton();
+                {% endif %}
+            });
+        }
+    });
+</script>
+
 
 </body>

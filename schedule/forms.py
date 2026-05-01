@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from wtforms import DateField, StringField, IntegerField, SelectField, SubmitField
+from wtforms import DateField, StringField, IntegerField, SelectField, SubmitField, HiddenField
 from wtforms.validators import DataRequired, NumberRange
 
 class ScheduleForm(FlaskForm):
@@ -44,6 +44,8 @@ class ScheduleForm(FlaskForm):
         ('deleted', '削除済'),
         ('cancelled', '中止')
     ], default='active')
+
+    team_id = HiddenField('チームID')
     
     submit = SubmitField('📅 スケジュール登録')
 

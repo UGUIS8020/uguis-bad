@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}マイ成績{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 720px;">
+
+  {# ── ヘッダー ── #}
+  <div class="card mb-4 shadow-sm">
+  <div class="card-body text-center">
+    <h5 class="text-muted mb-2">戦闘力</h5>
+
+    <div class="mb-3">
+      {# 管理者（adminかsuper）かどうかを変数に入れる #}
+      {% set is_manager = current_user.is_authenticated and (current_user.role == 'admin' or current_user.role == 'super') %}
+
+      <span id="skill-badge-profile"
+            class="badge {% if skill_score is not none %}bg-primary{% else %}bg-secondary{% endif %} 
+                   {% if is_manager %}editable-badge{% endif %} 
+                   fs-3 fw-bold d-inline-block"
+            
+            {% if is_manager %}
+              onclick="editSkillScore('{{ user['user#user_id'] }}', '{{ user['user#user_id'] }}')"
+              title="クリックして戦闘力を編集"
+              style="cursor: pointer; padding: 0.6em 1.2em;"
+            {% else %}
+              style="padding: 0.6em 1.2em;"
+            {% endif %}>
+
+          {% if skill_score is not none %}
+              {{ (skill_score|float)|round(2) }}
+          {% else %}
+              未設定
+          {% endif %}
+      </span>
+    </div>
+
+    {# 順位などの付随情報 #}
+    {% if my_score %}
+      <div class="text-muted">
+      {{ total_players }} 人中 <strong>{{ rank }} 位</strong>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+  {# ── 通算成績 ── #}
+  <div class="row g-3 mb-4">
+    <div class="col-4">
+      <div class="card text-center shadow-sm">
+        <div class="card-body py-3">
+          <div class="fs-2 fw-bold text-success">{{ wins }}</div>
+          <div class="text-muted small">勝</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="card text-center shadow-sm">
+        <div class="card-body py-3">
+          <div class="fs-2 fw-bold text-danger">{{ losses }}</div>
+          <div class="text-muted small">負</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="card text-center shadow-sm">
+        <div class="card-body py-3">
+          <div class="fs-2 fw-bold">{{ win_rate }}%</div>
+          <div class="text-muted small">勝率</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── スキル推移グラフ ── #}
+  {% if skill_history|length >= 2 %}
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header">📈 スキル推移</div>
+    <div class="card-body">
+      <canvas id="skillChart" height="120"></canvas>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── 直近試合 ── #}
+  <div class="card shadow-sm">
+    <div class="card-header">📋 直近の試合</div>
+    <div class="card-body p-0">
+      <div class="list-group list-group-flush">
+        {% for m in recent_matches[:20] %}
+        <div class="list-group-item">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <span class="badge {% if m.won %}bg-success{% else %}bg-danger{% endif %} me-2">
+                {{ '勝' if m.won else '負' }}
+              </span>
+              <span class="text-muted small">{{ m.date }} C{{ m.court }} {{ m.get('mode') }}</span>
+            </div>
+            <div class="fw-bold">{{ m.score_my }} - {{ m.score_opp }}</div>
+          </div>
+          <div class="small mt-1">
+            <span class="text-muted">ペア: </span>{{ m.partners | join(', ') or 'なし' }}
+            <span class="text-muted ms-2">対戦ペア: </span>{{ m.opponents | join(', ') }}
+          </div>
+        </div>
+        {% else %}
+          <div class="list-group-item text-muted text-center py-3">試合データがありません</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# Chart.js #}
+{% if skill_history|length >= 2 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const history = {{ skill_history | tojson }};
+const labels = history.map(h => h.date);
+const scores = history.map(h => h.score);
+
+new Chart(document.getElementById('skillChart'), {
+  type: 'line',
+  data: {
+    labels: labels,
+    datasets: [{
+      label: 'スキルスコア',
+      data: scores,
+      borderColor: '#0d6efd',
+      backgroundColor: 'rgba(13,110,253,0.1)',
+      tension: 0.3,
+      fill: true,
+      pointRadius: 3,
+    }]
+  },
+  options: {
+    scales: {
+      x: {
+        ticks: {
+          maxTicksLimit: 12,
+          maxRotation: 0,
+          callback: function(val, index) {
+            const label = this.getLabelForValue(val);
+            const parts = label.split('-');
+            return parts[1] + '/' + parts[2];
+          }
+        }
+      },
+      y: {
+        min: Math.max(0, Math.min(...scores) - 5)
+      }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}
