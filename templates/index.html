@@ -228,9 +228,9 @@
                     {% endif %}               
 
 
-                    <!-- ヘッダー行：左 = 折りたたみボタン / 右 = 操作ボタン -->
-                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}" style="flex:1; min-width:0;">
+                    <!-- ヘッダー行：上段 = アコーディオンボタン / 下段 = 操作ボタン -->
+                    <div class="px-2 pt-2">
+                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
 
                         {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %} 
                         
@@ -286,8 +286,8 @@
                         {% endif %}
                     </h2>
 
-                    <!-- 操作ボタン群（h2の外・右側） -->
-                    <div class="d-flex align-items-center flex-nowrap gap-2 flex-shrink-0 ms-2">
+                    <!-- 操作ボタン群（下段・右寄せ） -->
+                    <div class="d-flex align-items-center gap-2 justify-content-end pb-1">
                         <!-- 参加 -->
                         <button
                         class="btn btn-sm join-button text-nowrap
