@@ -2731,6 +2731,8 @@ def allowed_file(filename):
 # match_table = dynamodb.Table("bad-game-match_entries")
 
 # ---- imports（不足分をすべて追加）----
+import re
+from html import unescape as html_unescape
 from urllib.parse import quote_plus
 from dateutil import parser as dtp
 
@@ -2753,6 +2755,40 @@ REAL_UA = {"User-Agent": (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )}
+
+def _strip_html(text: str | None) -> str | None:
+    """HTMLタグを除去してプレーンテキストを返す"""
+    if not text:
+        return None
+    clean = re.sub(r'<[^>]+>', ' ', text)
+    clean = html_unescape(clean)
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean or None
+
+def _title_ngrams(title: str, n: int = 2) -> set:
+    """タイトルから文字nグラムのセットを生成（日本語対応）"""
+    t = re.sub(r'\s*[-–|｜]\s*\S{1,20}$', '', title).lower()
+    t = re.sub(r'\s+', '', t)
+    return set(t[i:i+n] for i in range(max(0, len(t) - n + 1)))
+
+def dedup_by_title(items: list, threshold: float = 0.60) -> list:
+    """タイトルの2グラムJaccard類似度で重複記事を除去する"""
+    kept = []
+    gram_sets = []
+    for item in items:
+        grams = _title_ngrams(item.get("title") or "")
+        if not grams:
+            kept.append(item)
+            gram_sets.append(grams)
+            continue
+        is_dup = any(
+            len(grams & kg) / len(grams | kg) >= threshold
+            for kg in gram_sets if kg
+        )
+        if not is_dup:
+            kept.append(item)
+            gram_sets.append(grams)
+    return kept
 
 # ---- ユーティリティ関数 ----
 def sha256(s: str) -> str:
@@ -2903,8 +2939,8 @@ import base64, json
 
 @app.route("/bad_news")
 def bad_news():
-    kind = request.args.get("kind") or "news"   # 'news' or 'video'
-    lang = request.args.get("lang") or "ja"     # 'ja' or 'en'
+    kind = request.args.get("kind") or "news"
+    lang = request.args.get("lang") or "ja"
     page_token = request.args.get("tok")
 
     last_evaluated_key = None
@@ -2914,15 +2950,24 @@ def bad_news():
                 base64.urlsafe_b64decode(page_token.encode()).decode()
             )
         except Exception:
-            last_evaluated_key = None  # トークン壊れ時の保険
+            last_evaluated_key = None
 
-    items, lek = bad_query_items(kind=kind, lang=lang, limit=40, last_evaluated_key=last_evaluated_key)
+    # 重複除去後に十分な件数を確保するため多めに取得
+    items, lek = bad_query_items(kind=kind, lang=lang, limit=80, last_evaluated_key=last_evaluated_key)
+
+    # タイトル類似度で重複記事を除去してから先頭40件に絞る
+    items = dedup_by_title(items)[:40]
+
+    # 最終更新日時（掲載記事の最新 published_at の日付部分）
+    dates = [i.get("published_at", "")[:10] for i in items if i.get("published_at")]
+    updated_at = max(dates).replace("-", "/") if dates else None
 
     next_tok = None
     if lek:
         next_tok = base64.urlsafe_b64encode(json.dumps(lek).encode()).decode()
 
-    return render_template("bad_news.html", rows=items, kind=kind, lang=lang, page=1, next_tok=next_tok)
+    return render_template("bad_news.html", rows=items, kind=kind, lang=lang,
+                           page=1, next_tok=next_tok, updated_at=updated_at)
 
 @app.route("/bad_news/demo")
 def bad_news_demo():

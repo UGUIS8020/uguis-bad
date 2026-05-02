@@ -257,91 +257,55 @@
                                         style="width: auto; box-shadow: none; cursor: default;">
                                 {% endif %}
                                     
-                                <div class="d-flex align-items-center flex-nowrap w-100">
-                                    <div class="d-flex align-items-center flex-grow-1">
+                                <div class="d-flex flex-column w-100" style="gap:4px;">
+                                    <!-- 1段目：日付・会場・募集状況 -->
+                                    <div class="d-flex align-items-center justify-content-between">
                                         <span class="me-2">{{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                         {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
-                                    
-                                        {{ schedule.venue }}{{ schedule.court }}
-                                        </span>
-                                        
+                                        {{ schedule.venue }}{{ schedule.court }}</span>
+                                        <div class="text-end flex-shrink-0 ms-2">
+                                            募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
+                                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
+                                                <div class="badge bg-warning text-dark">満員御礼</div>
+                                            {% else %}
+                                                <div class="badge bg-success">募集中</div>
+                                            {% endif %}
+                                        </div>
                                     </div>
-                                    
-                                    
-                                    <div>                                
-
-                                        募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
-                                        <!-- 募集状態 -->
-                                        {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
-                                            <div class="badge bg-warning text-dark">満員御礼</div>
+                                    <!-- 2段目：操作ボタン群（右寄せ） -->
+                                    <div class="d-flex gap-1 justify-content-end">
+                                        <button class="btn btn-sm join-button text-nowrap
+                                            {% if not current_user.is_authenticated %}btn-secondary disabled
+                                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}btn-secondary disabled
+                                            {% elif current_user.id in schedule.participants %}btn-danger
+                                            {% else %}btn-primary{% endif %}"
+                                            data-schedule-id="{{ schedule.schedule_id }}"
+                                            data-schedule-date="{{ schedule.date }}"
+                                            onclick="joinSchedule(this)"
+                                            {% if not current_user.is_authenticated or
+                                                (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and
+                                                current_user.id not in schedule.participants) %}disabled{% endif %}>
+                                            {% if not current_user.is_authenticated %}参加
+                                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}満員御礼
+                                            {% elif current_user.id in schedule.participants %}参加済
+                                            {% else %}参加{% endif %}
+                                        </button>
+                                        {% if current_user.is_authenticated %}
+                                        <button class="btn btn-sm text-nowrap
+                                            {% if current_user.id in schedule.get('tara_participants', []) %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                                            data-schedule-id="{{ schedule.schedule_id }}"
+                                            data-schedule-date="{{ schedule.date }}"
+                                            onclick="taraSchedule(this)">
+                                            {% if current_user.id in schedule.get('tara_participants', []) %}たら済 ✓{% else %}たら{% endif %}
+                                        </button>
                                         {% else %}
-                                            <div class="badge bg-success">募集中</div>
-                                        {% endif %}                                    
+                                        <button class="btn btn-sm text-nowrap btn-secondary" disabled>たら</button>
+                                        {% endif %}
+                                        <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
+                                           class="btn btn-sm btn-outline-secondary text-nowrap"
+                                           title="この練習のURLをシェア">🔗</a>
                                     </div>
-                            
-                                    
-                                    <!-- 時間と参加ボタン -->
-                                    
-                                        <button
-                                        class="btn btn-sm join-button m-1 text-nowrap                                          
-                                        {% if not current_user.is_authenticated %}
-                                            btn-secondary disabled
-                                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
-                                            btn-secondary disabled
-                                        {% elif current_user.id in schedule.participants %}
-                                            btn-danger
-                                        {% else %}
-                                            btn-primary
-                                        {% endif %}"
-                                        data-schedule-id="{{ schedule.schedule_id }}" 
-                                        data-schedule-date="{{ schedule.date }}" 
-                                        onclick="joinSchedule(this)"
-                                        {% if not current_user.is_authenticated or 
-                                            (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and 
-                                            current_user.id not in schedule.participants) %}disabled{% endif %}>
-                                        
-                                        {% if not current_user.is_authenticated %}
-                                            参加
-                                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
-                                            満員御礼
-                                        {% elif current_user.id in schedule.participants %}
-                                            参加済
-                                        {% else %}
-                                            参加
-                                        {% endif %}
-                                    </button>                                  
-                                    
-                                    <!-- 「たら」ボタン -->
-                                {% if current_user.is_authenticated %}
-                                    <button class="btn btn-sm text-nowrap
-                                        {% if current_user.id in schedule.get('tara_participants', []) %}
-                                            btn-warning
-                                        {% else %}
-                                            btn-outline-warning
-                                        {% endif %}"
-                                        data-schedule-id="{{ schedule.schedule_id }}"
-                                        data-schedule-date="{{ schedule.date }}"
-                                        onclick="taraSchedule(this)">
-                                        
-                                        {% if current_user.id in schedule.get('tara_participants', []) %}
-                                            たら済 ✓
-                                        {% else %}
-                                            たら
-                                        {% endif %}
-                                    </button>
-                                {% else %}
-                                    <!-- ログインしていない場合は無効なボタンを表示 -->
-                                    <button class="btn btn-sm text-nowrap btn-secondary disabled" disabled>
-                                        たら
-                                    </button>
-                                {% endif %}
-
-                                <!-- 個別URLリンク -->
-                                <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
-                                   class="btn btn-sm btn-outline-secondary text-nowrap"
-                                   title="この練習のURLをシェア">
-                                  🔗
-                                </a>
+                                </div>
                             </h2>
                             
                             {% if current_user.is_authenticated and current_user.administrator %}

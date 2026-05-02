@@ -147,11 +147,6 @@
             background: #f0f0f0;
         }
         
-        /* 日本語ニュース専用スタイル（画像なし） */
-        .news-card.jp-news .news-content {
-            padding: 30px 20px 20px 20px; /* 上部パディング増加 */
-        }
-        
         .news-content {
             padding: 20px;
         }
@@ -163,10 +158,11 @@
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
-        
+
         .news-meta {
             display: flex;
             justify-content: space-between;
@@ -194,10 +190,11 @@
             line-height: 1.5;
             display: -webkit-box;
             -webkit-line-clamp: 3;
+            line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
-        
+
         .pagination {
             text-align: center;
             margin-top: 40px;
@@ -256,15 +253,13 @@
     </style>
 
     <div class="header">
-        <h1>🏸 バドミントンニュース</h1>
-        
-        <!-- 管理者コントロール -->
-        <!-- <div class="admin-controls">
-            <button class="collect-btn" onclick="collectNews()">📥 ニュース収集実行</button>
-            <button class="collect-btn" onclick="autoRefresh()">🔄 自動更新 ON/OFF</button>
-            <div id="status" class="status"></div>
-        </div> -->
-        
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+            <h1 style="margin:0;">🏸 バドミントンニュース</h1>
+            {% if updated_at %}
+            <span style="font-size:13px; color:#999; align-self:flex-end;">最終更新: {{ updated_at }}</span>
+            {% endif %}
+        </div>
+
         <!-- フィルタータブ -->
         <div class="filter-tabs">
             <a href="/bad_news?kind=news&lang=ja" class="tab {{ 'active' if kind=='news' and lang=='ja' }}">📰 日本語ニュース</a>
@@ -276,35 +271,36 @@
 
     <div class="news-grid">
         {% for item in rows %}
-        <article class="news-card {{ 'jp-news' if lang == 'ja' and kind == 'news' }}">
-            {# ニュース（日本語・英語問わず）は画像を表示しない。動画のみ画像表示 #}
-            {% if kind == 'video' %}
-                {% if item.image_url %}
-                    <img src="{{ item.image_url }}" alt="{{ item.title }}" class="news-image" 
-                        onerror="this.style.display='none'">
-                {% else %}
-                    <div class="news-image" style="background: linear-gradient(45deg, #f0f0f0, #e0e0e0); display: flex; align-items: center; justify-content: center; color: #999;">
-                        🎥
-                    </div>
-                {% endif %}
+        <article class="news-card">
+            {% if item.image_url %}
+                <img src="{{ item.image_url }}" alt="{{ item.title }}" class="news-image"
+                     loading="lazy" onerror="this.style.display='none'">
+            {% elif item.kind == 'video' %}
+                <div class="news-image" style="background: linear-gradient(45deg, #f0f0f0, #e0e0e0); display: flex; align-items: center; justify-content: center; color: #999; font-size: 2rem;">
+                    🎥
+                </div>
             {% endif %}
-            
+
             <div class="news-content">
                 <h2 class="news-title">
                     <a href="{{ item.url }}" target="_blank" style="text-decoration: none; color: inherit;">
                         {{ item.title }}
                     </a>
                 </h2>
-                
+
                 <div class="news-meta">
                     <span class="news-type {{ item.kind }}">{{ '動画' if item.kind == 'video' else 'ニュース' }}</span>
                     <span>{{ item.published_at[:10] if item.published_at else '日付不明' }}</span>
                 </div>
-                
+
                 {% if item.author %}
-                    <p style="font-size: 13px; color: #888; margin: 8px 0;">出典: {{ item.author }}</p>
-                {% endif %}                
-                
+                <p style="font-size: 13px; color: #888; margin: 4px 0 8px;">出典: {{ item.author }}</p>
+                {% endif %}
+
+                {% set summary = item.summary | default('') %}
+                {% if summary %}
+                <p class="news-summary">{{ summary | striptags }}</p>
+                {% endif %}
             </div>
         </article>
         {% endfor %}
