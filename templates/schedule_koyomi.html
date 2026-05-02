@@ -109,6 +109,23 @@
     position: relative;
     pointer-events: auto;
 }
+
+.avatar-ig{
+    --size: 28px;
+    --ring: 2px;
+    --gap: 1px;
+    display:inline-grid; place-items:center;
+    width:calc(var(--size) + (var(--ring)+var(--gap))*2);
+    height:calc(var(--size) + (var(--ring)+var(--gap))*2);
+    border-radius:50%;
+    padding:calc(var(--ring) + var(--gap));
+    background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75);
+}
+.avatar-ig>img{
+    width:var(--size); height:var(--size);
+    border-radius:50%; object-fit:cover; display:block;
+    background:#fff; box-shadow:0 0 0 var(--gap) #fff;
+}
 </style>
 
 <div class="container">       
@@ -173,7 +190,8 @@
                                         {% for s in day.schedules %}
                                         {% set eff_max = s.adjusted_max if s.adjusted_max else s.max_participants %}
                                         {% set is_full = s.participants_count >= eff_max %}
-                                        <div class="cal-sched-item">
+                                        <div class="cal-sched-item" style="cursor:pointer;"
+                                             data-href="{{ url_for('schedule_detail', schedule_id=s.schedule_id, date=s.date) }}">
                                             <div class="cal-count">
                                                 {% if is_full %}
                                                 <span class="badge bg-warning text-dark" style="font-size:0.55rem;">満</span>
@@ -225,151 +243,111 @@
             </div>
            
 
-                <!-- アコーディオン -->
-        <div class="accordion" id="scheduleAccordion">
+                <div>
             {% for schedule in schedules %}
-            <div class="accordion-item">
-                                        
-                        <!-- イベント個別コメント・注意書き（中央揃え・暖色） -->
-                        {% if schedule.comment %}
-                            <div class="mb-2 text-center">
-                                <div class="fw-bold text-warning" style="white-space: pre-line;"><i class="fas fa-info-circle me-1"></i>{{ schedule.comment }}</div>
-                            </div>
-                        {% endif %}
-                                    
-                <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
-                    <div class="d-flex align-items-center justify-content-between">                    
-                        <!-- 日付と会場情報 -->
-                        <div class="d-flex align-items-center m-0 w-100">
-                            
+            <div class="border rounded mb-2 pb-1 schedule-card" style="cursor:pointer;"
+                 data-href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}">
 
-                            {% if current_user.is_authenticated and current_user.administrator %}
-                            <button class="accordion-button collapsed p-2 w-100" 
-                                    type="button" 
-                                    style="width: auto; box-shadow: none;"
-                                    data-bs-toggle="collapse" 
-                                    data-bs-target="#collapse{{ schedule.schedule_id }}"
-                                    aria-expanded="false"
-                                    aria-controls="collapse{{ schedule.schedule_id }}">
-                                {% else %}
-                                <!-- 一般ユーザー：見た目は同じ、クリック不可 -->
-                                <div class="accordion-button collapsed p-2 w-100"
-                                        style="width: auto; box-shadow: none; cursor: default;">
-                                {% endif %}
-                                    
-                                <div class="d-flex flex-column w-100" style="gap:4px;">
-                                    <!-- 1段目：日付・会場・募集状況 -->
-                                    <div class="d-flex align-items-center justify-content-between">
-                                        <span class="me-2">{{ schedule.date | format_date }}({{ schedule.day_of_week }})
-                                        {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
-                                        {{ schedule.venue }}{{ schedule.court }}</span>
-                                        <div class="text-end flex-shrink-0 ms-2">
-                                            募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
-                                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
-                                                <div class="badge bg-warning text-dark">満員御礼</div>
-                                            {% else %}
-                                                <div class="badge bg-success">募集中</div>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                    <!-- 2段目：操作ボタン群（右寄せ） -->
-                                    <div class="d-flex gap-1 justify-content-end">
-                                        <button class="btn btn-sm join-button text-nowrap
-                                            {% if not current_user.is_authenticated %}btn-secondary disabled
-                                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}btn-secondary disabled
-                                            {% elif current_user.id in schedule.participants %}btn-danger
-                                            {% else %}btn-primary{% endif %}"
-                                            data-schedule-id="{{ schedule.schedule_id }}"
-                                            data-schedule-date="{{ schedule.date }}"
-                                            onclick="joinSchedule(this)"
-                                            {% if not current_user.is_authenticated or
-                                                (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and
-                                                current_user.id not in schedule.participants) %}disabled{% endif %}>
-                                            {% if not current_user.is_authenticated %}参加
-                                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}満員御礼
-                                            {% elif current_user.id in schedule.participants %}参加済
-                                            {% else %}参加{% endif %}
-                                        </button>
-                                        {% if current_user.is_authenticated %}
-                                        <button class="btn btn-sm text-nowrap
-                                            {% if current_user.id in schedule.get('tara_participants', []) %}btn-warning{% else %}btn-outline-warning{% endif %}"
-                                            data-schedule-id="{{ schedule.schedule_id }}"
-                                            data-schedule-date="{{ schedule.date }}"
-                                            onclick="taraSchedule(this)">
-                                            {% if current_user.id in schedule.get('tara_participants', []) %}たら済 ✓{% else %}たら{% endif %}
-                                        </button>
-                                        {% else %}
-                                        <button class="btn btn-sm text-nowrap btn-secondary" disabled>たら</button>
-                                        {% endif %}
-                                        <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
-                                           class="btn btn-sm btn-outline-secondary text-nowrap"
-                                           title="この練習のURLをシェア">🔗</a>
-                                    </div>
-                                </div>
-                            </h2>
-                            
-                            {% if current_user.is_authenticated and current_user.administrator %}
-                            <div id="collapse{{ schedule.schedule_id }}" 
-                                class="accordion-collapse collapse" 
-                                aria-labelledby="heading{{ schedule.schedule_id }}"
-                                data-bs-parent="#scheduleAccordion">
-                            <div class="accordion-body">
-                                <!-- 参加者一覧 -->
-                                <div class="text-start">
-                                    <h5 class="mb-3">
-                                        <i class="bi bi-people-fill text-primary"></i>
-                                        <a href="{{ url_for('day_of_participants', date=schedule.date) }}" class="text-decoration-none text-dark">
-                                            参加者一覧 ({{ schedule.participants_count }}人)
-                                        </a>
-                                    </h5>
-                                    {% if schedule.participants_info %}                                             
-                                        <div class="row">
-                                        {% for participant in schedule.participants_info %}
-                                            <div class="col-md-3 col-sm-4 mb-1">
-                                            <div class="card">
-                                                <div class="card-body py-2">
-                                                    <span class="participant-name">
-                                                        {{ participant.display_name }}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            </div>
-                                        {% endfor %}
-                                        </div>
-                                    {% else %}
-                                        <p class="text-muted">まだ参加者がいません</p>
-                                    {% endif %}
-                                    
-                                    <!-- 「たら」参加者一覧を追加 -->
-                                    {% if schedule.tara_participants_info %}
-                                        <h5 class="mb-3 mt-4">
-                                            <i class="bi bi-question-circle text-warning"></i>
-                                            たら ({{ schedule.tara_count }}人)
-                                        </h5>
-                                        <div class="row">
-                                        {% for tara_participant in schedule.tara_participants_info %}
-                                            <div class="col-md-3 col-sm-4 mb-1">
-                                            <div class="card border-warning">
-                                                <div class="card-body py-2">
-                                                    <span class="participant-name text-warning">
-                                                        {{ tara_participant.display_name }}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            </div>
-                                        {% endfor %}
-                                        </div>
-                                    {% else %}
-                                        <h5 class="mb-2 mt-4">
-                                            <i class="bi bi-question-circle text-warning"></i>
-                                            たら (0人)
-                                        </h5>
-                                        <p class="text-muted">たらはいません</p>
-                                    {% endif %}
-                                </div>
+                {% if schedule.comment %}
+                <div class="mb-2 text-center">
+                    <div class="fw-bold text-warning" style="white-space: pre-line;">
+                    <i class="fas fa-info-circle me-1"></i>{{ schedule.comment }}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="px-2 pt-2">
+                    <div class="py-2 px-2">
+                        <div class="d-flex w-100 align-items-center justify-content-between gap-2">
+                            <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
+                            <span class="me-2">
+                                {{ schedule.date | format_date }}({{ schedule.day_of_week }})
+                                {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
+                                {{ schedule.venue }}{{ schedule.court }}
+                            </span>
                             </div>
+                            <div class="text-end">
+                            募集 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
+                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
+                                <span class="badge bg-warning text-dark">満員御礼</span>
+                            {% else %}
+                                <span class="badge bg-success">募集中</span>
+                            {% endif %}
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- 操作ボタン群（下段・右寄せ） -->
+                    <div class="d-flex align-items-center gap-2 justify-content-end pb-1">
+                        <button
+                        class="btn btn-sm join-button text-nowrap
+                            {% if not current_user.is_authenticated %}
+                            btn-secondary
+                            {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
+                            btn-secondary
+                            {% elif current_user.id in schedule.participants %}
+                            btn-danger
+                            {% else %}
+                            btn-primary
+                            {% endif %}"
+                        {% if not current_user.is_authenticated or
+                                (schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and
+                                current_user.id not in schedule.participants) %}disabled{% endif %}
+                        data-schedule-id="{{ schedule.schedule_id }}"
+                        data-schedule-date="{{ schedule.date }}"
+                        onclick="joinSchedule(this)">
+                        {% if not current_user.is_authenticated %}
+                            参加
+                        {% elif schedule.participants_count >= (schedule.adjusted_max if schedule.get('adjusted_max') else schedule.max_participants) and current_user.id not in schedule.participants %}
+                            満員御礼
+                        {% elif current_user.id in schedule.participants %}
+                            参加済
+                        {% else %}
+                            参加
                         {% endif %}
+                        </button>
+
+                        {% if current_user.is_authenticated %}
+                        <button class="btn btn-sm text-nowrap
+                                {% if current_user.id in schedule.get('tara_participants', []) %}
+                                btn-warning
+                                {% else %}
+                                btn-outline-warning
+                                {% endif %}"
+                                data-schedule-id="{{ schedule.schedule_id }}"
+                                data-schedule-date="{{ schedule.date }}"
+                                onclick="taraSchedule(this)">
+                        {% if current_user.id in schedule.get('tara_participants', []) %}たら済 ✓{% else %}たら{% endif %}
+                        </button>
+                        {% else %}
+                        <button class="btn btn-sm text-nowrap btn-secondary" disabled>たら</button>
+                        {% endif %}
+
+                    </div>
+
+                    {% if current_user.is_authenticated %}
+                    {% set plist = schedule.participants_info | default([]) %}
+                    {% if plist %}
+                    <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
+                        {% for p in plist[:7] %}
+                        <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;" title="{{ p.display_name }}">
+                        <img
+                            src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                            alt="{{ p.display_name }}"
+                            width="28" height="28" loading="lazy" decoding="async"
+                            class="rounded-circle" style="object-fit:cover;"
+                            onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                        </span>
+                        {% endfor %}
+                        {% if plist|length > 7 %}
+                        <span class="badge bg-secondary ms-1">+{{ plist|length - 7 }}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% endif %}
+
+                    </div>
+
                     </div>
                     {% endfor %}
                 </div>
@@ -394,6 +372,14 @@
     </div>
 
 <script>
+    document.querySelectorAll('.schedule-card, .cal-sched-item').forEach(card => {
+        card.addEventListener('click', function(e) {
+            if (!e.target.closest('button, a')) {
+                window.location.href = this.dataset.href;
+            }
+        });
+    });
+
     async function joinSchedule(button) {
         const scheduleId = button.getAttribute('data-schedule-id');
         const scheduleDate = button.getAttribute('data-schedule-date');

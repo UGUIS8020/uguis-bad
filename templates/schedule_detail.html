@@ -8,11 +8,9 @@
     <div class="card-body">
 
       {# ── タイトル ── #}
-      <h4 class="fw-bold mb-1">
+      <p class="fw-bold mb-1" style="font-size:1.25rem;">
         {{ schedule.date | format_date }}({{ schedule.day_of_week }})
-      </h4>
-      <p class="text-muted mb-3">
-        {{ schedule.start_time }} 〜 {{ schedule.end_time }}
+        &nbsp;{{ schedule.start_time }} 〜 {{ schedule.end_time }}
       </p>
 
       {# ── コメント・お知らせ ── #}
@@ -103,12 +101,14 @@
       <div class="d-flex flex-wrap gap-2">
         {% for p in participants_info %}
         <div class="text-center" style="width:48px;">
-          <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-               alt="{{ p.display_name }}"
-               width="40" height="40"
-               class="rounded-circle border"
-               style="object-fit:cover;"
-               onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+          <a href="{{ url_for('users.user_profile', user_id=p.user_id) }}">
+            <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                 alt="{{ p.display_name }}"
+                 width="40" height="40"
+                 class="rounded-circle border"
+                 style="object-fit:cover;"
+                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+          </a>
           <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
             {{ p.display_name }}
           </div>

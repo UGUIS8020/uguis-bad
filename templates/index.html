@@ -203,10 +203,10 @@
             </div>
            
 
-                <!-- アコーディオン（修正版） -->
-                <div class="accordion" id="scheduleAccordion">
+                <div>
                 {% for schedule in schedules %}
-                <div class="accordion-item">
+                <div class="border rounded mb-2 pb-1 schedule-card" style="cursor:pointer;"
+                     data-href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}">
 
                     {% if schedule.comment %}
                     <div class="mb-2 text-center">
@@ -228,29 +228,16 @@
                     {% endif %}               
 
 
-                    <!-- ヘッダー行：上段 = アコーディオンボタン / 下段 = 操作ボタン -->
                     <div class="px-2 pt-2">
-                     <h2 class="accordion-header" id="heading{{ schedule.schedule_id }}">
-
-                        {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %} 
-                        
-                        <button class="accordion-button collapsed py-2 px-2"
-                                type="button"
-                                data-bs-toggle="collapse"
-                                data-bs-target="#collapse{{ schedule.schedule_id }}"
-                                aria-expanded="false"
-                                aria-controls="collapse{{ schedule.schedule_id }}"
-                                style="box-shadow:none;">
+                     <div class="py-2 px-2">
                         <div class="d-flex w-100 align-items-center justify-content-between gap-2">
                             <div class="d-flex align-items-center flex-grow-1" style="min-width:0;">
-                            <span class="me-2">                                
-
+                            <span class="me-2">
                                 {{ schedule.date | format_date }}({{ schedule.day_of_week }})
                                 {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
-                                {{ schedule.venue }}{{ schedule.court }}   
-
+                                {{ schedule.venue }}{{ schedule.court }}
+                            </span>
                             </div>
-                            
                             <div class="text-end">
                             募集 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
                             {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
@@ -259,32 +246,8 @@
                                 <span class="badge bg-success">募集中</span>
                             {% endif %}
                             </div>
-
                         </div>
-                        </button>
-                        {% else %}
-                        <!-- 一般ユーザーは開閉不可のダミーボタン（disabled） -->
-                        <button class="accordion-button collapsed py-2 px-2" type="button" disabled style="cursor:default; box-shadow:none;">
-                        <div class="d-flex w-100 align-items-center justify-content-between gap-2">
-                            <div class="d-flex align-items-center flex-grow-1">
-                            <span class="me-2">
-                                {{ schedule.date | format_date }}({{ schedule.day_of_week }})
-                                {{ schedule.start_time }} ~ {{ schedule.end_time }}<br>
-                                {{ schedule.venue }}{{ schedule.court }}
-                            </span>
-                            </div>
-                            <div class="text-end">
-                            募集人数 {{ schedule.participants_count }}/{{ schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants }}
-                            {% if schedule.participants_count >= (schedule.adjusted_max if schedule.adjusted_max else schedule.max_participants) %}
-                                <span class="badge bg-warning text-dark">満員御礼</span>
-                            {% else %}
-                                <span class="badge bg-success">募集中</span>
-                            {% endif %}
-                            </div>
-                        </div>
-                        </button>
-                        {% endif %}
-                    </h2>
+                     </div>
 
                     <!-- 操作ボタン群（下段・右寄せ） -->
                     <div class="d-flex align-items-center gap-2 justify-content-end pb-1">
@@ -334,12 +297,6 @@
                         <button class="btn btn-sm text-nowrap btn-secondary" disabled>たら</button>
                         {% endif %}
 
-                        <!-- 個別URLコピー -->
-                        <a href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}"
-                           class="btn btn-sm btn-outline-secondary text-nowrap"
-                           title="この練習のURLをシェア">
-                          🔗
-                        </a>
                     </div>
                    
                     </div>
@@ -367,105 +324,6 @@
                             {% endif %}
                             {% endif %}
 
-                    {# 判定：システム管理者、または、この予定のチーム管理者である場合 #}
-                    {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %}
-                    <div id="collapse{{ schedule.schedule_id }}"
-                        class="accordion-collapse collapse"
-                        aria-labelledby="heading{{ schedule.schedule_id }}"
-                        data-bs-parent="#scheduleAccordion">
-                    <div class="accordion-body">
-                        <!-- 参加者一覧など（元のまま） -->
-                        <div class="text-start">
-                        <h5 class="mb-3">
-                            <!-- Bootstrap Icons を使うなら CDN 読み込み要。無ければ Font Awesome に置換を -->
-                            <i class="bi bi-people-fill text-primary"></i>
-                            <a href="{{ url_for('day_of_participants', date=schedule.date) }}" class="text-decoration-none text-dark">
-                            参加者一覧 ({{ schedule.participants_count }}人)
-                            </a>
-                        </h5>
-
-                        {% if schedule.participants_info %}
-                        <div id="participants-{{ schedule.schedule_id }}">
-                        <div class="row">
-                            {% for participant in schedule.participants_info %}
-                            <div class="col-md-3 col-sm-4 mb-1">
-                                <div class="card">
-                                <div class="card-body py-2 d-flex justify-content-between align-items-center">
-                                    <a href="{{ url_for('users.user_profile', user_id=participant.get('user_id') or participant.get('user#user_id')) }}"
-                                    class="participant-name text-decoration-none text-dark flex-grow-1"
-                                    data-count="{{ participant.get('join_count', 0) }}">
-                                    {{ participant.display_name }}
-                                    </a>
-
-                                    <!-- 削除ボタン（印刷では消すなら no-print を付ける） -->
-                                    <button class="btn btn-sm btn-danger ms-2 no-print"
-                                            onclick="removeParticipant('{{ schedule.schedule_id }}', '{{ participant.get('user_id') or participant.get('user#user_id') }}', '{{ schedule.date }}')"
-                                            title="参加者を削除">
-                                    ×
-                                    </button>
-                                </div>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                        </div>
-                        {% else %}
-                        <p class="text-muted">まだ参加者がいません</p>
-                        {% endif %}
-
-                        {% if schedule.tara_participants_info %}
-                        <h5 class="mb-3 mt-4">
-                        <i class="bi bi-question-circle text-warning"></i>
-                        たら ({{ schedule.tara_count }}人)
-                        </h5>
-                        <div class="row">
-                        {% for tara_participant in schedule.tara_participants_info %}
-                        <div class="col-md-3 col-sm-4 mb-1">
-                            <div class="card border-warning">
-                            <div class="card-body py-2">
-                                <a
-                                href="{{ url_for('users.user_profile', user_id=tara_participant.get('user_id') or tara_participant.get('user#user_id')) }}"
-                                class="participant-name text-warning text-decoration-none"
-                                >
-                                {{ tara_participant.display_name }}
-                                </a>
-                            </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                        </div>
-                        {% else %}
-                        <h5 class="mb-2 mt-4">
-                        <i class="bi bi-question-circle text-warning"></i>たら (0人)
-                        </h5>
-                        <p class="text-muted">たらはいません</p>
-                        {% endif %}
-                        </div>
-
-                        <div class="mt-4 d-flex align-items-center justify-content-end gap-2 no-print border-top pt-3">
-    
-                        {# チーム管理者またはシステム管理者の場合のみ「編集」を表示 #}
-                        {% if current_user.is_authenticated and (current_user.administrator or (current_user.role == 'admin' and current_user.team_id == schedule.team_id)) %}
-                            
-                            <a href="{{ url_for('schedule.edit_schedule', schedule_id=schedule.schedule_id) }}" 
-                            class="btn btn-sm btn-outline-primary">
-                            <i class="bi bi-pencil-square"></i> 編集
-                            </a>
-
-                        {% endif %}
-
-                        {# 印刷ボタンは共通で表示 #}
-                        <button type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                onclick="printParticipantsTable('{{ schedule.date }}', 'participants-{{ schedule.schedule_id }}')">
-                            <i class="bi bi-printer"></i> 印刷
-                        </button>
-                        
-                    </div>
-                        
-                    </div>
-                    </div>
-                    {% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -541,6 +399,14 @@
     </div>
 
 <script>
+    document.querySelectorAll('.schedule-card').forEach(card => {
+        card.addEventListener('click', function(e) {
+            if (!e.target.closest('button, a')) {
+                window.location.href = this.dataset.href;
+            }
+        });
+    });
+
     let isJoining = false;
     let isTaraJoining = false;
 

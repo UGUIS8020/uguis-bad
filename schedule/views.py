@@ -56,7 +56,7 @@ def admin_schedules():
         logger.info("フォームバリデーション成功")
         try:
             schedule_table = get_schedule_table()
-            schedule_id = str(uuid.uuid4())
+            schedule_id = uuid.uuid4().hex[:8]
 
             # --- 2. 保存データに team_id を追加 ---
             schedule_data = {

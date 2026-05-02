@@ -1039,10 +1039,19 @@ def schedule_koyomi(year=None, month=None):
                 uid = item["S"] if isinstance(item, dict) else item
                 user = user_cache.get(uid)
                 if user:
+                    url = (user.get("profile_image_url") or "").strip()
                     p_info.append({
                         "user_id": user["user#user_id"],
-                        "display_name": user.get("display_name", "不明")
+                        "display_name": user.get("display_name", "不明"),
+                        "profile_image_url": url if url and url.lower() != "none" else None,
+                        "is_admin": bool(user.get("administrator")),
+                        "join_count": int(user.get("practice_count") or 0),
                     })
+            p_info.sort(key=lambda x: (
+                not x.get("is_admin", False),
+                x.get("join_count", 0),
+                x.get("display_name", "")
+            ))
             schedule["participants_info"] = p_info
         
         # カレンダーデータ構築
@@ -2469,11 +2478,6 @@ def profile_image_edit(user_id):
         table = app.dynamodb.Table(app.table_name)
         resp = table.get_item(Key=_user_key(user_id), ConsistentRead=True)
 
-        table.update_item(
-            Key=_user_key(user_id),
-            UpdateExpression="SET profile_image_url = :p, large_image_url = :l, updated_at = :u",
-            ExpressionAttributeValues={...},
-        )
         user = resp.get('Item')
         if not user:
             flash('ユーザーが見つかりません。', 'error')

@@ -3001,28 +3001,6 @@ def submission_status():
 
 
 
-@bp_game.route("/api/submission_status")
-@login_required
-def submission_status():
-    if not current_user.administrator:
-        return jsonify({"error": "権限がありません"}), 403
-    
-    match_id = request.args.get("match_id")
-    if not match_id:
-        return jsonify({"error": "match_idが必要です"}), 400
-
-    result_table = current_app.dynamodb.Table("bad-game-results")
-    resp = result_table.scan(
-        FilterExpression=Attr("match_id").eq(str(match_id))
-    )
-    submitted_count = len(resp.get("Items", []))
-
-    return jsonify({
-        "match_id": match_id,
-        "submitted_count": submitted_count
-    })
-
-
 def clean_team(team):
     from flask import current_app
     current_app.logger.info(f"🧼 clean_team() 入力: {team}")
