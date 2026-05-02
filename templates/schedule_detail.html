@@ -15,38 +15,30 @@
         {{ schedule.date | format_date }}({{ schedule.day_of_week }})
         &nbsp;{{ schedule.start_time }} 〜 {{ schedule.end_time }}
       </p>
+      <p class="mb-1 text-muted">{{ schedule.venue }}{% if schedule.court %} {{ schedule.court }}{% endif %}</p>
+      <p class="mb-3">
+        {{ count }} / {{ max_p }} 人
+        {% if is_full %}
+          <span class="badge bg-warning text-dark ms-1">満員御礼</span>
+        {% else %}
+          <span class="badge bg-success ms-1">募集中</span>
+        {% endif %}
+      </p>
 
       {# ── コメント・お知らせ ── #}
       {% if schedule.comment %}
       <div class="alert alert-warning py-2 mb-3" style="white-space: pre-line;">{{ schedule.comment }}</div>
       {% endif %}
 
-      {# ── 詳細情報 ── #}
-      <table class="table table-sm mb-3">
-        <tbody>
-          <tr>
-            <th class="text-muted fw-normal" style="width:6rem;">場所</th>
-            <td>{{ schedule.venue }}{% if schedule.court %} {{ schedule.court }}{% endif %}</td>
-          </tr>
-          {% if schedule.get('note') %}
-          <tr>
-            <th class="text-muted fw-normal">備考</th>
-            <td>{{ schedule.note }}</td>
-          </tr>
-          {% endif %}
-          <tr>
-            <th class="text-muted fw-normal">募集状況</th>
-            <td>
-              {{ count }} / {{ max_p }} 人
-              {% if is_full %}
-                <span class="badge bg-warning text-dark ms-1">満員御礼</span>
-              {% else %}
-                <span class="badge bg-success ms-1">募集中</span>
-              {% endif %}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      {# ── 詳細（個別ページのみ） ── #}
+      {% if schedule.detail %}
+      <div class="mb-3" style="white-space: pre-line;">{{ schedule.detail }}</div>
+      {% endif %}
+
+      {# ── 備考 ── #}
+      {% if schedule.get('note') %}
+      <p class="text-muted small mb-3">{{ schedule.note }}</p>
+      {% endif %}
 
       {# ── 参加ボタン ── #}
       {% if current_user.is_authenticated %}
@@ -147,6 +139,77 @@ function copyUrl() {
       btn.classList.replace('btn-success', 'btn-outline-secondary');
     }, 2000);
   });
+}
+
+let isJoining = false;
+let isTaraJoining = false;
+
+async function joinSchedule(button) {
+  if (isJoining) return;
+  const scheduleId = button.getAttribute('data-schedule-id');
+  const scheduleDate = button.getAttribute('data-schedule-date');
+  if (!scheduleId || !scheduleDate) { alert('スケジュール情報が不足しています。'); return; }
+  isJoining = true;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = '処理中...';
+  try {
+    const response = await fetch(`/schedule/${scheduleId}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+      },
+      body: JSON.stringify({ date: scheduleDate })
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      alert(errorData.message || 'エラーが発生しました');
+      isJoining = false; button.disabled = false; button.textContent = originalText;
+      return;
+    }
+    const data = await response.json();
+    if (data.message) alert(data.message);
+    location.reload();
+  } catch (error) {
+    alert('通信エラー: ' + error.message);
+    isJoining = false; button.disabled = false; button.textContent = originalText;
+  }
+}
+
+async function taraSchedule(button) {
+  if (isTaraJoining) return;
+  const scheduleId = button.getAttribute('data-schedule-id');
+  const scheduleDate = button.getAttribute('data-schedule-date');
+  if (!scheduleId || !scheduleDate) { alert('スケジュール情報が不足しています。'); return; }
+  isTaraJoining = true;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = '処理中...';
+  try {
+    const response = await fetch('/tara_join', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+      },
+      body: JSON.stringify({ schedule_id: scheduleId, schedule_date: scheduleDate })
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      alert(errorData.message || 'エラーが発生しました');
+      isTaraJoining = false; button.disabled = false; button.textContent = originalText;
+      return;
+    }
+    const data = await response.json();
+    if (data.message) alert(data.message);
+    location.reload();
+  } catch (error) {
+    alert('通信エラーが発生しました');
+    isTaraJoining = false; button.disabled = false; button.textContent = originalText;
+  }
 }
 </script>
 {% endblock %}

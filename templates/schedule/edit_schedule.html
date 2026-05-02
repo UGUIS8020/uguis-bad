@@ -78,6 +78,18 @@
             <div class="form-text">日付・会場とは別に目立たせたいタイトルがあれば入力してください</div>
         </div>
 
+        <!-- 詳細（個別ページのみ） -->
+        <div class="mb-3">
+            <label for="detail" class="form-label">詳細（個別ページのみ表示）</label>
+            <textarea class="form-control"
+                      id="detail"
+                      name="detail"
+                      rows="5"
+                      maxlength="1000"
+                      placeholder="個別ページに表示する詳細情報（アクセス方法、持ち物リスト、スケジュール詳細など）">{{ schedule.get('detail', '') }}</textarea>
+            <div class="form-text">トップページには表示されません。個別ページ専用の詳細情報です。</div>
+        </div>
+
         <!-- ★ コメント入力欄を追加 -->
         <div class="mb-3">
             <label for="comment" class="form-label">コメント・注意書き</label>
