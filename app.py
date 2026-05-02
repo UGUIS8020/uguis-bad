@@ -2754,6 +2754,51 @@ def run_badnews():
     total = collect_badminton_news()
     return f"collect ok ({total})"
 
+@app.route("/admin/fix_news_images")
+def fix_news_images():
+    """Google Newsロゴが入ってる既存レコードのimage_urlを再取得して修正する"""
+    table = current_app.bad_table
+    google_domains = ("news.google.com", "lh3.googleusercontent.com",
+                      "lh4.googleusercontent.com", "lh5.googleusercontent.com",
+                      "lh6.googleusercontent.com")
+    fixed = 0
+    cleared = 0
+    scanned = 0
+
+    # Scan全件（ニューステーブルは件数が限られるので許容）
+    kwargs = {"FilterExpression": Attr("image_url").exists()}
+    while True:
+        resp = table.scan(**kwargs)
+        for item in resp.get("Items", []):
+            scanned += 1
+            img = item.get("image_url") or ""
+            if not any(d in img for d in google_domains):
+                continue
+            url = item.get("url", "")
+            new_img = extract_og_image(url) if url else None
+            if new_img:
+                table.update_item(
+                    Key={"pk": item["pk"], "sk": item["sk"]},
+                    UpdateExpression="SET image_url = :v",
+                    ExpressionAttributeValues={":v": new_img}
+                )
+                fixed += 1
+            else:
+                # 取得できなかった場合は属性ごと削除
+                table.update_item(
+                    Key={"pk": item["pk"], "sk": item["sk"]},
+                    UpdateExpression="REMOVE image_url"
+                )
+                cleared += 1
+
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+
+    return (f"scanned={scanned}, fixed={fixed} (new image), "
+            f"cleared={cleared} (google logo removed)")
+
 # ---- 収集系ユーティリティ ----
 REAL_UA = {"User-Agent": (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -2811,10 +2856,19 @@ def iso(dt):
 
 def extract_og_image(url: str, timeout=6):
     try:
-        resp = requests.get(url, timeout=timeout, headers=REAL_UA, allow_redirects=True)
+        from urllib.parse import urlparse
+        # HEADでリダイレクト先を解決（ボディ取得なしで高速）
+        head = requests.head(url, timeout=timeout, headers=REAL_UA, allow_redirects=True)
+        final_url = head.url
+
+        # リダイレクト後もGoogle Newsのままなら画像なしで返す
+        if "news.google.com" in urlparse(final_url).netloc:
+            return None
+
+        # リダイレクト先の記事ページからOG画像を取得
+        resp = requests.get(final_url, timeout=timeout, headers=REAL_UA, allow_redirects=True)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        # 優先順: og:image:secure_url → og:image → twitter:image
         for prop, attr in [("og:image:secure_url", "property"),
                            ("og:image", "property"),
                            ("twitter:image", "name")]:
@@ -2956,11 +3010,18 @@ def bad_news():
         except Exception:
             last_evaluated_key = None
 
-    # 重複除去後に十分な件数を確保するため多めに取得
-    items, lek = bad_query_items(kind=kind, lang=lang, limit=80, last_evaluated_key=last_evaluated_key)
-
-    # タイトル類似度で重複記事を除去してから先頭40件に絞る
-    items = dedup_by_title(items)[:40]
+    if kind == "tournament":
+        # 大会情報は日英両方を取得して published_at 降順で結合
+        items_ja, _ = bad_query_items(kind="tournament", lang="ja", limit=80)
+        items_en, _ = bad_query_items(kind="tournament", lang="en", limit=80)
+        all_items = items_ja + items_en
+        all_items.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+        items = dedup_by_title(all_items)[:40]
+        lek = None
+    else:
+        # 重複除去後に十分な件数を確保するため多めに取得
+        items, lek = bad_query_items(kind=kind, lang=lang, limit=80, last_evaluated_key=last_evaluated_key)
+        items = dedup_by_title(items)[:40]
 
     # 最終更新日時（掲載記事の最新 published_at の日付部分）
     dates = [i.get("published_at", "")[:10] for i in items if i.get("published_at")]
@@ -2998,28 +3059,140 @@ def bad_news_demo():
     ]
     return render_template("bad_news.html", rows=test_items)
 
+def fetch_bwf_news():
+    """BWF公式RSS → 取得できなければGoogle NewsでBWF大会情報を収集（英語）"""
+    count = 0
+
+    # BWF公式RSSを試みる
+    for rss_url in ["https://bwfbadminton.com/feed", "https://bwfbadminton.com/feed/"]:
+        try:
+            feed = feedparser.parse(rss_url)
+            for e in feed.entries:
+                link = getattr(e, "link", None)
+                if not link:
+                    continue
+                item = {
+                    "source": "bwf_rss",
+                    "kind": "tournament",
+                    "title": (getattr(e, "title", "") or "").strip(),
+                    "url": link,
+                    "published_at": iso(getattr(e, "published", None)),
+                    "summary": _strip_html(getattr(e, "summary", None)),
+                    "author": "BWF",
+                    "image_url": extract_og_image(link),
+                    "lang": "en",
+                }
+                if put_unique(item):
+                    count += 1
+            if count > 0:
+                break
+        except Exception as ex:
+            print(f"BWF RSS error: {ex}")
+
+    # BWF RSSが空の場合はGoogle Newsで補完
+    if count == 0:
+        for query in ["BWF World Tour badminton", "badminton championship 2026"]:
+            url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en&gl=US&ceid=US:en"
+            feed = feedparser.parse(url)
+            for e in feed.entries:
+                link = getattr(e, "link", None)
+                if not link:
+                    continue
+                item = {
+                    "source": "google_news_tournament",
+                    "kind": "tournament",
+                    "title": (getattr(e, "title", "") or "").strip(),
+                    "url": link,
+                    "published_at": iso(getattr(e, "published", None)),
+                    "summary": _strip_html(getattr(e, "summary", None)),
+                    "author": getattr(e, "source", {}).get("title") if hasattr(e, "source") else None,
+                    "image_url": extract_og_image(link),
+                    "lang": "en",
+                }
+                if put_unique(item):
+                    count += 1
+            time.sleep(1)
+
+    print(f"BWF/大会情報(en): {count}件の新しい記事を追加")
+    return count
+
+
+def fetch_tournament_news_ja():
+    """日本語の大会情報をGoogle Newsから収集"""
+    queries = [
+        "バドミントン 大会 2026",
+        "バドミントン チケット 大会",
+        "全日本バドミントン",
+        "ジャパンオープン バドミントン",
+        "バドミントン 国際大会",
+        "BWF バドミントン",
+    ]
+    count = 0
+    for query in queries:
+        url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=ja&gl=JP&ceid=JP:ja"
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries:
+                link = getattr(e, "link", None)
+                if not link:
+                    continue
+                title = (getattr(e, "title", "") or "").strip()
+                # 大会・チケット・選手権などのキーワードがタイトルに含まれるものに絞る
+                keywords = ["大会", "チケット", "選手権", "オープン", "カップ",
+                            "ジャパン", "全日本", "国際", "BWF", "Cup", "Open"]
+                if not any(kw in title for kw in keywords):
+                    continue
+                item = {
+                    "source": "google_news_tournament_ja",
+                    "kind": "tournament",
+                    "title": title,
+                    "url": link,
+                    "published_at": iso(getattr(e, "published", None)),
+                    "summary": _strip_html(getattr(e, "summary", None)),
+                    "author": getattr(e, "source", {}).get("title") if hasattr(e, "source") else None,
+                    "image_url": extract_og_image(link),
+                    "lang": "ja",
+                }
+                if put_unique(item):
+                    count += 1
+        except Exception as ex:
+            print(f"Tournament JP fetch error ({query}): {ex}")
+        time.sleep(1)
+
+    print(f"大会情報(ja): {count}件の新しい記事を追加")
+    return count
+
+
 # ---- データ収集実行 ----
 def collect_badminton_news():
     """バドミントンニュースを収集する"""
     print("バドミントンニュース収集を開始...")
-    
+
     total = 0
-    
+
     # 日本語ニュース
     total += fetch_google_news("バドミントン", "ja")
     time.sleep(1)
-    
+
     # 英語ニュース
     total += fetch_google_news("badminton", "en")
     time.sleep(1)
-    
+
     # 英語動画
     total += fetch_youtube_rss("badminton highlights", "en")
     time.sleep(1)
-    
+
     # 日本語動画
     total += fetch_youtube_rss("バドミントン 試合", "ja")
-    
+    time.sleep(1)
+
+    # BWF大会情報（英語）
+    total += fetch_bwf_news()
+    time.sleep(1)
+
+    # 大会情報（日本語）
+    total += fetch_tournament_news_ja()
+
     print(f"収集完了: 合計 {total}件の新しいコンテンツを追加")
     return total
 

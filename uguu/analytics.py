@@ -308,26 +308,36 @@ def analytics_member_health():
             continue
 
     three_months_ago = today - timedelta(days=90)
+    six_months_ago   = today - timedelta(days=180)
+
+    # 総メンバー = 直近6ヶ月以内に2回以上参加したユーザー
+    def _recent_count(dates):
+        return sum(1 for d in dates if d >= six_months_ago)
+
+    total_users = sum(1 for dates in user_dates.values() if _recent_count(dates) >= 2)
 
     # --- 離脱率 ---
-    # 1回以上参加済みで、最終参加が3ヶ月以上前のユーザー
-    total_users   = len(user_dates)
+    # 直近6ヶ月メンバーのうち、最終参加が3ヶ月以上前のユーザー
     churned_users = sum(
         1 for dates in user_dates.values()
-        if max(dates) < three_months_ago
+        if _recent_count(dates) >= 2 and max(dates) < three_months_ago
     )
     churn_rate = round(churned_users / total_users * 100, 1) if total_users else 0
 
     # --- 新規定着率 ---
-    # 初参加から3回以上来たユーザーの割合
-    retained_new = sum(1 for dates in user_dates.values() if len(dates) >= 3)
+    # 直近6ヶ月メンバーのうち累計3回以上参加したユーザーの割合
+    retained_new = sum(
+        1 for dates in user_dates.values()
+        if _recent_count(dates) >= 2 and len(dates) >= 3
+    )
     retention_rate = round(retained_new / total_users * 100, 1) if total_users else 0
 
     # --- アクティブ率 ---
-    # 直近3ヶ月以内に2回以上参加したユーザー / 全メンバー
+    # 直近3ヶ月以内に2回以上参加したユーザー / 直近6ヶ月メンバー
     active_users = sum(
         1 for dates in user_dates.values()
-        if sum(1 for d in dates if d >= three_months_ago) >= 2
+        if _recent_count(dates) >= 2
+        and sum(1 for d in dates if d >= three_months_ago) >= 2
     )
     active_rate = round(active_users / total_users * 100, 1) if total_users else 0
 
