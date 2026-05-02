@@ -192,6 +192,7 @@ def edit_schedule(schedule_id):
             form.max_participants.data = int(schedule.get('max_participants', 10))
             form.day_of_week.data = schedule.get('day_of_week', '')
             form.title.data = schedule.get('title', '')
+            form.detail.data = schedule.get('detail', '')
             form.status.data = schedule.get('status', 'active')
             form.is_pinned.data = schedule.get('is_pinned', False)
 
@@ -214,6 +215,7 @@ def edit_schedule(schedule_id):
                         'schedule_id': schedule_id,
                         'date': new_date,
                         'title': request.form.get('title', ''),
+                        'detail': request.form.get('detail', ''),
                         'day_of_week': form.day_of_week.data,
                         'venue': form.venue.data,
                         'start_time': form.start_time.data,
@@ -237,13 +239,14 @@ def edit_schedule(schedule_id):
                     else:
                         # 日付が変わらない場合：通常のupdate
                         update_expr = (
-                            "SET #title=:t, day_of_week=:dow, venue=:v, start_time=:st, "
+                            "SET #title=:t, #detail=:d, day_of_week=:dow, venue=:v, start_time=:st, "
                             "end_time=:et, max_participants=:mp, "
                             "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an, "
                             "is_pinned=:pin"
                         )
                         expr_values = {
                             ':t': request.form.get('title', ''),
+                            ':d': request.form.get('detail', ''),
                             ':dow': form.day_of_week.data,
                             ':v': form.venue.data,
                             ':st': form.start_time.data,
@@ -266,6 +269,7 @@ def edit_schedule(schedule_id):
                             UpdateExpression=update_expr,
                             ExpressionAttributeNames={
                                 '#title': 'title',
+                                '#detail': 'detail',
                                 '#status': 'status',
                                 '#comment': 'comment'
                             },

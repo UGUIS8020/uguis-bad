@@ -46,6 +46,7 @@ class ScheduleForm(FlaskForm):
         ('cancelled', '中止')
     ], default='active')
 
+    detail = StringField('詳細（個別ページのみ表示）')
     is_pinned = BooleanField('トップに固定表示する')
 
     team_id = HiddenField('チームID')
