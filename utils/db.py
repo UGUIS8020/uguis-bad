@@ -49,11 +49,10 @@ def get_schedules_with_formatting():
             if schedule.get('status', 'active') == 'active'
         ]
         
-        # dateで昇順ソート
+        # ピン留めを先頭、その後 date 昇順
         schedules = sorted(
             active_schedules,
-            key=lambda x: x.get('date', ''),
-            reverse=False
+            key=lambda x: (not x.get('is_pinned', False), x.get('date', ''))
         )[:10]
         
         formatted_schedules = []
@@ -90,9 +89,9 @@ def get_schedules_with_formatting():
                     'tara_participants': schedule.get('tara_participants', []),
                     'tara_count': len(schedule.get('tara_participants', [])),
                     'display_name': schedule.get('display_name', '管理者'),
-                    
+                    'is_pinned': schedule.get('is_pinned', False),
                 }
-                
+
                 formatted_schedules.append(formatted_schedule)
                 
             except Exception as e:
@@ -117,8 +116,11 @@ def get_schedules_with_formatting_all():
             if schedule.get('status', 'active') == 'active'
         ]
 
-        # dateで昇順ソート
-        schedules = sorted(active_schedules, key=lambda x: x.get('date', ''))
+        # ピン留めを先頭、その後 date 昇順
+        schedules = sorted(
+            active_schedules,
+            key=lambda x: (not x.get('is_pinned', False), x.get('date', ''))
+        )
 
         formatted_schedules = []
         for schedule in schedules:
@@ -144,6 +146,7 @@ def get_schedules_with_formatting_all():
                 'tara_participants': schedule.get('tara_participants', []),
                 'tara_count': len(schedule.get('tara_participants', [])),
                 'display_name': schedule.get('display_name', '管理者'),
+                'is_pinned': schedule.get('is_pinned', False),
             })
 
         return formatted_schedules

@@ -191,8 +191,10 @@ def edit_schedule(schedule_id):
             form.end_time.data = schedule.get('end_time', '')     # 終了時間
             form.max_participants.data = int(schedule.get('max_participants', 10))
             form.day_of_week.data = schedule.get('day_of_week', '')
+            form.title.data = schedule.get('title', '')
             form.status.data = schedule.get('status', 'active')
-            
+            form.is_pinned.data = schedule.get('is_pinned', False)
+
             # 備考（もしフォームに項目があれば）
             if hasattr(form, 'comment'):
                 form.comment.data = schedule.get('comment', '')
@@ -211,6 +213,7 @@ def edit_schedule(schedule_id):
                     new_item = {
                         'schedule_id': schedule_id,
                         'date': new_date,
+                        'title': request.form.get('title', ''),
                         'day_of_week': form.day_of_week.data,
                         'venue': form.venue.data,
                         'start_time': form.start_time.data,
@@ -218,6 +221,7 @@ def edit_schedule(schedule_id):
                         'max_participants': form.max_participants.data,
                         'status': form.status.data,
                         'comment': request.form.get('comment', ''),
+                        'is_pinned': form.is_pinned.data,
                         'updated_at': datetime.now().isoformat(),
                         'updated_by': current_user.display_name,
                         'team_id': schedule.get('team_id', ''),
@@ -233,11 +237,13 @@ def edit_schedule(schedule_id):
                     else:
                         # 日付が変わらない場合：通常のupdate
                         update_expr = (
-                            "SET day_of_week=:dow, venue=:v, start_time=:st, "
+                            "SET #title=:t, day_of_week=:dow, venue=:v, start_time=:st, "
                             "end_time=:et, max_participants=:mp, "
-                            "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an"
+                            "updated_at=:ua, #status=:s, #comment=:c, updated_by=:an, "
+                            "is_pinned=:pin"
                         )
                         expr_values = {
+                            ':t': request.form.get('title', ''),
                             ':dow': form.day_of_week.data,
                             ':v': form.venue.data,
                             ':st': form.start_time.data,
@@ -247,6 +253,7 @@ def edit_schedule(schedule_id):
                             ':s': form.status.data,
                             ':c': request.form.get('comment', ''),
                             ':an': current_user.display_name,
+                            ':pin': form.is_pinned.data,
                         }
                         if adjusted_max is not None:
                             update_expr += ", adjusted_max=:am"
@@ -258,6 +265,7 @@ def edit_schedule(schedule_id):
                             Key={'schedule_id': schedule_id, 'date': old_date},
                             UpdateExpression=update_expr,
                             ExpressionAttributeNames={
+                                '#title': 'title',
                                 '#status': 'status',
                                 '#comment': 'comment'
                             },

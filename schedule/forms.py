@@ -1,8 +1,9 @@
 from flask_wtf import FlaskForm
-from wtforms import DateField, StringField, IntegerField, SelectField, SubmitField, HiddenField
+from wtforms import DateField, StringField, IntegerField, SelectField, SubmitField, HiddenField, BooleanField
 from wtforms.validators import DataRequired, NumberRange
 
 class ScheduleForm(FlaskForm):
+    title = StringField('タイトル')
     date = DateField('日付', validators=[DataRequired()])
     day_of_week = StringField('曜日', render_kw={'readonly': True})
 
@@ -45,8 +46,10 @@ class ScheduleForm(FlaskForm):
         ('cancelled', '中止')
     ], default='active')
 
+    is_pinned = BooleanField('トップに固定表示する')
+
     team_id = HiddenField('チームID')
-    
+
     submit = SubmitField('📅 スケジュール登録')
 
 # ★ シンプル: 必要最小限の定数

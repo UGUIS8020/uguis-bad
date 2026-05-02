@@ -72,6 +72,12 @@
             {{ form.end_time(class="form-control", required=true) }}
         </div>
 
+        <div class="mb-3">
+            <label for="title" class="form-label">タイトル</label>
+            {{ form.title(class="form-control", id="title", placeholder="例：新越谷体育館　特別練習", value=schedule.get('title', '')) }}
+            <div class="form-text">日付・会場とは別に目立たせたいタイトルがあれば入力してください</div>
+        </div>
+
         <!-- ★ コメント入力欄を追加 -->
         <div class="mb-3">
             <label for="comment" class="form-label">コメント・注意書き</label>
@@ -88,6 +94,15 @@
         <div class="mb-3">
             <label for="status">ステータス</label>
             {{ form.status(class="form-control") }}
+        </div>
+
+        <!-- ピン留め -->
+        <div class="mb-3 form-check">
+            {{ form.is_pinned(class="form-check-input", id="is_pinned") }}
+            <label class="form-check-label fw-bold text-warning" for="is_pinned">
+                📌 トップに固定表示する
+            </label>
+            <div class="form-text">チェックを入れると、このスケジュールが一覧の先頭に表示されます。</div>
         </div>
 
         <!-- 現在のステータス表示 -->

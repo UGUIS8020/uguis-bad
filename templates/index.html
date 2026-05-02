@@ -53,6 +53,16 @@
 </style>
 
 <style>
+    .schedule-pinned {
+        border: 2px solid #ffc107 !important;
+        background-color: #fffbea;
+    }
+    .pinned-label {
+        padding: 2px 8px;
+        font-size: 0.8rem;
+        color: #d97706;
+        font-weight: bold;
+    }
     .avatar-ig{
         --size: 28px;   /* 画像の直径 */
         --ring: 2px;    /* グラデリングの太さ */
@@ -205,16 +215,20 @@
 
                 <div>
                 {% for schedule in schedules %}
-                <div class="border rounded mb-2 pb-1 schedule-card" style="cursor:pointer;"
+                {% set pinned_class = 'schedule-pinned' if schedule.is_pinned else '' %}
+                <div class="border rounded mb-2 pb-1 schedule-card {{ pinned_class }}" style="cursor:pointer;"
                      data-href="{{ url_for('schedule_detail', schedule_id=schedule.schedule_id, date=schedule.date) }}">
 
-                    {% if schedule.comment %}
-                    <div class="mb-2 text-center">
-                        <div class="fw-bold text-warning" style="white-space: pre-line;">
-                        <i class="fas fa-info-circle me-1"></i>{{ schedule.comment }}
-                        </div>
+                    {% if schedule.title or schedule.comment %}
+                    <div class="px-3 pt-2 text-center">
+                        {% if schedule.title %}
+                        <div class="fw-bold" style="font-size:1.05rem; line-height:1.4;">{{ schedule.title }}</div>
+                        {% endif %}
+                        {% if schedule.comment %}
+                        <div class="fw-bold text-warning" style="white-space:pre-line; line-height:1.4;">{{ schedule.comment }}</div>
+                        {% endif %}
                     </div>
-                    {% endif %}  
+                    {% endif %}
 
                     {% if schedule.team_id != 't000' %}
                         <div class="d-flex align-items-center flex-wrap gap-2 px-3 pt-2">
