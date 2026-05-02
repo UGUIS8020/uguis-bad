@@ -8,6 +8,9 @@
     <div class="card-body">
 
       {# ── タイトル ── #}
+      {% if schedule.title %}
+      <p class="fw-bold mb-0" style="font-size:1.15rem;">{{ schedule.title }}</p>
+      {% endif %}
       <p class="fw-bold mb-1" style="font-size:1.25rem;">
         {{ schedule.date | format_date }}({{ schedule.day_of_week }})
         &nbsp;{{ schedule.start_time }} 〜 {{ schedule.end_time }}
