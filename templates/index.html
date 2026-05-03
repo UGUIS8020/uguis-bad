@@ -315,14 +315,12 @@
                    
                     </div>
 
-                      {# ログインしているときだけ表示する #}
-                            {% if current_user.is_authenticated %}
-                            {# participants_info が無ければ [] にする #}
+                      {# 参加者アイコン（未ログインでも表示） #}
                             {% set plist = schedule.participants_info | default([]) %}
                             {% if plist %}
                                 <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
                                 {% for p in plist[:7] %}
-                                    <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;" title="{{ p.display_name }}">
+                                    <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;">
                                     <img
                                         src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                                         alt="{{ p.display_name }}"
@@ -335,7 +333,6 @@
                                     <span class="badge bg-secondary ms-1">+{{ plist|length - 7 }}</span>
                                 {% endif %}
                                 </div>
-                            {% endif %}
                             {% endif %}
 
                     </div>
