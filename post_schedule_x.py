@@ -15,6 +15,7 @@ cron設定例:
 
 import boto3
 import os
+import re
 import sys
 import argparse
 import logging
@@ -94,6 +95,10 @@ def build_tweet(schedule: dict, mode: str) -> str:
 
     venue_disp = venue_raw
 
+    # "A面(3面)" → "A面"、"B面(3面)" → "B面" に整形
+    m = re.match(r'^([AB]面)', court)
+    court_disp = m.group(1) if m else court
+
     # 残枠表示
     if remaining <= 0:
         slots = '満員御礼'
@@ -102,21 +107,26 @@ def build_tweet(schedule: dict, mode: str) -> str:
     else:
         slots = f'残{remaining}枠 参加募集中！'
 
-    if mode == '3days':
-        header = '【3日後の練習】'
-    else:
-        header = '【本日の練習】'
+    header = '【本日の練習】' if mode == 'today' else ''
 
     schedule_id = schedule.get('schedule_id', '')
     detail_url = f'{SITE_URL}/schedule/{schedule_id}/{date_str}' if schedule_id else SITE_URL
 
-    tweet = (
-        f'{header}\n'
-        f'{date_disp} {start}〜{end}\n'
-        f'{venue_disp} {court}\n'
-        f'{slots}\n'
-        f'{detail_url}'
-    )
+    lines = [
+        '鶯バドミントン',
+        '参加者募集！',
+        '基礎打ちができて、ルールがわかればどなたでも参加できます。',
+        '初級者～上級者レベルが違っても楽しくゲームできる方',
+    ]
+    if header:
+        lines.append(header)
+    lines += [
+        f'{date_disp} {start}〜{end}',
+        f'{venue_disp} {court_disp}',
+        slots,
+        detail_url,
+    ]
+    tweet = '\n'.join(lines)
     return tweet
 
 
