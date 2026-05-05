@@ -61,7 +61,7 @@ def admin_schedules():
             # --- 2. 保存データに team_id を追加 ---
             schedule_data = {
                 'schedule_id': schedule_id,
-                'team_id': current_user.team_id, 
+                'team_id': current_user.team_id,
                 'display_name': current_user.display_name,
                 'date': form.date.data.isoformat(),
                 'day_of_week': form.day_of_week.data,
@@ -70,10 +70,12 @@ def admin_schedules():
                 'start_time': form.start_time.data,
                 'end_time': form.end_time.data,
                 'max_participants': form.max_participants.data,
+                'title': request.form.get('title', '').strip(),
                 'comment': request.form.get('comment', '').strip(),
                 'created_at': datetime.now().isoformat(),
                 'participants_count': 0,
-                'status': form.status.data
+                'status': form.status.data,
+                'is_pinned': form.is_pinned.data,
             }
 
             schedule_table.put_item(Item=schedule_data)
