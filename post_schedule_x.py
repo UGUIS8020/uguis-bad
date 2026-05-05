@@ -51,12 +51,6 @@ X_ACCESS_TOKEN_SECRET  = os.getenv('X_ACCESS_TOKEN_SECRET')
 
 SITE_URL = 'https://uguis-bad.shibuya8020.com'
 
-# 会場名の短縮表示
-VENUE_SHORT = {
-    '越谷市立地域スポーツセンター': '北越谷体育館',
-    '越谷市立総合体育館': '越谷総合体育館',
-}
-
 
 def get_dynamodb_table():
     dynamodb = boto3.resource(
@@ -98,27 +92,30 @@ def build_tweet(schedule: dict, mode: str) -> str:
     except Exception:
         date_disp = date_str
 
-    venue_disp = VENUE_SHORT.get(venue_raw, venue_raw)
+    venue_disp = venue_raw
 
     # 残枠表示
     if remaining <= 0:
-        slots = '満員御礼🈵'
+        slots = '満員御礼'
     elif remaining <= 3:
-        slots = f'残り{remaining}枠⚡️'
+        slots = f'残り{remaining}枠'
     else:
         slots = f'残{remaining}枠 参加募集中！'
 
     if mode == '3days':
-        header = '【3日後の練習🏸】'
+        header = '【3日後の練習】'
     else:
-        header = '【本日の練習🏸】'
+        header = '【本日の練習】'
+
+    schedule_id = schedule.get('schedule_id', '')
+    detail_url = f'{SITE_URL}/schedule/{schedule_id}/{date_str}' if schedule_id else SITE_URL
 
     tweet = (
         f'{header}\n'
-        f'📅 {date_disp} {start}〜{end}\n'
-        f'📍 {venue_disp} {court}\n'
-        f'👥 {slots}\n'
-        f'👉 {SITE_URL}'
+        f'{date_disp} {start}〜{end}\n'
+        f'{venue_disp} {court}\n'
+        f'{slots}\n'
+        f'{detail_url}'
     )
     return tweet
 
