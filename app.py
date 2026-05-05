@@ -1147,6 +1147,52 @@ def schedule_detail(schedule_id, date):
         count = int(schedule.get('participants_count') or len(schedule.get('participants', [])))
         is_full = count >= max_p
 
+        # ── ノーショウチェック（管理者 + 過去日程のみ） ──
+        noshow_info = None
+        pairing_skipped = False
+        if current_user.is_authenticated and getattr(current_user, 'administrator', False):
+            schedule_date = date  # "YYYY-MM-DD"
+            today = datetime.now(timezone.utc).date().isoformat()
+            if schedule_date < today:
+                date_key = schedule_date.replace('-', '')  # "YYYYMMDD"
+                pairing_table = app.dynamodb.Table("bad-pairing-logs")
+                pr = pairing_table.scan(
+                    FilterExpression=Attr('match_id').begins_with(date_key)
+                )
+                pairing_items = pr.get('Items', [])
+
+                if not pairing_items:
+                    pairing_skipped = True  # ペアリング未実施
+                else:
+                    # ペアリングログに登場したuser_idを収集
+                    # 新形式（a_user_ids/b_user_ids）を優先し、なければ名前フォールバック
+                    logged_ids = set()
+                    logged_names = set()
+                    for log in pairing_items:
+                        for court in log.get('courts', []):
+                            for uid in court.get('a_user_ids', []) + court.get('b_user_ids', []):
+                                if uid:
+                                    logged_ids.add(uid)
+                            for name in court.get('a', []) + court.get('b', []):
+                                logged_names.add(name.strip())
+                        for p in log.get('waiting', []):
+                            logged_names.add(p.strip())
+
+                    # user_idで一致 → 確実に参加済み
+                    # user_idがない（旧ログ）→ 名前でフォールバック
+                    noshow_info = []
+                    for p in participants_info:
+                        uid = p.get('user_id')
+                        name = p.get('display_name', '')
+                        if logged_ids:
+                            # 新形式ログがある場合はuser_idで判定
+                            if uid not in logged_ids:
+                                noshow_info.append(p)
+                        else:
+                            # 旧形式ログのみの場合は名前フォールバック
+                            if name not in logged_names:
+                                noshow_info.append(p)
+
         return render_template(
             'schedule_detail.html',
             schedule=schedule,
@@ -1156,11 +1202,68 @@ def schedule_detail(schedule_id, date):
             is_full=is_full,
             max_p=max_p,
             count=count,
+            noshow_info=noshow_info,
+            pairing_skipped=pairing_skipped,
         )
     except Exception as e:
         app.logger.error(f'[schedule_detail] error: {e}')
         flash('ページの読み込みに失敗しました。', 'danger')
         return redirect(url_for('index'))
+
+
+@app.route('/schedule/<string:schedule_id>/<string:date>/remove_noshow/<string:user_id>', methods=['POST'])
+@login_required
+def remove_noshow(schedule_id, date, user_id):
+    """ノーショウ参加者の記録を削除（管理者のみ）"""
+    if not getattr(current_user, 'administrator', False):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+    try:
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        users_table    = app.dynamodb.Table(app.table_name_users)
+        history_table  = app.dynamodb.Table("bad-users-history")
+
+        # 1) スケジュールのparticipantsから除去
+        resp = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
+        schedule = resp.get('Item', {})
+        participants = [p for p in schedule.get('participants', []) if p != user_id]
+        schedule_table.update_item(
+            Key={'schedule_id': schedule_id, 'date': date},
+            UpdateExpression='SET participants = :p, participants_count = :c',
+            ExpressionAttributeValues={
+                ':p': participants,
+                ':c': len(participants)
+            }
+        )
+
+        # 2) 参加履歴（bad-users-history）からその日の記録を削除
+        hist_resp = history_table.query(
+            KeyConditionExpression=Key('user_id').eq(user_id)
+        )
+        for item in hist_resp.get('Items', []):
+            event_date = item.get('event_date') or item.get('joined_at', '')[:10]
+            if event_date == date and item.get('status') != 'cancelled':
+                history_table.delete_item(
+                    Key={'user_id': item['user_id'], 'joined_at': item['joined_at']}
+                )
+
+        # 3) practice_countをデクリメント
+        try:
+            users_table.update_item(
+                Key={'user#user_id': user_id},
+                UpdateExpression='SET practice_count = if_not_exists(practice_count, :zero) - :dec',
+                ConditionExpression='practice_count > :zero',
+                ExpressionAttributeValues={':dec': 1, ':zero': 0}
+            )
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                raise
+
+        app.logger.info(f'[remove_noshow] schedule={schedule_id} date={date} user={user_id}')
+        return jsonify({'status': 'success', 'message': '参加記録を削除しました'})
+
+    except Exception as e:
+        app.logger.error(f'[remove_noshow] error: {e}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/schedule/<string:schedule_id>/join', methods=['POST'])
@@ -2751,6 +2854,37 @@ from flask import render_template, request
 def run_badnews():
     total = collect_badminton_news()
     return f"collect ok ({total})"
+
+@app.route("/admin/reconcile_practice_count")
+def admin_reconcile_practice_count():
+    """全ユーザーのpractice_countを参加履歴から正しい値に修正する"""
+    from uguu.reconcile_practice_count import _scan_all
+    from uguu.dynamo import db as uguu_db
+
+    users_table = current_app.dynamodb.Table(current_app.config["TABLE_NAME_USER"])
+    users = _scan_all(users_table)
+
+    checked = updated = errors = 0
+    for u in users:
+        user_id = u.get("user#user_id")
+        if not user_id:
+            continue
+        checked += 1
+        try:
+            records = uguu_db.get_user_participation_history_with_timestamp(str(user_id)) or []
+            correct = len(records)
+            cur_raw = u.get("practice_count")
+            cur = int(cur_raw) if cur_raw is not None else None
+            if cur != correct:
+                users_table.update_item(
+                    Key={"user#user_id": str(user_id)},
+                    UpdateExpression="SET practice_count = :c",
+                    ExpressionAttributeValues={":c": int(correct)},
+                )
+                updated += 1
+        except Exception as e:
+            errors += 1
+    return f"checked={checked}, updated={updated}, errors={errors}"
 
 @app.route("/admin/fix_news_images")
 def fix_news_images():
