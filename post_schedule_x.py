@@ -234,11 +234,13 @@ def main():
     for schedule in schedules:
         tweet = build_tweet(schedule, args.mode)
         logger.info(f'生成ツイート:\n{tweet}')
-        if not post_to_x(tweet, dry_run=dry_run):
+        ok_x       = post_to_x(tweet, dry_run=dry_run)
+        ok_threads = post_to_threads(tweet, dry_run=dry_run)
+        if not ok_x:
             logger.error('X投稿に失敗しました。')
-            sys.exit(1)
-        if not post_to_threads(tweet, dry_run=dry_run):
+        if not ok_threads:
             logger.error('Threads投稿に失敗しました。')
+        if not ok_x and not ok_threads:
             sys.exit(1)
 
 
