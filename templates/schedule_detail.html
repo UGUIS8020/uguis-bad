@@ -105,24 +105,33 @@
       </div>
       <p class="text-muted small text-center">このURLをLINEなどで共有できます</p>
 
-      {# ── 参加者一覧（管理者のみ） ── #}
-      {% if current_user.is_authenticated and current_user.administrator and participants_info %}
+      {# ── 参加者一覧 ── #}
+      {% if participants_info %}
       <hr>
       <p class="text-muted small mb-2">参加予定 ({{ count }}人)</p>
       <div class="d-flex flex-wrap gap-2">
         {% for p in participants_info %}
         <div class="text-center" style="width:48px;">
-          <a href="{{ url_for('users.user_profile', user_id=p.user_id) }}">
+          {% if current_user.is_authenticated and current_user.administrator %}
+            <a href="{{ url_for('users.user_profile', user_id=p.user_id) }}">
+              <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                   alt="{{ p.display_name }}"
+                   width="40" height="40"
+                   class="rounded-circle border"
+                   style="object-fit:cover;"
+                   onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+            </a>
+            <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
+              {{ p.display_name }}
+            </div>
+          {% else %}
             <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-                 alt="{{ p.display_name }}"
+                 alt=""
                  width="40" height="40"
                  class="rounded-circle border"
                  style="object-fit:cover;"
                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
-          </a>
-          <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
-            {{ p.display_name }}
-          </div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
