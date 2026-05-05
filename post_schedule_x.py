@@ -21,6 +21,7 @@ import argparse
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import requests
 import tweepy
 from dotenv import load_dotenv
 
@@ -51,6 +52,10 @@ X_ACCESS_TOKEN         = os.getenv('X_ACCESS_TOKEN')
 X_ACCESS_TOKEN_SECRET  = os.getenv('X_ACCESS_TOKEN_SECRET')
 
 SITE_URL = 'https://uguis-bad.shibuya8020.com'
+
+# Threads API設定
+THREADS_APP_ID       = os.getenv('THREADS_APP_ID')
+THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
 
 
 def get_dynamodb_table():
@@ -95,9 +100,8 @@ def build_tweet(schedule: dict, mode: str) -> str:
 
     venue_disp = venue_raw
 
-    # "A面(3面)" → "A面"、"B面(3面)" → "B面" に整形
-    m = re.match(r'^([AB]面)', court)
-    court_disp = m.group(1) if m else court
+    # "A面(3面)"→"A面"、"第一体育室(6面)"→"第一体育室" のように括弧部分を除去
+    court_disp = re.sub(r'\(.*?\)$', '', court).strip()
 
     # 残枠表示
     if remaining <= 0:
@@ -157,6 +161,45 @@ def post_to_x(text: str, dry_run: bool = False) -> bool:
         return False
 
 
+def post_to_threads(text: str, dry_run: bool = False) -> bool:
+    """Threadsに投稿"""
+    if dry_run:
+        logger.info(f'[DRY RUN Threads] 投稿内容:\n{text}')
+        return True
+
+    if not all([THREADS_APP_ID, THREADS_ACCESS_TOKEN]):
+        logger.error('Threads APIキーが設定されていません。.envを確認してください。')
+        return False
+
+    try:
+        r1 = requests.post(
+            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads',
+            params={
+                'media_type': 'TEXT',
+                'text': text,
+                'access_token': THREADS_ACCESS_TOKEN,
+            }
+        )
+        r1.raise_for_status()
+        container_id = r1.json()['id']
+        logger.info(f'Threadsコンテナ作成: {container_id}')
+
+        r2 = requests.post(
+            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads_publish',
+            params={
+                'creation_id': container_id,
+                'access_token': THREADS_ACCESS_TOKEN,
+            }
+        )
+        r2.raise_for_status()
+        post_id = r2.json()['id']
+        logger.info(f'Threads投稿成功！ post_id={post_id}')
+        return True
+    except Exception as e:
+        logger.error(f'Threads投稿エラー: {e}')
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description='鶯バドミントン X自動投稿')
     parser.add_argument('--mode', choices=['3days', 'today', 'test'], default='test',
@@ -187,9 +230,11 @@ def main():
     for schedule in schedules:
         tweet = build_tweet(schedule, args.mode)
         logger.info(f'生成ツイート:\n{tweet}')
-        success = post_to_x(tweet, dry_run=dry_run)
-        if not success:
-            logger.error('投稿に失敗しました。')
+        if not post_to_x(tweet, dry_run=dry_run):
+            logger.error('X投稿に失敗しました。')
+            sys.exit(1)
+        if not post_to_threads(tweet, dry_run=dry_run):
+            logger.error('Threads投稿に失敗しました。')
             sys.exit(1)
 
 
