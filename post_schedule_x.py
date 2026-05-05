@@ -95,9 +95,8 @@ def build_tweet(schedule: dict, mode: str) -> str:
 
     venue_disp = venue_raw
 
-    # "A面(3面)" → "A面"、"B面(3面)" → "B面" に整形
-    m = re.match(r'^([AB]面)', court)
-    court_disp = m.group(1) if m else court
+    # "A面(3面)"→"A面"、"第一体育室(6面)"→"第一体育室" のように括弧部分を除去
+    court_disp = re.sub(r'\(.*?\)$', '', court).strip()
 
     # 残枠表示
     if remaining <= 0:
