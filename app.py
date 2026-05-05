@@ -1136,10 +1136,8 @@ def schedule_detail(schedule_id, date):
             flash('指定された練習予定が見つかりません。', 'warning')
             return redirect(url_for('index'))
 
-        # 参加者情報（管理者のみ）
-        participants_info = []
-        if current_user.is_authenticated and current_user.administrator:
-            participants_info = get_participants_info(schedule)
+        # 参加者情報（全員取得・表示制御はテンプレート側で行う）
+        participants_info = get_participants_info(schedule)
 
         # 参加状態
         is_joined = current_user.is_authenticated and current_user.id in schedule.get('participants', [])
