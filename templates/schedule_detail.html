@@ -117,19 +117,19 @@
               <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                    alt="{{ p.display_name }}"
                    width="40" height="40"
-                   class="rounded-circle border"
-                   style="object-fit:cover;"
+                   class="rounded-circle"
+                   style="object-fit:cover; border: 2px solid {{ '#FFD700' if p.join_count == 1 else '#dee2e6' }};"
                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
             </a>
             <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
-              {{ p.display_name }}
+              {{ p.display_name }}{% if p.join_count == 1 %} <span style="color:#FFD700;">★</span>{% endif %}
             </div>
           {% else %}
             <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                  alt=""
                  width="40" height="40"
-                 class="rounded-circle border"
-                 style="object-fit:cover;"
+                 class="rounded-circle"
+                 style="object-fit:cover; border: 2px solid {{ '#FFD700' if p.join_count == 1 else '#dee2e6' }};"
                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
           {% endif %}
         </div>
@@ -139,6 +139,41 @@
 
     </div>
   </div>
+
+  {# ── ノーショウチェック（管理者・過去日程のみ） ── #}
+  {% if pairing_skipped %}
+  <div class="card shadow-sm mt-3">
+    <div class="card-body py-2 text-muted small text-center">
+      ペアリングログが見つからないため参加チェックをスキップしました
+    </div>
+  </div>
+  {% elif noshow_info is not none %}
+  <div class="card shadow-sm mt-3 border-warning">
+    <div class="card-body">
+      <p class="fw-bold mb-2" style="font-size:0.95rem;">
+        ⚠️ 参加ボタンを押したがペアリングログに未記録（{{ noshow_info|length }}名）
+      </p>
+      {% if noshow_info %}
+      <div class="d-flex flex-wrap gap-2" id="noshow-list">
+        {% for p in noshow_info %}
+        <div class="d-flex align-items-center gap-1 border rounded px-2 py-1" id="noshow-{{ p.user_id }}">
+          <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+               width="28" height="28" class="rounded-circle" style="object-fit:cover;">
+          <span class="small">{{ p.display_name }}</span>
+          <button class="btn btn-outline-danger btn-sm ms-1"
+                  style="font-size:0.75rem; padding:1px 6px;"
+                  onclick="removeNoshow('{{ schedule.schedule_id }}', '{{ schedule.date }}', '{{ p.user_id }}', this)">
+            削除
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-success small mb-0">全員参加が確認されました ✅</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <div class="text-center mt-3 d-flex justify-content-center align-items-center gap-3">
     <a href="{{ url_for('index') }}" class="btn btn-link text-muted">← 練習予定一覧へ</a>
@@ -153,6 +188,38 @@
 </div>
 
 <script>
+async function removeNoshow(scheduleId, date, userId, btn) {
+  if (!confirm('この参加記録を削除しますか？\n（スケジュール・履歴・参加回数が修正されます）')) return;
+  btn.disabled = true;
+  btn.textContent = '削除中...';
+  try {
+    const resp = await fetch(`/schedule/${scheduleId}/${date}/remove_noshow/${userId}`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    const data = await resp.json();
+    if (data.status === 'success') {
+      const row = document.getElementById(`noshow-${userId}`);
+      if (row) row.remove();
+      const list = document.getElementById('noshow-list');
+      if (list && list.children.length === 0) {
+        list.innerHTML = '<p class="text-success small mb-0">全員参加が確認されました ✅</p>';
+      }
+    } else {
+      alert('エラー: ' + data.message);
+      btn.disabled = false;
+      btn.textContent = '削除';
+    }
+  } catch (e) {
+    alert('通信エラー: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '削除';
+  }
+}
+
 function copyUrl() {
   const el = document.getElementById('shareUrl');
   navigator.clipboard.writeText(el.value).then(() => {

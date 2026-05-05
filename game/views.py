@@ -3943,6 +3943,8 @@ def create_pairings():
                 'court': str(i),
                 'a': [a1.name, a2.name],
                 'b': [b1.name, b2.name],
+                'a_user_ids': [getattr(a1, 'user_id', None), getattr(a2, 'user_id', None)],
+                'b_user_ids': [getattr(b1, 'user_id', None), getattr(b2, 'user_id', None)],
                 'a_strength': str(round(sa, 2)),
                 'b_strength': str(round(sb, 2)),
                 'diff': str(round(d, 2)),
