@@ -29,17 +29,21 @@
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:url" content="{{ request.url }}">
     <meta property="og:site_name" content="鶯 | 越谷市バドミントンサークル">
+    {% block og_image %}
     <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="鶯バドミントンサークルのイメージ画像">
+    {% endblock %}
     <meta property="og:locale" content="ja_JP">
-    
+
     <!-- Twitter Card -->
+    {% block twitter_card %}
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@rbn17pjAfz41575">
     <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/2025/tournament2025_03.jpg">
     <meta name="twitter:image:alt" content="鶯バドミントンサークルのイメージ画像">
+    {% endblock %}
 
     <!-- Bootstrap CSS（プリロード＋onloadで読み込み） -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
