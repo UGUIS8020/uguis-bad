@@ -25,19 +25,23 @@ import requests
 import tweepy
 from dotenv import load_dotenv
 
+# スクリプトのディレクトリを基準にパスを解決
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ログ設定
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('/var/www/uguis_bad/post_schedule_x.log'),
+        logging.FileHandler(os.path.join(BASE_DIR, 'post_schedule_x.log')),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# 環境変数読み込み
+# 環境変数読み込み（本番パス → なければスクリプトと同じディレクトリの.env）
 load_dotenv('/var/www/uguis_bad/.env')
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 # DynamoDB設定
 AWS_ACCESS_KEY_ID     = os.getenv('AWS_ACCESS_KEY_ID')
