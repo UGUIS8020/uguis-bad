@@ -180,7 +180,9 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
                 'access_token': THREADS_ACCESS_TOKEN,
             }
         )
-        r1.raise_for_status()
+        if not r1.ok:
+            logger.error(f'Threadsコンテナ作成失敗: {r1.status_code} {r1.text}')
+            return False
         container_id = r1.json()['id']
         logger.info(f'Threadsコンテナ作成: {container_id}')
 
@@ -191,7 +193,9 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
                 'access_token': THREADS_ACCESS_TOKEN,
             }
         )
-        r2.raise_for_status()
+        if not r2.ok:
+            logger.error(f'Threads公開失敗: {r2.status_code} {r2.text}')
+            return False
         post_id = r2.json()['id']
         logger.info(f'Threads投稿成功！ post_id={post_id}')
         return True
