@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"c:\\\\Users\\\\shibu\\\\Desktop\\\\website\\\\uguis-bad\\\\\\\\\")",
+      "Bash(grep -E \"\\\\.py$|\\\\.sh$|\\\\.json$\")"
+    ]
+  }
+}

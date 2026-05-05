@@ -551,9 +551,12 @@
             // プレビュー画像をBlobに変換
             const profileBlob = await (await fetch(finalPreview.src)).blob();
 
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
             const formData = new FormData();
+            formData.append('csrf_token', csrfToken);
             formData.append('profile_image', profileBlob, 'profile.jpg'); // フォールバック用
-            
+
             if (imageState.originalFile) {
                 formData.append('original_image', imageState.originalFile, imageState.originalFile.name); // 元画像
             }
@@ -564,9 +567,10 @@
             formData.append('crop_side', cropSide.value || '');
 
             // 実際のサーバーに送信
-            const resp = await fetch(window.location.href, { 
-                method: 'POST', 
-                body: formData 
+            const resp = await fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken },
+                body: formData
             });
             
             if (!resp.ok) {
