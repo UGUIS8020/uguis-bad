@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(ls -la \"c:\\\\Users\\\\shibu\\\\Desktop\\\\website\\\\uguis-bad\\\\\\\\\")",
-      "Bash(grep -E \"\\\\.py$|\\\\.sh$|\\\\.json$\")"
+      "Bash(grep -E \"\\\\.py$|\\\\.sh$|\\\\.json$\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
