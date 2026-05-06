@@ -48,6 +48,7 @@ AWS_ACCESS_KEY_ID     = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_REGION            = os.getenv('AWS_REGION', 'ap-northeast-1')
 TABLE_NAME_SCHEDULE   = os.getenv('TABLE_NAME_SCHEDULE', 'bad_schedules')
+TABLE_NAME_USER       = os.getenv('TABLE_NAME_USER', 'bad-users')
 
 # X API設定
 X_API_KEY              = os.getenv('X_API_KEY')
@@ -59,6 +60,11 @@ SITE_URL = 'https://uguis-bad.shibuya8020.com'
 
 # Threads API設定
 THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
+
+# Instagram API設定
+INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
+INSTAGRAM_USER_ID      = os.getenv('INSTAGRAM_USER_ID')
+INSTAGRAM_IMAGES_DIR   = os.path.join(BASE_DIR, 'static', 'sns_images')
 
 
 def get_dynamodb_table():
@@ -80,6 +86,54 @@ def get_schedules_for_date(target_date: str):
         ExpressionAttributeValues={':date': target_date, ':status': 'active'}
     )
     return result.get('Items', [])
+
+
+def get_participant_details(schedule: dict) -> dict:
+    """参加者の合計数と初参加者の性別内訳を返す"""
+    raw = schedule.get('participants') or []
+    ids = []
+    seen = set()
+    for x in raw:
+        uid = (x.get('user_id') or x.get('user#user_id')) if isinstance(x, dict) else x
+        if uid and str(uid) not in seen:
+            seen.add(str(uid))
+            ids.append(str(uid))
+
+    total = int(schedule.get('participants_count') or len(ids))
+    first_timers = {'male': 0, 'female': 0, 'other': 0}
+
+    if not ids:
+        return {'total': total, 'first_timers': first_timers}
+
+    client = boto3.client(
+        'dynamodb',
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
+
+    # 100件ずつバッチ取得
+    for i in range(0, len(ids), 100):
+        chunk = ids[i:i+100]
+        resp = client.batch_get_item(RequestItems={
+            TABLE_NAME_USER: {
+                'Keys': [{'user#user_id': {'S': uid}} for uid in chunk],
+                'ProjectionExpression': '#uid, practice_count, gender',
+                'ExpressionAttributeNames': {'#uid': 'user#user_id'}
+            }
+        })
+        for user in resp.get('Responses', {}).get(TABLE_NAME_USER, []):
+            pc = user.get('practice_count', {}).get('N')
+            if pc is not None and int(pc) == 1:
+                g = user.get('gender', {}).get('S', '')
+                if g == 'male':
+                    first_timers['male'] += 1
+                elif g == 'female':
+                    first_timers['female'] += 1
+                else:
+                    first_timers['other'] += 1
+
+    return {'total': total, 'first_timers': first_timers}
 
 
 def build_tweet(schedule: dict, mode: str) -> str:
@@ -114,65 +168,134 @@ def build_tweet(schedule: dict, mode: str) -> str:
     else:
         slots = f'残{remaining}枠 参加募集中！'
 
-    header = '【本日の練習】' if mode == 'today' else ''
-
     schedule_id = schedule.get('schedule_id', '')
     detail_url = f'{SITE_URL}/schedule/{schedule_id}/{date_str}' if schedule_id else SITE_URL
 
-    lines = [
-        '鶯バドミントン',
-        '参加者募集！',
-        '基礎打ちができて、ルールがわかればどなたでも参加できます。',
-        '初級者～上級者レベルが違っても楽しくゲームできる方',
-    ]
-    if header:
-        lines.append(header)
-    lines += [
-        f'{date_disp} {start}〜{end}',
-        f'{venue_disp} {court_disp}',
-        slots,
-        detail_url,
-    ]
-    tweet = '\n'.join(lines)
-    return tweet
+    # 参加者詳細
+    details = get_participant_details(schedule)
+    total = details['total']
+    ft = details['first_timers']
+    ft_parts = []
+    if ft['female'] > 0:
+        ft_parts.append(f'女性{ft["female"]}名')
+    if ft['male'] > 0:
+        ft_parts.append(f'男性{ft["male"]}名')
+    if ft['other'] > 0:
+        ft_parts.append(f'その他{ft["other"]}名')
+    first_timer_line = f'初参加者：{" ".join(ft_parts)}' if ft_parts else ''
+
+    if mode == 'today':
+        # 当日引用投稿用：シンプルな内容で最新情報を表示
+        lines = [
+            '今日はバドミントンです',
+            '参加者募集！',
+            f'{date_disp} {start}〜{end}',
+            f'{venue_disp} {court_disp}',
+            slots,
+            f'現在{total}名参加',
+        ]
+        if first_timer_line:
+            lines.append(first_timer_line)
+        lines.append(detail_url)
+    else:
+        # 3日前投稿用：詳細情報を含む
+        lines = [
+            '鶯バドミントン',
+            '参加者募集！',
+            f'{date_disp} {start}〜{end}',
+            f'{venue_disp} {court_disp}',
+            '基礎打ちができて、ルールがわかればどなたでも参加できます。',
+            '初級者～上級者レベルが違っても楽しくゲームできる方',
+            slots,
+            f'現在{total}名参加',
+        ]
+        if first_timer_line:
+            lines.append(first_timer_line)
+        lines.append(detail_url)
+
+    return '\n'.join(lines)
 
 
-def post_to_x(text: str, dry_run: bool = False) -> bool:
-    """Xに投稿"""
+def get_x_client():
+    return tweepy.Client(
+        consumer_key=X_API_KEY,
+        consumer_secret=X_API_SECRET,
+        access_token=X_ACCESS_TOKEN,
+        access_token_secret=X_ACCESS_TOKEN_SECRET
+    )
+
+
+def post_to_x(text: str, dry_run: bool = False):
+    """Xに投稿。成功時はtweet_idを返す、失敗時はNone"""
     if dry_run:
         logger.info(f'[DRY RUN] 投稿内容:\n{text}')
-        return True
+        return 'DRY_RUN_ID'
 
     if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET]):
         logger.error('X APIキーが設定されていません。.envを確認してください。')
+        return None
+
+    try:
+        response = get_x_client().create_tweet(text=text)
+        tweet_id = response.data['id']
+        logger.info(f'X投稿成功！ tweet_id={tweet_id}')
+        logger.info(f'URL: https://x.com/rbn17pjAfz41575/status/{tweet_id}')
+        return tweet_id
+    except tweepy.TweepyException as e:
+        logger.error(f'X投稿エラー: {e}')
+        return None
+
+
+def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None):
+    """投稿IDをDynamoDBのスケジュールに保存"""
+    updates = []
+    values = {}
+    if tweet_id:
+        updates.append('x_tweet_id = :xid')
+        values[':xid'] = tweet_id
+    if threads_post_id:
+        updates.append('threads_post_id = :tid')
+        values[':tid'] = threads_post_id
+    if not updates:
+        return
+    table = get_dynamodb_table()
+    table.update_item(
+        Key={'schedule_id': schedule['schedule_id'], 'date': schedule['date']},
+        UpdateExpression='SET ' + ', '.join(updates),
+        ExpressionAttributeValues=values
+    )
+    logger.info(f'投稿ID保存: x={tweet_id}, threads={threads_post_id}')
+
+
+def quote_post_to_x(text: str, quote_tweet_id: str, dry_run: bool = False) -> bool:
+    """保存したtweet_idを引用して新規投稿"""
+    if dry_run:
+        logger.info(f'[DRY RUN] 引用投稿 quote_id={quote_tweet_id}\n{text}')
+        return True
+
+    if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET]):
+        logger.error('X APIキーが設定されていません。')
         return False
 
     try:
-        client = tweepy.Client(
-            consumer_key=X_API_KEY,
-            consumer_secret=X_API_SECRET,
-            access_token=X_ACCESS_TOKEN,
-            access_token_secret=X_ACCESS_TOKEN_SECRET
-        )
-        response = client.create_tweet(text=text)
+        response = get_x_client().create_tweet(text=text, quote_tweet_id=quote_tweet_id)
         tweet_id = response.data['id']
-        logger.info(f'投稿成功！ tweet_id={tweet_id}')
-        logger.info(f'URL: https://x.com/rbn17pjAfz41575/status/{tweet_id}')
+        logger.info(f'X引用投稿成功！ tweet_id={tweet_id}')
         return True
     except tweepy.TweepyException as e:
-        logger.error(f'X投稿エラー: {e}')
+        logger.error(f'X引用投稿エラー: {e}')
         return False
 
 
-def post_to_threads(text: str, dry_run: bool = False) -> bool:
-    """Threadsに投稿"""
+def post_to_threads(text: str, dry_run: bool = False):
+    """Threadsに投稿。成功時はpost_idを返す、失敗時はNone"""
     if dry_run:
         logger.info(f'[DRY RUN Threads] 投稿内容:\n{text}')
-        return True
+        return 'DRY_RUN_ID'
 
     if not THREADS_ACCESS_TOKEN:
         logger.error('Threads APIキーが設定されていません。.envを確認してください。')
-        return False
+        return None
 
     try:
         r1 = requests.post(
@@ -185,7 +308,7 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
         )
         if not r1.ok:
             logger.error(f'Threadsコンテナ作成失敗: {r1.status_code} {r1.text}')
-            return False
+            return None
         container_id = r1.json()['id']
         logger.info(f'Threadsコンテナ作成: {container_id}')
 
@@ -198,13 +321,108 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
         )
         if not r2.ok:
             logger.error(f'Threads公開失敗: {r2.status_code} {r2.text}')
-            return False
+            return None
         post_id = r2.json()['id']
         logger.info(f'Threads投稿成功！ post_id={post_id}')
-        return True
+        return post_id
     except Exception as e:
         logger.error(f'Threads投稿エラー: {e}')
+        return None
+
+
+def quote_post_to_threads(text: str, quote_post_id: str, dry_run: bool = False) -> bool:
+    """保存したpost_idを引用して新規投稿（テキスト必須）"""
+    if dry_run:
+        logger.info(f'[DRY RUN Threads] 引用投稿 quote_id={quote_post_id}\n{text}')
+        return True
+
+    if not THREADS_ACCESS_TOKEN:
+        logger.error('Threads APIキーが設定されていません。')
         return False
+
+    try:
+        r1 = requests.post(
+            'https://graph.threads.net/v1.0/me/threads',
+            params={
+                'media_type': 'TEXT',
+                'text': text,
+                'quote_post_id': quote_post_id,
+                'access_token': THREADS_ACCESS_TOKEN,
+            }
+        )
+        if not r1.ok:
+            logger.error(f'Threads引用コンテナ作成失敗: {r1.status_code} {r1.text}')
+            return False
+        container_id = r1.json()['id']
+
+        r2 = requests.post(
+            'https://graph.threads.net/v1.0/me/threads_publish',
+            params={
+                'creation_id': container_id,
+                'access_token': THREADS_ACCESS_TOKEN,
+            }
+        )
+        if not r2.ok:
+            logger.error(f'Threads引用投稿公開失敗: {r2.status_code} {r2.text}')
+            return False
+        logger.info(f'Threads引用投稿成功！ post_id={r2.json()["id"]}')
+        return True
+    except Exception as e:
+        logger.error(f'Threads引用投稿エラー: {e}')
+        return False
+
+
+def post_to_instagram(caption: str, dry_run: bool = False):
+    """Instagramに画像付きで投稿。成功時はpost_idを返す、失敗時はNone"""
+    import random, glob as globmod
+    images = globmod.glob(os.path.join(INSTAGRAM_IMAGES_DIR, '*.jpg')) + \
+             globmod.glob(os.path.join(INSTAGRAM_IMAGES_DIR, '*.png'))
+    if not images:
+        logger.error('sns_imagesフォルダに画像がありません。')
+        return None
+
+    image_file = random.choice(images)
+    image_name = os.path.basename(image_file)
+    image_url  = f'{SITE_URL}/static/sns_images/{image_name}'
+
+    if dry_run:
+        logger.info(f'[DRY RUN Instagram] 画像: {image_name}\nキャプション:\n{caption}')
+        return 'DRY_RUN_ID'
+
+    if not INSTAGRAM_ACCESS_TOKEN or not INSTAGRAM_USER_ID:
+        logger.error('Instagram APIキーが設定されていません。')
+        return None
+
+    try:
+        r1 = requests.post(
+            f'https://graph.instagram.com/v21.0/{INSTAGRAM_USER_ID}/media',
+            params={
+                'image_url': image_url,
+                'caption': caption,
+                'access_token': INSTAGRAM_ACCESS_TOKEN,
+            }
+        )
+        if not r1.ok:
+            logger.error(f'Instagramコンテナ作成失敗: {r1.status_code} {r1.text}')
+            return None
+        container_id = r1.json()['id']
+
+        r2 = requests.post(
+            f'https://graph.instagram.com/v21.0/{INSTAGRAM_USER_ID}/media_publish',
+            params={
+                'creation_id': container_id,
+                'access_token': INSTAGRAM_ACCESS_TOKEN,
+            }
+        )
+        if not r2.ok:
+            logger.error(f'Instagram公開失敗: {r2.status_code} {r2.text}')
+            return None
+        post_id = r2.json()['id']
+        logger.info(f'Instagram投稿成功！ post_id={post_id} 画像: {image_name}')
+        return post_id
+    except Exception as e:
+        logger.error(f'Instagram投稿エラー: {e}')
+        return None
 
 
 def main():
@@ -237,13 +455,47 @@ def main():
     for schedule in schedules:
         tweet = build_tweet(schedule, args.mode)
         logger.info(f'生成ツイート:\n{tweet}')
-        ok_x       = post_to_x(tweet, dry_run=dry_run)
-        ok_threads = post_to_threads(tweet, dry_run=dry_run)
+
+        if args.mode == 'today':
+            # 3日前に保存したIDを引用して新規投稿
+            x_id = schedule.get('x_tweet_id')
+            if x_id:
+                ok_x = quote_post_to_x(tweet, x_id, dry_run=dry_run)
+                if not ok_x:
+                    logger.error('X引用投稿に失敗しました。')
+            else:
+                logger.warning('x_tweet_idが見つかりません。新規投稿します。')
+                ok_x = post_to_x(tweet, dry_run=dry_run) is not None
+
+            th_id = schedule.get('threads_post_id')
+            if th_id:
+                ok_threads = quote_post_to_threads(tweet, th_id, dry_run=dry_run)
+                if not ok_threads:
+                    logger.error('Threads引用投稿に失敗しました。')
+            else:
+                logger.warning('threads_post_idが見つかりません。新規投稿します。')
+                ok_threads = post_to_threads(tweet, dry_run=dry_run) is not None
+
+            ok_ig = post_to_instagram(tweet, dry_run=dry_run) is not None
+            if not ok_ig:
+                logger.error('Instagram投稿に失敗しました。')
+        else:
+            # 3daysモード: 新規投稿してIDを保存
+            x_id      = post_to_x(tweet, dry_run=dry_run)
+            th_id     = post_to_threads(tweet, dry_run=dry_run)
+            ok_x      = x_id is not None
+            ok_threads = th_id is not None
+            ok_ig     = post_to_instagram(tweet, dry_run=dry_run) is not None
+            if not dry_run:
+                save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id)
+            if not ok_ig:
+                logger.error('Instagram投稿に失敗しました。')
+
         if not ok_x:
-            logger.error('X投稿に失敗しました。')
+            logger.error('X投稿/リポストに失敗しました。')
         if not ok_threads:
-            logger.error('Threads投稿に失敗しました。')
-        if not ok_x and not ok_threads:
+            logger.error('Threads投稿/リポストに失敗しました。')
+        if not ok_x and not ok_threads and not ok_ig:
             sys.exit(1)
 
 
