@@ -177,7 +177,7 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
 
     try:
         r1 = requests.post(
-            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads',
+            'https://graph.threads.net/v1.0/me/threads',
             params={
                 'media_type': 'TEXT',
                 'text': text,
@@ -191,7 +191,7 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
         logger.info(f'Threadsコンテナ作成: {container_id}')
 
         r2 = requests.post(
-            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads_publish',
+            'https://graph.threads.net/v1.0/me/threads_publish',
             params={
                 'creation_id': container_id,
                 'access_token': THREADS_ACCESS_TOKEN,
