@@ -25,19 +25,23 @@ import requests
 import tweepy
 from dotenv import load_dotenv
 
+# スクリプトのディレクトリを基準にパスを解決
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ログ設定
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('/var/www/uguis_bad/post_schedule_x.log'),
+        logging.FileHandler(os.path.join(BASE_DIR, 'post_schedule_x.log')),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# 環境変数読み込み
+# 環境変数読み込み（本番パス → なければスクリプトと同じディレクトリの.env）
 load_dotenv('/var/www/uguis_bad/.env')
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 # DynamoDB設定
 AWS_ACCESS_KEY_ID     = os.getenv('AWS_ACCESS_KEY_ID')
@@ -54,7 +58,6 @@ X_ACCESS_TOKEN_SECRET  = os.getenv('X_ACCESS_TOKEN_SECRET')
 SITE_URL = 'https://uguis-bad.shibuya8020.com'
 
 # Threads API設定
-THREADS_APP_ID       = os.getenv('THREADS_APP_ID')
 THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
 
 
@@ -167,31 +170,35 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
         logger.info(f'[DRY RUN Threads] 投稿内容:\n{text}')
         return True
 
-    if not all([THREADS_APP_ID, THREADS_ACCESS_TOKEN]):
+    if not THREADS_ACCESS_TOKEN:
         logger.error('Threads APIキーが設定されていません。.envを確認してください。')
         return False
 
     try:
         r1 = requests.post(
-            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads',
+            'https://graph.threads.net/v1.0/me/threads',
             params={
                 'media_type': 'TEXT',
                 'text': text,
                 'access_token': THREADS_ACCESS_TOKEN,
             }
         )
-        r1.raise_for_status()
+        if not r1.ok:
+            logger.error(f'Threadsコンテナ作成失敗: {r1.status_code} {r1.text}')
+            return False
         container_id = r1.json()['id']
         logger.info(f'Threadsコンテナ作成: {container_id}')
 
         r2 = requests.post(
-            f'https://graph.threads.net/v1.0/{THREADS_APP_ID}/threads_publish',
+            'https://graph.threads.net/v1.0/me/threads_publish',
             params={
                 'creation_id': container_id,
                 'access_token': THREADS_ACCESS_TOKEN,
             }
         )
-        r2.raise_for_status()
+        if not r2.ok:
+            logger.error(f'Threads公開失敗: {r2.status_code} {r2.text}')
+            return False
         post_id = r2.json()['id']
         logger.info(f'Threads投稿成功！ post_id={post_id}')
         return True
@@ -230,11 +237,13 @@ def main():
     for schedule in schedules:
         tweet = build_tweet(schedule, args.mode)
         logger.info(f'生成ツイート:\n{tweet}')
-        if not post_to_x(tweet, dry_run=dry_run):
+        ok_x       = post_to_x(tweet, dry_run=dry_run)
+        ok_threads = post_to_threads(tweet, dry_run=dry_run)
+        if not ok_x:
             logger.error('X投稿に失敗しました。')
-            sys.exit(1)
-        if not post_to_threads(tweet, dry_run=dry_run):
+        if not ok_threads:
             logger.error('Threads投稿に失敗しました。')
+        if not ok_x and not ok_threads:
             sys.exit(1)
 
 
