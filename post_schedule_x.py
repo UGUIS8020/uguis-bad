@@ -21,6 +21,7 @@ import argparse
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from uuid import uuid4
 import requests
 import tweepy
 from dotenv import load_dotenv
@@ -60,6 +61,10 @@ SITE_URL = 'https://uguis-bad.shibuya8020.com'
 
 # Threads API設定
 THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
+
+# うぐすたぐらむ設定
+UGUU_BOT_USER_ID = os.getenv('UGUU_BOT_USER_ID')
+UGUU_POST_TABLE  = 'uguu_post'
 
 # Instagram API設定
 INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
@@ -318,7 +323,7 @@ def post_to_x(text: str, dry_run: bool = False):
         return None
 
 
-def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None):
+def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None, uguu_post_id=None):
     """投稿IDをDynamoDBのスケジュールに保存"""
     updates = []
     values = {}
@@ -328,6 +333,9 @@ def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None):
     if threads_post_id:
         updates.append('threads_post_id = :tid')
         values[':tid'] = threads_post_id
+    if uguu_post_id:
+        updates.append('uguu_post_id = :uid')
+        values[':uid'] = uguu_post_id
     if not updates:
         return
     table = get_dynamodb_table()
@@ -336,7 +344,7 @@ def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None):
         UpdateExpression='SET ' + ', '.join(updates),
         ExpressionAttributeValues=values
     )
-    logger.info(f'投稿ID保存: x={tweet_id}, threads={threads_post_id}')
+    logger.info(f'投稿ID保存: x={tweet_id}, threads={threads_post_id}, uguu={uguu_post_id}')
 
 
 def quote_post_to_x(text: str, quote_tweet_id: str, dry_run: bool = False) -> bool:
@@ -444,6 +452,46 @@ def quote_post_to_threads(text: str, quote_post_id: str, dry_run: bool = False) 
         return False
 
 
+def post_to_uguu(content: str, dry_run: bool = False):
+    """うぐすたぐらむに投稿。成功時はpost_idを返す、失敗時はNone"""
+    if dry_run:
+        logger.info(f'[DRY RUN うぐすたぐらむ] 投稿内容:\n{content}')
+        return 'DRY_RUN_ID'
+
+    if not UGUU_BOT_USER_ID:
+        logger.error('UGUU_BOT_USER_IDが設定されていません。.envを確認してください。')
+        return None
+
+    try:
+        dynamodb = boto3.resource(
+            'dynamodb',
+            region_name=AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+        )
+        table = dynamodb.Table(UGUU_POST_TABLE)
+        post_id = str(uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        item = {
+            'PK': f'POST#{post_id}',
+            'SK': f'METADATA#{post_id}',
+            'post_id': post_id,
+            'user_id': UGUU_BOT_USER_ID,
+            'content': content,
+            'created_at': now,
+            'updated_at': now,
+            'feed_pk': 'FEED',
+            'feed_sk': f'TS#{now}#POST#{post_id}',
+            'likes_count': 0,
+        }
+        table.put_item(Item=item)
+        logger.info(f'うぐすたぐらむ投稿成功！ post_id={post_id}')
+        return post_id
+    except Exception as e:
+        logger.error(f'うぐすたぐらむ投稿エラー: {e}')
+        return None
+
+
 def post_to_instagram(caption: str, dry_run: bool = False):
     """Instagramに画像付きで投稿。成功時はpost_idを返す、失敗時はNone"""
     import random, glob as globmod
@@ -549,9 +597,13 @@ def main():
                 logger.warning('threads_post_idが見つかりません。新規投稿します。')
                 ok_threads = post_to_threads(tweet, dry_run=dry_run) is not None
 
-            ok_ig = post_to_instagram(caption, dry_run=dry_run) is not None
+            ok_ig   = post_to_instagram(caption, dry_run=dry_run) is not None
+            uguu_id = post_to_uguu(tweet, dry_run=dry_run)
+            ok_uguu = uguu_id is not None
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
+            if not ok_uguu:
+                logger.error('うぐすたぐらむ投稿に失敗しました。')
         else:
             # 3daysモード: 新規投稿してIDを保存
             x_id      = post_to_x(tweet, dry_run=dry_run)
@@ -559,16 +611,20 @@ def main():
             ok_x      = x_id is not None
             ok_threads = th_id is not None
             ok_ig     = post_to_instagram(caption, dry_run=dry_run) is not None
+            uguu_id   = post_to_uguu(tweet, dry_run=dry_run)
+            ok_uguu   = uguu_id is not None
             if not dry_run:
-                save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id)
+                save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id, uguu_post_id=uguu_id)
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
+            if not ok_uguu:
+                logger.error('うぐすたぐらむ投稿に失敗しました。')
 
         if not ok_x:
             logger.error('X投稿/リポストに失敗しました。')
         if not ok_threads:
             logger.error('Threads投稿/リポストに失敗しました。')
-        if not ok_x and not ok_threads and not ok_ig:
+        if not ok_x and not ok_threads and not ok_ig and not ok_uguu:
             sys.exit(1)
 
 
