@@ -216,6 +216,78 @@ def build_tweet(schedule: dict, mode: str) -> str:
     return '\n'.join(lines)
 
 
+INSTAGRAM_HASHTAGS = '#バドミントン #越谷 #バドミントンサークル #メンバー募集 #越谷市 #埼玉 #スポーツサークル #社会人サークル #badminton'
+
+
+def build_instagram_caption(schedule: dict, mode: str) -> str:
+    """Instagram用キャプションを生成（URLなし・ハッシュタグあり）"""
+    date_str  = schedule.get('date', '')
+    dow       = schedule.get('day_of_week', '')
+    start     = schedule.get('start_time', '')
+    end       = schedule.get('end_time', '')
+    venue_raw = schedule.get('venue', '')
+    court     = schedule.get('court', '')
+    max_p     = int(schedule.get('max_participants', 0))
+    count_p   = int(schedule.get('participants_count', 0))
+    remaining = max_p - count_p
+
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        date_disp = dt.strftime('%-m/%-d') + f'({dow})'
+    except Exception:
+        date_disp = date_str
+
+    court_disp = re.sub(r'\(.*?\)$', '', court).strip()
+
+    if remaining <= 0:
+        slots = '満員御礼'
+    elif remaining <= 3:
+        slots = f'残り{remaining}枠'
+    else:
+        slots = f'残{remaining}枠 参加募集中！'
+
+    details = get_participant_details(schedule)
+    total = details['total']
+    ft = details['first_timers']
+    ft_parts = []
+    if ft['female'] > 0:
+        ft_parts.append(f'女性{ft["female"]}名')
+    if ft['male'] > 0:
+        ft_parts.append(f'男性{ft["male"]}名')
+    if ft['other'] > 0:
+        ft_parts.append(f'その他{ft["other"]}名')
+    first_timer_line = f'初参加者：{" ".join(ft_parts)}' if ft_parts else ''
+
+    if mode == 'today':
+        lines = [
+            '今日はバドミントンです',
+            '参加者募集！',
+            f'{date_disp} {start}〜{end}',
+            f'{venue_raw} {court_disp}',
+            slots,
+            f'現在{total}名参加',
+        ]
+    else:
+        lines = [
+            '鶯バドミントン',
+            '参加者募集！',
+            f'{date_disp} {start}〜{end}',
+            f'{venue_raw} {court_disp}',
+            '基礎打ちができて、ルールがわかればどなたでも参加できます。',
+            '初級者～上級者レベルが違っても楽しくゲームできる方',
+            slots,
+            f'現在{total}名参加',
+        ]
+
+    if first_timer_line:
+        lines.append(first_timer_line)
+    lines.append('詳細・参加登録はプロフィールのリンクから')
+    lines.append('')
+    lines.append(INSTAGRAM_HASHTAGS)
+
+    return '\n'.join(lines)
+
+
 def get_x_client():
     return tweepy.Client(
         consumer_key=X_API_KEY,
@@ -453,7 +525,8 @@ def main():
         return
 
     for schedule in schedules:
-        tweet = build_tweet(schedule, args.mode)
+        tweet   = build_tweet(schedule, args.mode)
+        caption = build_instagram_caption(schedule, args.mode)
         logger.info(f'生成ツイート:\n{tweet}')
 
         if args.mode == 'today':
@@ -476,7 +549,7 @@ def main():
                 logger.warning('threads_post_idが見つかりません。新規投稿します。')
                 ok_threads = post_to_threads(tweet, dry_run=dry_run) is not None
 
-            ok_ig = post_to_instagram(tweet, dry_run=dry_run) is not None
+            ok_ig = post_to_instagram(caption, dry_run=dry_run) is not None
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
         else:
@@ -485,7 +558,7 @@ def main():
             th_id     = post_to_threads(tweet, dry_run=dry_run)
             ok_x      = x_id is not None
             ok_threads = th_id is not None
-            ok_ig     = post_to_instagram(tweet, dry_run=dry_run) is not None
+            ok_ig     = post_to_instagram(caption, dry_run=dry_run) is not None
             if not dry_run:
                 save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id)
             if not ok_ig:
