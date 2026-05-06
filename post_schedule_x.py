@@ -58,7 +58,6 @@ X_ACCESS_TOKEN_SECRET  = os.getenv('X_ACCESS_TOKEN_SECRET')
 SITE_URL = 'https://uguis-bad.shibuya8020.com'
 
 # Threads API設定
-THREADS_APP_ID       = os.getenv('THREADS_APP_ID')
 THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
 
 
@@ -171,7 +170,7 @@ def post_to_threads(text: str, dry_run: bool = False) -> bool:
         logger.info(f'[DRY RUN Threads] 投稿内容:\n{text}')
         return True
 
-    if not all([THREADS_APP_ID, THREADS_ACCESS_TOKEN]):
+    if not THREADS_ACCESS_TOKEN:
         logger.error('Threads APIキーが設定されていません。.envを確認してください。')
         return False
 
