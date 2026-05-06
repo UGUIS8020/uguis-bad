@@ -7,7 +7,13 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(move \"c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\uguis-bad\\\\sns_images\\\\*\" \"c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\uguis-bad\\\\static\\\\sns_images\\\\\" && rmdir \"c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\uguis-bad\\\\sns_images\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"sudo systemctl restart crond && echo 'crond�ċN������' && systemctl status crond --no-pager | head -5\")",
+      "PowerShell(scp -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\shibu\\\\Desktop\\\\uguis-bad\\\\_test_cron2.sh\" ec2-user@18.177.233.71:/tmp/_test_cron2.sh)",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"bash /tmp/_test_cron2.sh\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"cat /tmp/cron_test.log 2>/dev/null || echo '�t�@�C���Ȃ�'; sudo journalctl -u crond --no-pager --since '2026-05-07 08:21' | tail -10\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"echo '現在時刻: '$\\(date\\); cat /tmp/cron_test.log 2>/dev/null || echo 'ファイルなし（cron未実行）'; sudo journalctl -u crond --no-pager --since '2026-05-07 08:21' | grep -E 'ec2-user|CMD' | tail -10\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"until [ -f /tmp/cron_test.log ] || [ \\\\$\\(date +%M\\) -ge 25 ]; do sleep 10; done; echo '現在時刻: '$\\(date\\); cat /tmp/cron_test.log 2>/dev/null || echo 'ファイルなし（cron未実行）'\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\Owner\\Desktop\\website\\uguis-bad\\sns_images"

@@ -17,7 +17,21 @@
       "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"crontab -l\")",
       "PowerShell(scp -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\shibu\\\\Desktop\\\\uguis-bad\\\\_set_cron.sh\" ec2-user@18.177.233.71:/tmp/_set_cron.sh)",
       "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"bash /tmp/_set_cron.sh\")",
-      "Read(//c/Users/shibu/.ssh/**)"
+      "Read(//c/Users/shibu/.ssh/**)",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"tail -50 /var/www/uguis_bad/post_schedule_x.log\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"tail -80 /var/www/uguis_bad/post_schedule_x.log 2>/dev/null; echo '---'; tail -30 /var/www/uguis_bad/post_badnews.log 2>/dev/null\")",
+      "PowerShell(scp -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\shibu\\\\Desktop\\\\uguis-bad\\\\_set_cron.sh\" ec2-user@18.177.233.71:/tmp/_set_cron2.sh)",
+      "PowerShell(scp -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\shibu\\\\Desktop\\\\uguis-bad\\\\_fix_cron.sh\" ec2-user@18.177.233.71:/tmp/_fix_cron.sh)",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"bash /tmp/_fix_cron.sh\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"/var/www/uguis_bad/venv/bin/python /var/www/uguis_bad/post_badnews.py --mode test 2>&1 | tail -15\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"cat /var/www/uguis_bad/post_schedule_x.log\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"date && cat /etc/timezone 2>/dev/null || timedatectl | grep 'Time zone'\")",
+      "PowerShell(scp -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no \"C:\\\\Users\\\\shibu\\\\Desktop\\\\uguis-bad\\\\_check_schedule.py\" ec2-user@18.177.233.71:/tmp/_check_schedule.py)",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"/var/www/uguis_bad/venv/bin/python /tmp/_check_schedule.py\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"sudo grep -i 'post_schedule\\\\|CRON\\\\|python' /var/log/cron | tail -20\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"sudo journalctl -u crond --since '2026-05-07 06:00' --no-pager | tail -30\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"sudo journalctl -u crond --since '2026-05-06 00:00' --no-pager | grep 'ec2-user' | tail -30\")",
+      "PowerShell(ssh -i \"C:\\\\Users\\\\shibu\\\\Desktop\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@18.177.233.71 \"cat -A /var/spool/cron/ec2-user\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\shibu\\.ssh"
