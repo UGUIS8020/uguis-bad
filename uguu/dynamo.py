@@ -822,9 +822,7 @@ class DynamoDB:
             source = rec.get("source")
             if status == "cancelled":
                 return "cancelled"
-            if action in EXCLUDE_ACTIONS or source == "admin_manual":  # ← 追加
-                return "other"
-            if action in EXCLUDE_ACTIONS:
+            if action in EXCLUDE_ACTIONS or source == "admin_manual":
                 return "other"
             if action == TARA_ACTION:
                 return "tara"
@@ -833,11 +831,10 @@ class DynamoDB:
         def better_local(new: dict, old: dict) -> bool:
             cn, co = classify_local(new), classify_local(old)
 
-            # --- 追加: official 保護ロジック ---
-            # すでに official (参加) があるなら、後から来た cancelled や tara に上書きさせない
-            if co == "official" and cn in ["cancelled", "tara"]:
+            # tara は official に上書きさせない（時刻問わず）
+            if co == "official" and cn == "tara":
                 return False
-            # -------------------------------
+            # cancelled は時刻で判断（後から来たキャンセルは有効）
 
             # other は参加履歴の採用対象外
             if cn == "other" and co != "other":
