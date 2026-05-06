@@ -41,7 +41,11 @@ def main():
 
         checked += 1
         try:
-            records = db.get_user_participation_history_with_timestamp(str(user_id)) or []
+            records = db.get_user_participation_history_with_timestamp(str(user_id))
+            if records is None:
+                errors += 1
+                print(f"[reconcile][SKIP] user_id={user_id} 履歴取得失敗のためスキップ")
+                continue
             correct = len(records)
 
             cur_raw = u.get("practice_count")
@@ -57,6 +61,7 @@ def main():
                     ExpressionAttributeValues={":c": int(correct)},
                 )
                 updated += 1
+                print(f"[reconcile] updated user_id={user_id} {cur} -> {correct}")
 
         except Exception as e:
             errors += 1
@@ -65,4 +70,9 @@ def main():
     print(f"[reconcile] checked={checked} updated={updated} errors={errors}")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from app import create_app
+    application = create_app()
+    with application.app_context():
+        main()
