@@ -748,6 +748,18 @@ def get_all_users_dict():
         app.logger.error(f"ユーザー一括取得エラー: {str(e)}")
         return {}
 
+@app.template_filter('linkify')
+def linkify_filter(text):
+    import re
+    from markupsafe import Markup, escape
+    escaped = str(escape(text or ''))
+    pattern = re.compile(r'(https?://[^\s<>"{}|\\^`\[\]]+)')
+    return Markup(pattern.sub(
+        r'<a href="\1" target="_blank" rel="noopener noreferrer">\1</a>',
+        escaped
+    ))
+
+
 @app.template_filter('format_date')
 def format_date(value, fmt='%m/%d'):
     """
