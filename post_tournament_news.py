@@ -59,13 +59,15 @@ AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 OPENAI_API_KEY        = os.getenv('OPENAI_API_KEY')
 SITE_NEWS_URL         = 'https://uguis-bad.shibuya8020.com/bad_news'
 
-# 国内・国際大会の検索クエリ
+# 国内・国際大会の検索クエリ（主要大会のみ）
 TOURNAMENT_QUERIES = [
-    ('バドミントン 大会 結果',            'ja'),
-    ('全日本バドミントン 結果',            'ja'),
-    ('バドミントン ワールドツアー',         'ja'),
-    ('BWF World Tour results badminton', 'en'),
-    ('badminton championship results',   'en'),
+    ('全日本バドミントン 結果',                      'ja'),
+    ('バドミントン 全国大会 結果',                   'ja'),
+    ('バドミントン ワールドツアー 結果',              'ja'),
+    ('ユーバー杯 OR トーマス杯 OR スディルマン杯',    'ja'),
+    ('バドミントン ジャパンオープン OR ジャパンマスターズ', 'ja'),
+    ('BWF World Tour results badminton',            'en'),
+    ('badminton Super Series OR World Championships results', 'en'),
 ]
 
 
@@ -179,7 +181,7 @@ def generate_posts(articles: list[dict]) -> dict | None:
 - 応援コメントを自然に添える
 - 最後（空行なし）に「詳細はサイトのニュースページへ」
 
-大会結果と無関係な記事しかない場合、または具体的な情報が何も得られない場合はnullを返してください。
+地区大会・市区町村レベルの小規模な大会は対象外です。全国大会・国際大会・BWFワールドツアーなど主要大会の結果のみ投稿してください。該当する記事がない場合はnullを返してください。
 
 JSON形式で返してください：
 {{
