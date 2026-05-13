@@ -190,9 +190,9 @@ def build_tweet(schedule: dict, mode: str) -> str:
     first_timer_line = f'初参加者：{" ".join(ft_parts)}' if ft_parts else ''
 
     if mode == 'today':
-        # 当日引用投稿用：シンプルな内容で最新情報を表示
+        # 前日引用投稿用：シンプルな内容で最新情報を表示
         lines = [
-            '今日はバドミントンです',
+            '明日はバドミントンです',
             '参加者募集！',
             f'{date_disp} {start}〜{end}',
             f'{venue_disp} {court_disp}',
@@ -265,7 +265,7 @@ def build_instagram_caption(schedule: dict, mode: str) -> str:
 
     if mode == 'today':
         lines = [
-            '今日はバドミントンです',
+            '明日はバドミントンです',
             '参加者募集！',
             f'{date_disp} {start}〜{end}',
             f'{venue_raw} {court_disp}',
