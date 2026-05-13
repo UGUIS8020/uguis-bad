@@ -10,7 +10,7 @@ post_schedule_x.py
 
 cron設定例:
   0 9 * * * cd /var/www/uguis_bad && python3 post_schedule_x.py --mode 3days
-  0 7 * * * cd /var/www/uguis_bad && python3 post_schedule_x.py --mode today
+  0 20 * * * cd /var/www/uguis_bad && python3 post_schedule_x.py --mode today
 """
 
 import boto3
@@ -558,7 +558,7 @@ def main():
     if args.mode == '3days':
         target = now + timedelta(days=3)
     elif args.mode == 'today':
-        target = now
+        target = now + timedelta(days=1)
     else:
         # testモード: 直近のactiveな予定を1件取得
         target = now
