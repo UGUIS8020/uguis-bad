@@ -2522,6 +2522,8 @@ def api_chat_logs():
 @app.route('/update_skill_score', methods=['POST'])
 @login_required
 def update_skill_score():
+    if not current_user.administrator:
+        return jsonify({"success": False, "error": "権限がありません"}), 403
     try:
         data = request.get_json(silent=True) or {}
         user_id = data.get("user_id")
