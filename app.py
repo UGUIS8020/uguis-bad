@@ -3469,12 +3469,14 @@ from uguu.post import post
 from schedule.views import bp as bp_schedule
 from game.views import bp_game
 from uguu.analytics import analytics
+from uguu.admin_oauth import admin_oauth
 
 for blueprint in [uguu, post, users, analytics]:
     app.register_blueprint(blueprint, url_prefix='/uguu')
 
 app.register_blueprint(bp_schedule, url_prefix='/schedule')
 app.register_blueprint(bp_game, url_prefix='/game')
+app.register_blueprint(admin_oauth)
 
 if __name__ == "__main__":
     app.run(debug=True)

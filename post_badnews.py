@@ -298,11 +298,15 @@ def main():
     logger.info(f'--- うぐすたぐらむ投稿文 ---\n{uguu_full}')
 
     # 3. 各SNSに投稿
-    x_id      = post_to_x(tweet_text, top_article_url, dry_run=dry_run)
-    uguu_id   = post_to_uguu(uguu_full, dry_run=dry_run)
+    threads_text = tweet_text + chr(10) + top_article_url
+    x_id       = post_to_x(tweet_text, top_article_url, dry_run=dry_run)
+    threads_id = post_to_threads(threads_text, dry_run=dry_run)
+    uguu_id    = post_to_uguu(uguu_full, dry_run=dry_run)
 
     if not x_id:
         logger.error('X投稿に失敗しました。')
+    if not threads_id:
+        logger.error('Threads投稿に失敗しました。')
     if not uguu_id:
         logger.error('うぐすたぐらむ投稿に失敗しました。')
 
