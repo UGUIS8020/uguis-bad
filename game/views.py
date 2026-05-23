@@ -2038,6 +2038,7 @@ def finish_current_match():
                     Attr("entry_status").eq("playing") &
                     ~Attr("entry_id").contains("meta")
                 ),
+                "ConsistentRead": True,
             }
             while True:
                 resp = match_table.scan(**kwargs)
@@ -2186,6 +2187,10 @@ def finish_current_match():
         })
 
         # (b) playing を pending か resting に戻す（rest_requested フラグで分岐）
+        current_app.logger.info(
+            "[finish] playing_players rest_requested dump: %s",
+            [(p.get("user_id", "?"), p.get("rest_requested")) for p in playing_players]
+        )
         for p in playing_players:
             entry_id = p.get("entry_id")
             if not entry_id:
@@ -2599,7 +2604,7 @@ def rest_request():
                 ':now': datetime.now(JST).isoformat(),
             }
         )
-        current_app.logger.info('[rest_request] user=%s 休憩予約', user_id)
+        current_app.logger.info('[rest_request] user=%s entry_id=%s 休憩予約', user_id, entry['entry_id'])
     except Exception as e:
         current_app.logger.error(f'休憩予約エラー: {e}')
         flash('休憩予約に失敗しました', 'danger')
