@@ -113,6 +113,7 @@ def court():
         is_registered = False
         is_resting = False
         is_playing = False
+        rest_requested = False
         skill_score = 50
         match_count = 0
 
@@ -127,9 +128,10 @@ def court():
             me = max(my_entries, key=_ts)  # 最新を採用
             st = me.get("entry_status")
 
-            is_registered = (st == "pending")
-            is_resting    = (st == "resting")
-            is_playing    = (st == "playing")
+            is_registered  = (st == "pending")
+            is_resting     = (st == "resting")
+            is_playing     = (st == "playing")
+            rest_requested = bool(me.get("rest_requested")) if is_playing else False
 
             # いったん entry の値（無ければ50）
             skill_score = me.get("skill_score", 50)
@@ -236,6 +238,7 @@ def court():
             is_registered=is_registered,
             is_resting=is_resting,
             is_playing=is_playing,
+            rest_requested=rest_requested,
             current_user_skill_score=skill_score,
             current_user_match_count=match_count,
             match_courts=match_courts,
@@ -2182,32 +2185,55 @@ def finish_current_match():
             }
         })
 
-        # (b) 全 playing を pending に戻す
-        # ★注意: REMOVE court_number/team をすると「遅延してきたスコア送信」が復旧不能になる
-        # 全送信チェックを入れているので基本は大丈夫ですが、心配なら REMOVE を外すのがより安全です。
+        # (b) playing を pending か resting に戻す（rest_requested フラグで分岐）
         for p in playing_players:
             entry_id = p.get("entry_id")
             if not entry_id:
                 current_app.logger.warning("[finish] missing entry_id in playing player: %s", p)
                 continue
 
-            tx_items.append({
-                "Update": {
-                    "TableName": "bad-game-match_entries",
-                    "Key": {"entry_id": {"S": str(entry_id)}},
-                    "UpdateExpression": (
-                        "SET entry_status=:pending, updated_at=:now "
-                        "REMOVE court_number, team, team_side, match_id" 
-                    ),
-                    "ConditionExpression": "entry_status = :playing AND match_id = :mid",
-                    "ExpressionAttributeValues": {
-                        ":pending": {"S": "pending"},
-                        ":playing": {"S": "playing"},
-                        ":mid": {"S": str(match_id)},
-                        ":now": {"S": now_jst},
-                    },
-                }
-            })
+            if p.get("rest_requested"):
+                # 休憩予約あり → resting に移行・rest_count加算
+                current_app.logger.info("[finish] rest_requested → resting: user=%s", p.get("user_id"))
+                tx_items.append({
+                    "Update": {
+                        "TableName": "bad-game-match_entries",
+                        "Key": {"entry_id": {"S": str(entry_id)}},
+                        "UpdateExpression": (
+                            "SET entry_status=:resting, updated_at=:now, "
+                            "rest_count = if_not_exists(rest_count, :zero) + :inc "
+                            "REMOVE court_number, team, team_side, match_id, rest_requested"
+                        ),
+                        "ConditionExpression": "entry_status = :playing AND match_id = :mid",
+                        "ExpressionAttributeValues": {
+                            ":resting": {"S": "resting"},
+                            ":playing": {"S": "playing"},
+                            ":mid":     {"S": str(match_id)},
+                            ":now":     {"S": now_jst},
+                            ":zero":    {"N": "0"},
+                            ":inc":     {"N": "1"},
+                        },
+                    }
+                })
+            else:
+                # 通常 → pending に戻す
+                tx_items.append({
+                    "Update": {
+                        "TableName": "bad-game-match_entries",
+                        "Key": {"entry_id": {"S": str(entry_id)}},
+                        "UpdateExpression": (
+                            "SET entry_status=:pending, updated_at=:now "
+                            "REMOVE court_number, team, team_side, match_id"
+                        ),
+                        "ConditionExpression": "entry_status = :playing AND match_id = :mid",
+                        "ExpressionAttributeValues": {
+                            ":pending": {"S": "pending"},
+                            ":playing": {"S": "playing"},
+                            ":mid":     {"S": str(match_id)},
+                            ":now":     {"S": now_jst},
+                        },
+                    }
+                })
 
         # トランザクション実行
         try:
@@ -2548,6 +2574,67 @@ def toggle_player_status():
         current_app.logger.error(f'状態変更エラー: {e}', exc_info=True)
         return jsonify({'success': False, 'message': f'エラーが発生しました: {str(e)}'}), 500
     
+
+@bp_game.route('/rest_request', methods=['POST'])
+@login_required
+def rest_request():
+    """試合中に次回の休憩を予約"""
+    try:
+        user_id = current_user.get_id()
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        resp = match_table.scan(
+            FilterExpression=Attr('user_id').eq(user_id) & Attr('entry_status').eq('playing'),
+            ConsistentRead=True,
+        )
+        items = resp.get('Items', [])
+        if not items:
+            flash('試合中のエントリーが見つかりません', 'warning')
+            return redirect(url_for('game.court'))
+        entry = items[0]
+        match_table.update_item(
+            Key={'entry_id': entry['entry_id']},
+            UpdateExpression='SET rest_requested = :true, updated_at = :now',
+            ExpressionAttributeValues={
+                ':true': True,
+                ':now': datetime.now(JST).isoformat(),
+            }
+        )
+        current_app.logger.info('[rest_request] user=%s 休憩予約', user_id)
+    except Exception as e:
+        current_app.logger.error(f'休憩予約エラー: {e}')
+        flash('休憩予約に失敗しました', 'danger')
+    return redirect(url_for('game.court'))
+
+
+@bp_game.route('/rest_request_cancel', methods=['POST'])
+@login_required
+def rest_request_cancel():
+    """試合中の休憩予約をキャンセル"""
+    try:
+        user_id = current_user.get_id()
+        match_table = current_app.dynamodb.Table("bad-game-match_entries")
+        resp = match_table.scan(
+            FilterExpression=Attr('user_id').eq(user_id) & Attr('entry_status').eq('playing'),
+            ConsistentRead=True,
+        )
+        items = resp.get('Items', [])
+        if not items:
+            flash('試合中のエントリーが見つかりません', 'warning')
+            return redirect(url_for('game.court'))
+        entry = items[0]
+        match_table.update_item(
+            Key={'entry_id': entry['entry_id']},
+            UpdateExpression='REMOVE rest_requested SET updated_at = :now',
+            ExpressionAttributeValues={
+                ':now': datetime.now(JST).isoformat(),
+            }
+        )
+        current_app.logger.info('[rest_request_cancel] user=%s 休憩予約キャンセル', user_id)
+    except Exception as e:
+        current_app.logger.error(f'休憩予約キャンセルエラー: {e}')
+        flash('キャンセルに失敗しました', 'danger')
+    return redirect(url_for('game.court'))
+
 
 @bp_game.route('/resume', methods=['POST'])
 @login_required
