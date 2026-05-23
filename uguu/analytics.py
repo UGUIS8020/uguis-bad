@@ -575,6 +575,7 @@ def analytics_overall():
     events_count = 0                  # 対象期間のイベント数
     by_weekday = Counter()            # 曜日別（延べ）
     by_group = Counter()              # 月/週/日別（延べ）
+    events_by_group = Counter()       # 月/週/日別（イベント数）
     by_hour  = Counter({f"{h:02d}": 0 for h in range(24)})  # 開始時刻ベース
     participation_dates = Counter()   # 日別の延べ参加数（ヒートマップ等で使える）
 
@@ -616,7 +617,9 @@ def analytics_overall():
         by_weekday[youbi[d.weekday()]] += count_here
 
         # 粒度別（延べ）
-        by_group[_group_key(d, group)] += count_here
+        gk = _group_key(d, group)
+        by_group[gk] += count_here
+        events_by_group[gk] += 1
 
         # 開始時刻→時間帯（延べ）
         hh = _event_start_hour(s)
@@ -650,6 +653,7 @@ def analytics_overall():
             "by_weekday": dict(by_weekday),                 # 曜日別（延べ）
             "by_hour": dict(by_hour),                       # 開始時刻ベース
             "by_group": [{"group": k, "count": v} for k, v in sorted(by_group.items())],
+            "events_by_group": {k: v for k, v in events_by_group.items()},
             "by_date": [{"date": d.strftime("%Y-%m-%d"), "count": c}
                         for d, c in sorted(participation_dates.items())]
         }
