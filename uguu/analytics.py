@@ -349,6 +349,9 @@ def analytics_member_health():
         first = min(dates).strftime("%Y-%m")
         user_first_month[uid] = first
 
+    # 参加経験者全員（固定分母）
+    total_participants = len(user_dates)
+
     monthly_data = []
     cumulative_users = set()
     for m in months_sorted:
@@ -358,13 +361,14 @@ def analytics_member_health():
         # 新規（このサークル初参加）
         new_this_month = sum(1 for uid in users_this_month if user_first_month.get(uid) == m)
 
-        # アクティブ率（累積ユーザー中の当月参加者）
-        act_rate = round(len(users_this_month) / len(cumulative_users) * 100, 1) if cumulative_users else 0
+        # アクティブ率（参加経験者全員のうち当月参加者）
+        act_rate = round(len(users_this_month) / total_participants * 100, 1) if total_participants else 0
 
         monthly_data.append({
             "month": m,
             "active_users": len(users_this_month),
             "cumulative_users": len(cumulative_users),
+            "total_participants": total_participants,
             "active_rate": act_rate,
             "new_members": new_this_month,
         })

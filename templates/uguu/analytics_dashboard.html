@@ -362,7 +362,7 @@
         <i class="fas fa-users kpi-icon"></i>
         <div class="kpi-label">アクティブ率</div>
         <div class="kpi-value"><span id="kpiActiveRate">-</span><small style="font-size:1rem;">%</small> <small style="font-size:1rem;">(<span id="kpiActiveUsers">-</span>人)</small></div>
-        <div class="kpi-subtitle">3ヶ月以内に2回以上参加 / 直近6ヶ月2回以上参加 <span id="kpiActiveTotal"></span></div>
+        <div class="kpi-subtitle">3ヶ月以内に2回以上参加 / 参加経験者全員 <span id="kpiActiveTotal"></span></div>
       </div>
     </div>
 
@@ -371,7 +371,7 @@
       <div class="card chart-card">
         <div class="chart-title">
           <i class="fas fa-chart-area"></i>
-          <span>月次アクティブ率</span>
+          <span>月次アクティブ率（参加経験者比）</span>
         </div>
         <div class="chart-container">
           <canvas id="chartActiveRate"></canvas>
@@ -905,7 +905,7 @@
       data: {
         labels,
         datasets: [{
-          label: 'アクティブ率 (%)',
+          label: 'アクティブ率（参加経験者比） (%)',
           data: monthlyFiltered.map(x => x.active_rate),
           borderColor: 'rgba(74,144,226,1)',
           backgroundColor: 'rgba(74,144,226,0.12)',
