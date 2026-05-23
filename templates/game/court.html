@@ -261,7 +261,7 @@
             <form method="POST" action="{{ url_for('game.resume') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-success btn-lg">
-                    <i class="fas fa-play"></i> 再開する
+                    <i class="fas fa-play"></i> 試合に参加
                 </button>
             </form>
             {% elif is_playing %}
