@@ -2450,10 +2450,12 @@ def rest():
                 return redirect(url_for('game.court'))
             match_table.update_item(
                 Key={'entry_id': current_entry['entry_id']},
-                UpdateExpression='SET entry_status = :status, rest_started_at = :time',
+                UpdateExpression='SET entry_status = :status, rest_started_at = :time, rest_count = if_not_exists(rest_count, :zero) + :inc',
                 ExpressionAttributeValues={
                     ':status': 'resting',
-                    ':time': datetime.now().isoformat()
+                    ':time': datetime.now(JST).isoformat(),
+                    ':zero': 0,
+                    ':inc': 1,
                 }
             )
     except Exception as e:
@@ -2505,10 +2507,12 @@ def toggle_player_status():
             current_app.logger.info(f'{player_name}を休憩状態に変更中...')
             match_table.update_item(
                 Key={'entry_id': current_entry['entry_id']},
-                UpdateExpression='SET entry_status = :status, rest_started_at = :time',
+                UpdateExpression='SET entry_status = :status, rest_started_at = :time, rest_count = if_not_exists(rest_count, :zero) + :inc',
                 ExpressionAttributeValues={
                     ':status': 'resting',
-                    ':time': datetime.now().isoformat()
+                    ':time': datetime.now(JST).isoformat(),
+                    ':zero': 0,
+                    ':inc': 1,
                 }
             )
             current_app.logger.info(f'{player_name}を休憩状態に変更完了')
