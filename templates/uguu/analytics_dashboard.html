@@ -657,16 +657,22 @@
   }
 
   let chartMonthly = null;
-  function buildMonthlyChart(json, mode='compact'){
+  function buildMonthlyChart(json, overall, mode='compact'){
     const ctx = document.getElementById('chartMonthly').getContext('2d');
     const byGroup = (json.distributions?.by_group || []).slice().sort((a,b)=> a.group.localeCompare(b.group));
-    const evByGroup = json.distributions?.events_by_group || {};
+    // 全体データから月別セッション数と参加延べ数を取得して平均を計算
+    const overallByGroup = {};
+    for (const item of (overall?.distributions?.by_group || [])) {
+      overallByGroup[item.group] = item.count;
+    }
+    const evByGroup = overall?.distributions?.events_by_group || {};
     const src = (mode === 'compact') ? takeLast(byGroup, 6) : byGroup;
     const labels = src.map(x => x.group);
     const data   = src.map(x => x.count);
     const avgData = src.map(x => {
       const ev = evByGroup[x.group] || 0;
-      return ev > 0 ? Math.round(x.count / ev * 10) / 10 : null;
+      const total = overallByGroup[x.group] || 0;
+      return ev > 0 ? Math.round(total / ev * 10) / 10 : null;
     });
 
     if (chartMonthly) chartMonthly.destroy();
@@ -894,18 +900,23 @@
 
   async function main(){
     try{
-      const res = await fetch(apiUrl, { credentials: 'same-origin' });
+      const overallUrl = "{{ url_for('analytics.analytics_overall', group='month') }}";
+      const [res, overallRes] = await Promise.all([
+        fetch(apiUrl, { credentials: 'same-origin' }),
+        fetch(overallUrl, { credentials: 'same-origin' }),
+      ]);
       if(!res.ok) throw new Error('API error: ' + res.status);
       const json = await res.json();
+      const overall = overallRes.ok ? await overallRes.json() : null;
 
-      buildMonthlyChart(json, 'compact');
+      buildMonthlyChart(json, overall, 'compact');
       buildWeekdayChart(json);
       buildHourChart(json, 'compact');
 
       const btnMonthlyCompact = document.getElementById('btnMonthlyCompact');
       const btnMonthlyFull = document.getElementById('btnMonthlyFull');
-      btnMonthlyCompact.onclick = ()=> { buildMonthlyChart(json, 'compact'); toggleButtons(btnMonthlyCompact, btnMonthlyFull); };
-      btnMonthlyFull.onclick = ()=> { buildMonthlyChart(json, 'full'); toggleButtons(btnMonthlyFull, btnMonthlyCompact); };
+      btnMonthlyCompact.onclick = ()=> { buildMonthlyChart(json, overall, 'compact'); toggleButtons(btnMonthlyCompact, btnMonthlyFull); };
+      btnMonthlyFull.onclick = ()=> { buildMonthlyChart(json, overall, 'full'); toggleButtons(btnMonthlyFull, btnMonthlyCompact); };
 
       const btnHourCompact = document.getElementById('btnHourCompact');
       const btnHourFull = document.getElementById('btnHourFull');
