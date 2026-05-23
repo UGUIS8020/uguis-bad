@@ -952,7 +952,6 @@
         labels: nmLabels,
         datasets: [
           {
-            type: 'bar',
             label: '新規メンバー',
             data: nmNew,
             backgroundColor: 'rgba(80,200,120,0.75)',
@@ -960,45 +959,21 @@
             borderWidth: 2,
             borderRadius: 6,
             barPercentage: 0.7,
-            yAxisID: 'yNew',
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: '累積メンバー',
-            data: nmCumul,
-            borderColor: 'rgba(74,144,226,1)',
-            backgroundColor: 'rgba(74,144,226,0.08)',
-            borderWidth: 2,
-            pointRadius: 3,
-            fill: true,
-            tension: 0.3,
-            yAxisID: 'yCumul',
-            order: 1,
           }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         scales: {
-          yNew: {
+          y: {
             beginAtZero: true,
-            position: 'left',
-            ticks: { stepSize: 1, font: {size:11}, color: 'rgba(80,200,120,1)' },
+            ticks: { stepSize: 1, font: {size:11}, color: '#6c757d' },
             grid: { color: 'rgba(0,0,0,0.05)' },
-            title: { display: true, text: '新規', color: 'rgba(80,200,120,1)', font: {size:10} }
-          },
-          yCumul: {
-            beginAtZero: false,
-            position: 'right',
-            ticks: { font: {size:11}, color: 'rgba(74,144,226,1)' },
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: '累積', color: 'rgba(74,144,226,1)', font: {size:10} }
           },
           x: { grid: {display:false}, ticks: { font:{size:11}, color:'#6c757d' } }
         },
         plugins: {
-          legend: { display: true, position: 'bottom', labels: { font:{size:11}, boxWidth:12, padding:12 } },
+          legend: { display: false },
           tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding:10, cornerRadius:8 }
         }
       }
