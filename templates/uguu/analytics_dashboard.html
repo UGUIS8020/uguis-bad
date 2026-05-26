@@ -362,7 +362,7 @@
         <i class="fas fa-users kpi-icon"></i>
         <div class="kpi-label">アクティブ率</div>
         <div class="kpi-value"><span id="kpiActiveRate">-</span><small style="font-size:1rem;">%</small> <small style="font-size:1rem;">(<span id="kpiActiveUsers">-</span>人)</small></div>
-        <div class="kpi-subtitle">3ヶ月以内に2回以上参加 / 直近6ヶ月2回以上参加 <span id="kpiActiveTotal"></span></div>
+        <div class="kpi-subtitle">3ヶ月以内に2回以上参加 / 参加経験者全員 <span id="kpiActiveTotal"></span></div>
       </div>
     </div>
 
@@ -371,7 +371,7 @@
       <div class="card chart-card">
         <div class="chart-title">
           <i class="fas fa-chart-area"></i>
-          <span>月次アクティブ率</span>
+          <span>月次アクティブ率（参加経験者比）</span>
         </div>
         <div class="chart-container">
           <canvas id="chartActiveRate"></canvas>
@@ -657,12 +657,23 @@
   }
 
   let chartMonthly = null;
-  function buildMonthlyChart(json, mode='compact'){
+  function buildMonthlyChart(json, overall, mode='compact'){
     const ctx = document.getElementById('chartMonthly').getContext('2d');
     const byGroup = (json.distributions?.by_group || []).slice().sort((a,b)=> a.group.localeCompare(b.group));
+    // 全体データから月別セッション数と参加延べ数を取得して平均を計算
+    const overallByGroup = {};
+    for (const item of (overall?.distributions?.by_group || [])) {
+      overallByGroup[item.group] = item.count;
+    }
+    const evByGroup = overall?.distributions?.events_by_group || {};
     const src = (mode === 'compact') ? takeLast(byGroup, 6) : byGroup;
     const labels = src.map(x => x.group);
     const data   = src.map(x => x.count);
+    const avgData = src.map(x => {
+      const ev = evByGroup[x.group] || 0;
+      const total = overallByGroup[x.group] || 0;
+      return ev > 0 ? Math.round(total / ev * 10) / 10 : null;
+    });
 
     if (chartMonthly) chartMonthly.destroy();
     const gradient = chartColors.gradient(ctx);
@@ -670,17 +681,71 @@
       type: 'bar',
       data: {
         labels,
-        datasets: [{
-          data,
-          backgroundColor: gradient,
-          borderColor: chartColors.primaryBorder,
-          borderWidth: 2,
-          borderRadius: 8,
-          barPercentage: 0.7,
-          categoryPercentage: 0.8
-        }]
+        datasets: [
+          {
+            type: 'bar',
+            label: '月間参加数',
+            data,
+            backgroundColor: gradient,
+            borderColor: chartColors.primaryBorder,
+            borderWidth: 2,
+            borderRadius: 8,
+            barPercentage: 0.7,
+            categoryPercentage: 0.8,
+            yAxisID: 'yTotal',
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: '1回平均',
+            data: avgData,
+            borderColor: 'rgba(255,99,132,1)',
+            backgroundColor: 'rgba(255,99,132,0.1)',
+            borderWidth: 2,
+            pointRadius: 4,
+            pointBackgroundColor: 'rgba(255,99,132,1)',
+            fill: false,
+            tension: 0.3,
+            yAxisID: 'yAvg',
+            order: 1,
+          }
+        ]
       },
-      options: commonBarOpts
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          yTotal: {
+            beginAtZero: true,
+            position: 'left',
+            ticks: { stepSize: 5, font: { size: 11, weight: '500' }, color: '#6c757d' },
+            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+          },
+          yAvg: {
+            beginAtZero: true,
+            position: 'right',
+            ticks: { font: { size: 11 }, color: 'rgba(255,99,132,1)' },
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: '平均人数', color: 'rgba(255,99,132,1)', font: { size: 10 } },
+          },
+          x: {
+            grid: { display: false },
+            ticks: { autoSkip: true, maxTicksLimit: 12, font: { size: 11, weight: '500' }, color: '#6c757d' }
+          }
+        },
+        plugins: {
+          legend: { display: true, position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12, padding: 12 } },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            backgroundColor: 'rgba(0,0,0,0.8)',
+            padding: 12,
+            cornerRadius: 8,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 }
+          }
+        }
+      }
     });
   }
 
@@ -835,18 +900,23 @@
 
   async function main(){
     try{
-      const res = await fetch(apiUrl, { credentials: 'same-origin' });
+      const overallUrl = "{{ url_for('analytics.analytics_overall', group='month') }}";
+      const [res, overallRes] = await Promise.all([
+        fetch(apiUrl, { credentials: 'same-origin' }),
+        fetch(overallUrl, { credentials: 'same-origin' }),
+      ]);
       if(!res.ok) throw new Error('API error: ' + res.status);
       const json = await res.json();
+      const overall = overallRes.ok ? await overallRes.json() : null;
 
-      buildMonthlyChart(json, 'compact');
+      buildMonthlyChart(json, overall, 'compact');
       buildWeekdayChart(json);
       buildHourChart(json, 'compact');
 
       const btnMonthlyCompact = document.getElementById('btnMonthlyCompact');
       const btnMonthlyFull = document.getElementById('btnMonthlyFull');
-      btnMonthlyCompact.onclick = ()=> { buildMonthlyChart(json, 'compact'); toggleButtons(btnMonthlyCompact, btnMonthlyFull); };
-      btnMonthlyFull.onclick = ()=> { buildMonthlyChart(json, 'full'); toggleButtons(btnMonthlyFull, btnMonthlyCompact); };
+      btnMonthlyCompact.onclick = ()=> { buildMonthlyChart(json, overall, 'compact'); toggleButtons(btnMonthlyCompact, btnMonthlyFull); };
+      btnMonthlyFull.onclick = ()=> { buildMonthlyChart(json, overall, 'full'); toggleButtons(btnMonthlyFull, btnMonthlyCompact); };
 
       const btnHourCompact = document.getElementById('btnHourCompact');
       const btnHourFull = document.getElementById('btnHourFull');
@@ -905,7 +975,7 @@
       data: {
         labels,
         datasets: [{
-          label: 'アクティブ率 (%)',
+          label: 'アクティブ率（参加経験者比） (%)',
           data: monthlyFiltered.map(x => x.active_rate),
           borderColor: 'rgba(74,144,226,1)',
           backgroundColor: 'rgba(74,144,226,0.12)',
@@ -952,7 +1022,6 @@
         labels: nmLabels,
         datasets: [
           {
-            type: 'bar',
             label: '新規メンバー',
             data: nmNew,
             backgroundColor: 'rgba(80,200,120,0.75)',
@@ -960,45 +1029,21 @@
             borderWidth: 2,
             borderRadius: 6,
             barPercentage: 0.7,
-            yAxisID: 'yNew',
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: '累積メンバー',
-            data: nmCumul,
-            borderColor: 'rgba(74,144,226,1)',
-            backgroundColor: 'rgba(74,144,226,0.08)',
-            borderWidth: 2,
-            pointRadius: 3,
-            fill: true,
-            tension: 0.3,
-            yAxisID: 'yCumul',
-            order: 1,
           }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         scales: {
-          yNew: {
+          y: {
             beginAtZero: true,
-            position: 'left',
-            ticks: { stepSize: 1, font: {size:11}, color: 'rgba(80,200,120,1)' },
+            ticks: { stepSize: 1, font: {size:11}, color: '#6c757d' },
             grid: { color: 'rgba(0,0,0,0.05)' },
-            title: { display: true, text: '新規', color: 'rgba(80,200,120,1)', font: {size:10} }
-          },
-          yCumul: {
-            beginAtZero: false,
-            position: 'right',
-            ticks: { font: {size:11}, color: 'rgba(74,144,226,1)' },
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: '累積', color: 'rgba(74,144,226,1)', font: {size:10} }
           },
           x: { grid: {display:false}, ticks: { font:{size:11}, color:'#6c757d' } }
         },
         plugins: {
-          legend: { display: true, position: 'bottom', labels: { font:{size:11}, boxWidth:12, padding:12 } },
+          legend: { display: false },
           tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding:10, cornerRadius:8 }
         }
       }
