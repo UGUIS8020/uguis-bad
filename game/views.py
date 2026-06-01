@@ -3596,8 +3596,294 @@ def create_pairings():
         current_app.logger.error("[ペア生成エラー] %s", str(e), exc_info=True)
         flash("試合の作成中にエラーが発生しました。", "danger")
         return redirect(url_for("game.court"))
-    
-    
+
+
+@bp_game.route('/create_pairings_skilled', methods=["POST"])
+@login_required
+def create_pairings_skilled():
+    """スキルスコア20以下を除外したAIペアリング（人数不足時は除外しない）"""
+    if not current_user.administrator:
+        flash('管理者のみ実行できます。', 'danger')
+        return redirect(url_for('game.court'))
+
+    if has_ongoing_matches():
+        flash('進行中の試合があるため、新しいペアリングを実行できません。', 'warning')
+        return redirect(url_for('game.court'))
+
+    try:
+        from botocore.exceptions import ClientError
+        from boto3.dynamodb.conditions import Attr
+
+        SKILL_THRESHOLD = 20.0
+        mode = "skilled_ai"
+
+        max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)
+        session["selected_max_courts"] = max_courts
+
+        # 1) pendingエントリー取得
+        entry_table = current_app.dynamodb.Table("bad-game-match_entries")
+        response = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"))
+
+        entries_by_user = {}
+        for e in response.get("Items", []):
+            uid, joined_at = e["user_id"], e.get("joined_at", "")
+            if uid not in entries_by_user or joined_at > entries_by_user[uid].get("joined_at", ""):
+                entries_by_user[uid] = e
+        entries = list(entries_by_user.values())
+
+        if len(entries) < 4:
+            flash("4人以上のエントリーが必要です。", "warning")
+            return redirect(url_for("game.court"))
+
+        # 2) スキルスコア20以下を除外（人数が4人未満になる場合は除外しない）
+        skilled = [e for e in entries if float(e.get("skill_score", 50.0)) > SKILL_THRESHOLD]
+        if len(skilled) >= 4:
+            current_app.logger.info(
+                "[skilled_ai] %d→%d entries after filter (threshold=%.0f)",
+                len(entries), len(skilled), SKILL_THRESHOLD
+            )
+            entries = skilled
+        else:
+            current_app.logger.info(
+                "[skilled_ai] filter skipped: only %d players above threshold, using all %d",
+                len(skilled), len(entries)
+            )
+
+        # 3) 優先順位（試合少ない→ランダム）
+        sorted_entries = sorted(entries, key=lambda e: (
+            e.get("match_count", 0),
+            random.random()
+        ))
+
+        # 4) 待機者計算・選出
+        cap_by_courts = min(max_courts * 4, len(sorted_entries))
+        required_players = cap_by_courts - (cap_by_courts % 4)
+        waiting_count = len(sorted_entries) - required_players
+
+        if waiting_count > 0:
+            active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
+        else:
+            active_entries, waiting_entries = sorted_entries, []
+            current_app.logger.info("[wait] waiting_count=0 (none)")
+
+        # 5) Player変換
+        players = []
+        for e in active_entries:
+            skill_score = float(e.get("skill_score", 50.0))
+            skill_sigma = float(e.get("skill_sigma", 8.333))
+            conservative_val = skill_score - 3 * skill_sigma
+            p = Player(e["display_name"], conservative_val, e.get("gender", "M"))
+            p.user_id = e.get("user_id")
+            p.entry_id = e.get("entry_id")
+            p.conservative = conservative_val
+            p.skill_score = skill_score
+            p.skill_sigma = skill_sigma
+            players.append(p)
+
+        waiting_players = []
+        for e in waiting_entries:
+            skill_score = float(e.get("skill_score", 50.0))
+            skill_sigma = float(e.get("skill_sigma", 8.333))
+            conservative_val = skill_score - 3 * skill_sigma
+            p = Player(e["display_name"], conservative_val, e.get("gender", "M"))
+            p.user_id = e.get("user_id")
+            p.entry_id = e.get("entry_id")
+            p.conservative = conservative_val
+            waiting_players.append(p)
+
+        # 6) AIペアリング
+        match_id = generate_match_id()
+        matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
+
+        for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
+            current_app.logger.info(
+                "[match] C%d: A=[%s,%s] vs B=[%s,%s]",
+                i, a1.name, a2.name, b1.name, b2.name
+            )
+
+        def _team_strength(p1, p2):
+            return float(getattr(p1, "conservative", 0.0)) + float(getattr(p2, "conservative", 0.0))
+
+        diffs = []
+        courts_log = []
+        for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
+            sa = _team_strength(a1, a2)
+            sb = _team_strength(b1, b2)
+            d = abs(sa - sb)
+            diffs.append(d)
+            courts_log.append({
+                'court': str(i),
+                'a': [a1.name, a2.name],
+                'b': [b1.name, b2.name],
+                'a_user_ids': [getattr(a1, 'user_id', None), getattr(a2, 'user_id', None)],
+                'b_user_ids': [getattr(b1, 'user_id', None), getattr(b2, 'user_id', None)],
+                'a_strength': str(round(sa, 2)),
+                'b_strength': str(round(sb, 2)),
+                'diff': str(round(d, 2)),
+            })
+            current_app.logger.info(
+                "[eval] C%d A_strength=%.2f B_strength=%.2f diff=%.2f", i, sa, sb, d
+            )
+
+        if diffs:
+            current_app.logger.info(
+                "[eval] diff_avg=%.2f diff_max=%.2f",
+                sum(diffs) / len(diffs), max(diffs)
+            )
+            try:
+                from datetime import timezone
+                pairing_log_table = dynamodb.Table("bad-pairing-logs")
+                pairing_log_table.put_item(Item={
+                    'match_id': match_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'mode': mode,
+                    'participants_count': len(players),
+                    'waiting_count': len(waiting_players) + len(additional_waiting_players),
+                    'courts': courts_log,
+                    'diff_avg': str(round(sum(diffs) / len(diffs), 2)),
+                    'diff_max': str(round(max(diffs), 2)),
+                })
+            except Exception as e:
+                current_app.logger.warning("ペアリングログ保存失敗: %s", e)
+
+        waiting_players.extend(additional_waiting_players)
+
+        if not matches:
+            flash("試合を作成できませんでした（人数不足など）。", "warning")
+            return redirect(url_for("game.court"))
+
+        current_app.logger.info(
+            "[wait] final_waiting_names=%s",
+            ", ".join([p.name for p in waiting_players]) or "(none)"
+        )
+
+        # 7) TransactWriteItems
+        max_tx = 25
+        if 1 + 4 * len(matches) > max_tx:
+            flash("試合数が多すぎて作成できませんでした。コート数を減らしてください。", "danger")
+            return redirect(url_for("game.court"))
+
+        now_jst = datetime.now(JST).isoformat()
+        dynamodb_client = boto3.client('dynamodb', region_name='ap-northeast-1')
+        tx_items = []
+
+        tx_items.append({
+            "Update": {
+                "TableName": "bad-game-matches",
+                "Key": {"match_id": {"S": "meta#current"}},
+                "UpdateExpression": (
+                    "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #sa = :now, "
+                    "#pm = :mode, #wp = :waiting"
+                ),
+                "ConditionExpression": "attribute_not_exists(#st) OR #st <> :playing",
+                "ExpressionAttributeNames": {
+                    "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
+                    "#ua": "updated_at", "#sa": "started_at",
+                    "#pm": "pairing_mode", "#wp": "waiting_players",
+                },
+                "ExpressionAttributeValues": {
+                    ":playing": {"S": "playing"},
+                    ":mid": {"S": str(match_id)},
+                    ":cc": {"N": str(len(matches))},
+                    ":now": {"S": now_jst},
+                    ":mode": {"S": mode},
+                    ":waiting": {"L": [{"S": p.name} for p in waiting_players]},
+                },
+            }
+        })
+
+        for court_num, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
+            for pl, team in [(a1, "A"), (a2, "A"), (b1, "B"), (b2, "B")]:
+                entry_id = str(getattr(pl, "entry_id", "") or "")
+                if not entry_id:
+                    raise RuntimeError(f"entry_id missing for player name={pl.name}")
+                tx_items.append({
+                    "Update": {
+                        "TableName": "bad-game-match_entries",
+                        "Key": {"entry_id": {"S": entry_id}},
+                        "UpdateExpression": (
+                            "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now"
+                        ),
+                        "ConditionExpression": "entry_status = :pending",
+                        "ExpressionAttributeValues": {
+                            ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
+                            ":mid": {"S": str(match_id)}, ":c": {"N": str(court_num)},
+                            ":t": {"S": team}, ":now": {"S": now_jst},
+                        },
+                    }
+                })
+
+        try:
+            dynamodb_client.transact_write_items(TransactItems=tx_items)
+            current_app.logger.info(
+                "[meta] lock+players committed: current_match_id=%s court_count=%s",
+                match_id, len(matches)
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
+                flash("進行中の試合があるためペアリングできませんでした。", "warning")
+                return redirect(url_for("game.court"))
+            raise
+
+        # 8) last_modeを更新（cycle_indexは変えない）
+        meta_table = current_app.dynamodb.Table("bad-game-matches")
+        meta_table.update_item(
+            Key={"match_id": "meta#pairing"},
+            UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now",
+            ExpressionAttributeValues={
+                ":m": mode,
+                ":mid": str(match_id),
+                ":now": now_jst,
+            }
+        )
+
+        # 9) 待機者処理
+        if waiting_players:
+            for wp in waiting_players:
+                entry_id = str(getattr(wp, "entry_id", "") or "")
+                if not entry_id:
+                    continue
+                entry_table.update_item(
+                    Key={"entry_id": entry_id},
+                    UpdateExpression=(
+                        "SET last_rest_match_id=:mid, last_rest_at=:now, last_rest_reason=:rr, updated_at=:now "
+                        "ADD rest_count :one"
+                    ),
+                    ExpressionAttributeValues={
+                        ":mid": str(match_id), ":now": now_jst,
+                        ":rr": "not_selected", ":one": 1,
+                    },
+                )
+                rest_event_id = str(uuid.uuid4())
+                rest_item = {
+                    "entry_id": rest_event_id,
+                    "type": "rest_event",
+                    "match_id": str(match_id),
+                    "display_name": wp.name,
+                    "entry_status": "resting",
+                    "reason": "not_selected",
+                    "court_number": 0,
+                    "team": "R",
+                    "created_at": now_jst,
+                    "updated_at": now_jst,
+                    "source_entry_id": entry_id,
+                }
+                uid = getattr(wp, "user_id", None)
+                if uid:
+                    rest_item["user_id"] = str(uid)
+                entry_table.put_item(Item=rest_item)
+
+        current_app.logger.info(
+            "ペアリング成功: %s試合, %s人待機 (mode=%s)", len(matches), len(waiting_players), mode
+        )
+        return redirect(url_for("game.court"))
+
+    except Exception as e:
+        current_app.logger.error("[skilled_ai ペア生成エラー] %s", str(e), exc_info=True)
+        flash("試合の作成中にエラーが発生しました。", "danger")
+        return redirect(url_for("game.court"))
+
+
 # 待機者選出ロジック（キュー方式）
 def _select_waiting_entries(sorted_entries: list, waiting_count: int) -> tuple[list, list]:
     ...
