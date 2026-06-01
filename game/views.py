@@ -3637,19 +3637,9 @@ def create_pairings_skilled():
         max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)
         session["selected_max_courts"] = max_courts
 
-        # 0) 現在のサイクルモードを読む（進めない）
+        # 0) メタテーブル参照（cycle_indexは進めない）
         meta_table = current_app.dynamodb.Table("bad-game-matches")
-        pairing_meta = meta_table.get_item(
-            Key={"match_id": "meta#pairing"}, ConsistentRead=True
-        ).get("Item", {}) or {}
-        cycle_index = int(pairing_meta.get("cycle_index", 0))
-        if cycle_index == 1:
-            mode = "full_random"
-        elif cycle_index == 2:
-            mode = "ai"
-        else:
-            mode = "random"
-        current_app.logger.info("[skilled_ai] using mode=%s (cycle_index=%d, not advancing)", mode, cycle_index)
+        mode = "skilled_ai"
 
         # 1) pendingエントリー取得
         entry_table = current_app.dynamodb.Table("bad-game-match_entries")
@@ -3712,14 +3702,9 @@ def create_pairings_skilled():
             p.conservative = conservative_val
             waiting_players.append(p)
 
-        # 6) ペアリング（通常サイクルと同じアルゴリズム）
+        # 6) スキル順コートグループ化ペアリング
         match_id = generate_match_id()
-        if mode == "ai":
-            matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
-        elif mode == "full_random":
-            pairs, matches, additional_waiting_players = generate_full_random_pairings(players, max_courts)
-        else:
-            pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
+        matches, additional_waiting_players = generate_skill_grouped_pairings(players, max_courts)
 
         for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
             current_app.logger.info(
