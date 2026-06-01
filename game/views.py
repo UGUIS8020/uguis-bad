@@ -2536,13 +2536,13 @@ def reset_participants():
             meta_table.delete_item(Key={"match_id": "rest_queue"})
             current_app.logger.info("[reset] rest_queue を完全に削除しました")
 
-            # (C) meta#pairing の cycle_index を 0 にリセット（練習開始は必ずランダムから）
+            # (C) meta#pairing の cycle_index を 0 にリセット、last_mode も削除
             meta_table.update_item(
                 Key={"match_id": "meta#pairing"},
-                UpdateExpression="SET cycle_index = :zero",
+                UpdateExpression="SET cycle_index = :zero REMOVE last_mode",
                 ExpressionAttributeValues={":zero": 0},
             )
-            current_app.logger.info("[reset] cycle_index を 0 にリセットしました（次回はバランスマッチングから開始）")
+            current_app.logger.info("[reset] cycle_index を 0、last_mode をリセットしました")
 
         except Exception as e:
             current_app.logger.error(f"[reset] メタデータリセットエラー: {e}")
