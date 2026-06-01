@@ -335,6 +335,27 @@
                                 </div>
                             {% endif %}
 
+                            {# たら参加者アイコン #}
+                            {% set tlist = schedule.tara_participants_info | default([]) %}
+                            {% if tlist %}
+                                <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
+                                    <span class="badge bg-warning text-dark me-1" style="font-size:0.7rem;">たら</span>
+                                {% for p in tlist[:7] %}
+                                    <span class="avatar-ig" style="--size:24px;--ring:2px;--gap:1px;opacity:0.75;">
+                                    <img
+                                        src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                                        alt="{{ p.display_name }}"
+                                        width="24" height="24" loading="lazy" decoding="async"
+                                        class="rounded-circle" style="object-fit:cover;"
+                                        onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+                                    </span>
+                                {% endfor %}
+                                {% if tlist|length > 7 %}
+                                    <span class="badge bg-secondary ms-1">+{{ tlist|length - 7 }}</span>
+                                {% endif %}
+                                </div>
+                            {% endif %}
+
                     </div>
                     {% endfor %}
                 </div>
