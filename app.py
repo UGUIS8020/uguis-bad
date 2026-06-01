@@ -1481,9 +1481,11 @@ def tara_join():
             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません'}), 404
 
         schedule = response['Item']
-        tara_participants = schedule.get('tara_participants', [])
+        tara_participants = schedule.get('tara_participants') or []
 
         is_tara_joined = user_id in tara_participants
+        app.logger.info('[tara_join] user=%s schedule=%s date=%s current_tara=%s is_joined=%s',
+                        user_id, schedule_id, schedule_date, tara_participants, is_tara_joined)
 
         if is_tara_joined:
             # 解除

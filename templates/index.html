@@ -491,7 +491,6 @@
 async function taraSchedule(button) {
 
     if (isTaraJoining) {
-        console.log('「たら」参加処理中です');
         return;
     }
 
@@ -505,51 +504,55 @@ async function taraSchedule(button) {
 
     isTaraJoining = true;
     button.disabled = true;
-    const originalText = button.textContent;
     button.textContent = '処理中...';
 
     try {
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
+
         const response = await fetch('/tara_join', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
-                // ↓↓↓ ここを追加：CSRFトークンをメタタグから取得 ↓↓↓
-                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                'X-CSRFToken': csrfToken
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 schedule_id: scheduleId,
-                schedule_date: scheduleDate 
+                schedule_date: scheduleDate
             })
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            alert(errorData.message || 'エラーが発生しました');
-            
-            // ↓↓↓ 追加：エラー時はフラグとボタンを戻す ↓↓↓
-            isTaraJoining = false;
+            let msg = 'エラーが発生しました';
+            try { const e = await response.json(); msg = e.message || msg; } catch(_) {}
+            alert(msg);
             button.disabled = false;
-            button.textContent = originalText;
+            button.textContent = button.classList.contains('btn-warning') ? 'たら済 ✓' : 'たら';
+            isTaraJoining = false;
             return;
         }
 
         const data = await response.json();
 
-        if (data.message) {
-            alert(data.message);
+        // ボタン状態をその場で更新（リロード不要）
+        if (data.is_tara_joined) {
+            button.classList.remove('btn-outline-warning');
+            button.classList.add('btn-warning');
+            button.textContent = 'たら済 ✓';
+        } else {
+            button.classList.remove('btn-warning');
+            button.classList.add('btn-outline-warning');
+            button.textContent = 'たら';
         }
-
-        // ページをリロードして変更を反映
-        location.reload();
 
     } catch (error) {
         console.error('「たら」参加処理エラー:', error);
-        alert('通信エラーが発生しました');
-
-        isTaraJoining = false;
+        alert('通信エラー: ' + error.message);
+        button.textContent = button.classList.contains('btn-warning') ? 'たら済 ✓' : 'たら';
+    } finally {
         button.disabled = false;
-        button.textContent = originalText;
+        isTaraJoining = false;
     }
 }
 </script>
