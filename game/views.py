@@ -3616,7 +3616,7 @@ def create_pairings():
 @bp_game.route('/create_pairings_skilled', methods=["POST"])
 @login_required
 def create_pairings_skilled():
-    """スキルスコア20以下を除外したAIペアリング（人数不足時は除外しない）"""
+    """スキルスコア20以下を除外した通常ペアリング（cycle_indexは進めない）"""
     if not current_user.administrator:
         flash('管理者のみ実行できます。', 'danger')
         return redirect(url_for('game.court'))
@@ -3626,14 +3626,30 @@ def create_pairings_skilled():
         return redirect(url_for('game.court'))
 
     try:
+        import boto3
+        import uuid
         from botocore.exceptions import ClientError
         from boto3.dynamodb.conditions import Attr
+        from datetime import datetime
 
         SKILL_THRESHOLD = 20.0
-        mode = "skilled_ai"
 
         max_courts = min(max(int(request.form.get("max_courts", 3)), 1), 6)
         session["selected_max_courts"] = max_courts
+
+        # 0) 現在のサイクルモードを読む（進めない）
+        meta_table = current_app.dynamodb.Table("bad-game-matches")
+        pairing_meta = meta_table.get_item(
+            Key={"match_id": "meta#pairing"}, ConsistentRead=True
+        ).get("Item", {}) or {}
+        cycle_index = int(pairing_meta.get("cycle_index", 0))
+        if cycle_index == 1:
+            mode = "full_random"
+        elif cycle_index == 2:
+            mode = "ai"
+        else:
+            mode = "random"
+        current_app.logger.info("[skilled_ai] using mode=%s (cycle_index=%d, not advancing)", mode, cycle_index)
 
         # 1) pendingエントリー取得
         entry_table = current_app.dynamodb.Table("bad-game-match_entries")
@@ -3652,24 +3668,24 @@ def create_pairings_skilled():
 
         # 2) スキルスコア20以下を除外。除外後4人未満なら全員対象
         skilled = [e for e in entries if float(e.get("skill_score", 50.0)) > SKILL_THRESHOLD]
-        pool = skilled if len(skilled) >= 4 else entries
+        entries = skilled if len(skilled) >= 4 else entries
         current_app.logger.info(
-            "[skilled_ai] pool: %d entries (skilled=%d, threshold=%.0f)",
-            len(pool), len(skilled), SKILL_THRESHOLD
+            "[skilled_ai] %d entries after filter (skilled=%d, threshold=%.0f)",
+            len(entries), len(skilled), SKILL_THRESHOLD
         )
 
-        # 3) 休憩回数が少ない人を優先してプレイ（キュー更新はしない・読むだけ）
-        pool_sorted = sorted(pool, key=lambda e: (int(e.get("rest_count", 0)), random.random()))
-        cap_by_courts = min(max_courts * 4, len(pool_sorted))
+        # 3) 優先順位（試合少ない→ランダム）
+        sorted_entries = sorted(entries, key=lambda e: (e.get("match_count", 0), random.random()))
+
+        # 4) 待機者計算・選出（通常と同じキュー方式）
+        cap_by_courts = min(max_courts * 4, len(sorted_entries))
         required_players = cap_by_courts - (cap_by_courts % 4)
-        if required_players < 4:
-            required_players = min(4, len(pool_sorted))
-        active_entries = pool_sorted[:required_players]
-        waiting_entries = pool_sorted[required_players:]
-        current_app.logger.info(
-            "[skilled_ai] active=%d waiting=%d (by rest_count)",
-            len(active_entries), len(waiting_entries)
-        )
+        waiting_count = len(sorted_entries) - required_players
+        if waiting_count > 0:
+            active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
+        else:
+            active_entries, waiting_entries = sorted_entries, []
+            current_app.logger.info("[wait] waiting_count=0 (none)")
 
         # 5) Player変換
         players = []
@@ -3696,9 +3712,14 @@ def create_pairings_skilled():
             p.conservative = conservative_val
             waiting_players.append(p)
 
-        # 6) スキルグループ化ペアリング（スキル順に4人ずつ、コート内でチームバランス最適化）
+        # 6) ペアリング（通常サイクルと同じアルゴリズム）
         match_id = generate_match_id()
-        matches, additional_waiting_players = generate_skill_grouped_pairings(players, max_courts)
+        if mode == "ai":
+            matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
+        elif mode == "full_random":
+            pairs, matches, additional_waiting_players = generate_full_random_pairings(players, max_courts)
+        else:
+            pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
 
         for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
             current_app.logger.info(
@@ -3830,26 +3851,23 @@ def create_pairings_skilled():
                 return redirect(url_for("game.court"))
             raise
 
-        # 8) last_modeを更新（cycle_indexは変えない）
-        meta_table = current_app.dynamodb.Table("bad-game-matches")
+        # 8) last_modeを"skilled_ai"で保存（cycle_indexは進めない）
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
             UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now",
             ExpressionAttributeValues={
-                ":m": mode,
+                ":m": "skilled_ai",
                 ":mid": str(match_id),
                 ":now": now_jst,
             }
         )
 
-        # 9) 待機者処理：スコア>20の待機者はrest_count・rest_eventを更新する
-        #    （スコア≤20の強制除外者は更新しない。キューの書き戻しもしない）
+        # 9) 待機者処理（通常ペアリングと同じ）
         if waiting_players:
             for wp in waiting_players:
                 entry_id = str(getattr(wp, "entry_id", "") or "")
                 if not entry_id:
                     continue
-
                 entry_table.update_item(
                     Key={"entry_id": entry_id},
                     UpdateExpression=(
@@ -3861,7 +3879,6 @@ def create_pairings_skilled():
                         ":rr": "not_selected", ":one": 1,
                     },
                 )
-
                 rest_event_id = str(uuid.uuid4())
                 rest_item = {
                     "entry_id": rest_event_id,
@@ -3882,7 +3899,7 @@ def create_pairings_skilled():
                 entry_table.put_item(Item=rest_item)
 
         current_app.logger.info(
-            "ペアリング成功: %s試合, %s人待機 (mode=%s)", len(matches), len(waiting_players), mode
+            "ペアリング成功: %s試合, %s人待機 (mode=skilled_ai/base=%s)", len(matches), len(waiting_players), mode
         )
         return redirect(url_for("game.court"))
 
