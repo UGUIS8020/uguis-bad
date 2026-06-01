@@ -3637,34 +3637,46 @@ def create_pairings_skilled():
 
         # 2) スキルスコア20以下を除外（人数が4人未満になる場合は除外しない）
         skilled = [e for e in entries if float(e.get("skill_score", 50.0)) > SKILL_THRESHOLD]
+
+        # 3) 優先順位 & 待機者計算・選出
+        cap_by_courts = min(max_courts * 4, len(entries))
+        required_players = cap_by_courts - (cap_by_courts % 4)
+
         if len(skilled) >= 4:
+            # 正常ケース: 除外後の人数でキュー方式待機選出
             current_app.logger.info(
                 "[skilled_ai] %d→%d entries after filter (threshold=%.0f)",
                 len(entries), len(skilled), SKILL_THRESHOLD
             )
-            entries = skilled
+            sorted_entries = sorted(skilled, key=lambda e: (
+                e.get("match_count", 0),
+                random.random()
+            ))
+            cap_by_courts = min(max_courts * 4, len(sorted_entries))
+            required_players = cap_by_courts - (cap_by_courts % 4)
+            waiting_count = len(sorted_entries) - required_players
+            if waiting_count > 0:
+                active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
+            else:
+                active_entries, waiting_entries = sorted_entries, []
+                current_app.logger.info("[wait] waiting_count=0 (none)")
         else:
+            # フォールバック: 全員をスキル高い順にソートし上位から採用
             current_app.logger.info(
-                "[skilled_ai] filter skipped: only %d players above threshold, using all %d",
+                "[skilled_ai] fallback: only %d players above threshold, sorting all %d by skill_score desc",
                 len(skilled), len(entries)
             )
-
-        # 3) 優先順位（試合少ない→ランダム）
-        sorted_entries = sorted(entries, key=lambda e: (
-            e.get("match_count", 0),
-            random.random()
-        ))
-
-        # 4) 待機者計算・選出
-        cap_by_courts = min(max_courts * 4, len(sorted_entries))
-        required_players = cap_by_courts - (cap_by_courts % 4)
-        waiting_count = len(sorted_entries) - required_players
-
-        if waiting_count > 0:
-            active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
-        else:
-            active_entries, waiting_entries = sorted_entries, []
-            current_app.logger.info("[wait] waiting_count=0 (none)")
+            by_skill = sorted(entries, key=lambda e: float(e.get("skill_score", 50.0)), reverse=True)
+            cap_by_courts = min(max_courts * 4, len(by_skill))
+            required_players = cap_by_courts - (cap_by_courts % 4)
+            if required_players < 4:
+                required_players = min(4, len(by_skill))
+            active_entries = by_skill[:required_players]
+            waiting_entries = by_skill[required_players:]
+            current_app.logger.info(
+                "[skilled_ai] fallback: active=%d waiting=%d",
+                len(active_entries), len(waiting_entries)
+            )
 
         # 5) Player変換
         players = []
