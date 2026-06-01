@@ -516,6 +516,42 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
+def generate_skill_grouped_pairings(players: List["Player"], max_courts: int):
+    """
+    スキル高い順に4人ずつコートへ割り当て、コート内でチームバランスを最適化する。
+    各コートはスキルが近い4人で構成される。
+    戻り値: (matches, waiting_players)
+    """
+    sorted_players = sorted(
+        players,
+        key=lambda p: float(getattr(p, "conservative", None) or getattr(p, "skill_score", 0) or 0),
+        reverse=True,
+    )
+
+    num_courts = min(max_courts, len(sorted_players) // 4)
+    active = sorted_players[:num_courts * 4]
+    waiting = sorted_players[num_courts * 4:]
+
+    matches = []
+    for c in range(num_courts):
+        p1, p2, p3, p4 = active[c * 4:(c + 1) * 4]
+
+        # 3パターン試してコート内チームバランス最適を選ぶ
+        best_diff = float("inf")
+        best_pair = ((p1, p2), (p3, p4))
+        for t1, t2 in [((p1, p2), (p3, p4)), ((p1, p3), (p2, p4)), ((p1, p4), (p2, p3))]:
+            s1 = float(getattr(t1[0], "conservative", 0) or 0) + float(getattr(t1[1], "conservative", 0) or 0)
+            s2 = float(getattr(t2[0], "conservative", 0) or 0) + float(getattr(t2[1], "conservative", 0) or 0)
+            diff = abs(s1 - s2)
+            if diff < best_diff:
+                best_diff = diff
+                best_pair = (t1, t2)
+
+        matches.append(best_pair)
+
+    return matches, waiting
+
+
 FULL_RANDOM_SWAP_THRESHOLD = 20
 
 def generate_full_random_pairings(players, max_courts):

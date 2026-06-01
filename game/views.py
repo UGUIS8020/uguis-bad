@@ -12,6 +12,7 @@ from .game_utils import (
     generate_ai_best_pairings,
     generate_balanced_pairs_and_matches,
     generate_full_random_pairings,
+    generate_skill_grouped_pairings,
     parse_players,
     sync_match_entries_with_updated_skills,
     update_trueskill_for_players_and_return_updates, _rest_queue_pk
@@ -3703,9 +3704,9 @@ def create_pairings_skilled():
             p.conservative = conservative_val
             waiting_players.append(p)
 
-        # 6) AIペアリング
+        # 6) スキルグループ化ペアリング（スキル順に4人ずつ、コート内でチームバランス最適化）
         match_id = generate_match_id()
-        matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
+        matches, additional_waiting_players = generate_skill_grouped_pairings(players, max_courts)
 
         for i, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
             current_app.logger.info(
