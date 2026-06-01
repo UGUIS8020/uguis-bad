@@ -3650,7 +3650,7 @@ def create_pairings_skilled():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
-        # 2) スキルスコア20以下を除外。除外後4人未満ならスキル高い順で全員対象
+        # 2) スキルスコア20以下を除外。除外後4人未満なら全員対象
         skilled = [e for e in entries if float(e.get("skill_score", 50.0)) > SKILL_THRESHOLD]
         pool = skilled if len(skilled) >= 4 else entries
         current_app.logger.info(
@@ -3658,14 +3658,15 @@ def create_pairings_skilled():
             len(pool), len(skilled), SKILL_THRESHOLD
         )
 
-        # 3) スキル高い順にソートして上位から採用（キュー・休憩順は無視）
-        by_skill = sorted(pool, key=lambda e: float(e.get("skill_score", 50.0)), reverse=True)
-        cap_by_courts = min(max_courts * 4, len(by_skill))
+        # 3) 待機者はランダム選出（スコア順の追加除外はしない）
+        shuffled = pool[:]
+        random.shuffle(shuffled)
+        cap_by_courts = min(max_courts * 4, len(shuffled))
         required_players = cap_by_courts - (cap_by_courts % 4)
         if required_players < 4:
-            required_players = min(4, len(by_skill))
-        active_entries = by_skill[:required_players]
-        waiting_entries = by_skill[required_players:]
+            required_players = min(4, len(shuffled))
+        active_entries = shuffled[:required_players]
+        waiting_entries = shuffled[required_players:]
         current_app.logger.info(
             "[skilled_ai] active=%d waiting=%d", len(active_entries), len(waiting_entries)
         )
