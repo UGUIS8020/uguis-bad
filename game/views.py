@@ -3658,17 +3658,17 @@ def create_pairings_skilled():
             len(pool), len(skilled), SKILL_THRESHOLD
         )
 
-        # 3) 待機者はランダム選出（スコア順の追加除外はしない）
-        shuffled = pool[:]
-        random.shuffle(shuffled)
-        cap_by_courts = min(max_courts * 4, len(shuffled))
+        # 3) 休憩回数が少ない人を優先してプレイ（キュー更新はしない・読むだけ）
+        pool_sorted = sorted(pool, key=lambda e: (int(e.get("rest_count", 0)), random.random()))
+        cap_by_courts = min(max_courts * 4, len(pool_sorted))
         required_players = cap_by_courts - (cap_by_courts % 4)
         if required_players < 4:
-            required_players = min(4, len(shuffled))
-        active_entries = shuffled[:required_players]
-        waiting_entries = shuffled[required_players:]
+            required_players = min(4, len(pool_sorted))
+        active_entries = pool_sorted[:required_players]
+        waiting_entries = pool_sorted[required_players:]
         current_app.logger.info(
-            "[skilled_ai] active=%d waiting=%d", len(active_entries), len(waiting_entries)
+            "[skilled_ai] active=%d waiting=%d (by rest_count)",
+            len(active_entries), len(waiting_entries)
         )
 
         # 5) Player変換
