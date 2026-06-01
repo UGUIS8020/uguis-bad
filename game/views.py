@@ -3636,48 +3636,25 @@ def create_pairings_skilled():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
-        # 2) スキルスコア20以下を除外（人数が4人未満になる場合は除外しない）
+        # 2) スキルスコア20以下を除外。除外後4人未満ならスキル高い順で全員対象
         skilled = [e for e in entries if float(e.get("skill_score", 50.0)) > SKILL_THRESHOLD]
+        pool = skilled if len(skilled) >= 4 else entries
+        current_app.logger.info(
+            "[skilled_ai] pool: %d entries (skilled=%d, threshold=%.0f)",
+            len(pool), len(skilled), SKILL_THRESHOLD
+        )
 
-        # 3) 優先順位 & 待機者計算・選出
-        cap_by_courts = min(max_courts * 4, len(entries))
+        # 3) スキル高い順にソートして上位から採用（キュー・休憩順は無視）
+        by_skill = sorted(pool, key=lambda e: float(e.get("skill_score", 50.0)), reverse=True)
+        cap_by_courts = min(max_courts * 4, len(by_skill))
         required_players = cap_by_courts - (cap_by_courts % 4)
-
-        if len(skilled) >= 4:
-            # 正常ケース: 除外後の人数でキュー方式待機選出
-            current_app.logger.info(
-                "[skilled_ai] %d→%d entries after filter (threshold=%.0f)",
-                len(entries), len(skilled), SKILL_THRESHOLD
-            )
-            sorted_entries = sorted(skilled, key=lambda e: (
-                e.get("match_count", 0),
-                random.random()
-            ))
-            cap_by_courts = min(max_courts * 4, len(sorted_entries))
-            required_players = cap_by_courts - (cap_by_courts % 4)
-            waiting_count = len(sorted_entries) - required_players
-            if waiting_count > 0:
-                active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
-            else:
-                active_entries, waiting_entries = sorted_entries, []
-                current_app.logger.info("[wait] waiting_count=0 (none)")
-        else:
-            # フォールバック: 全員をスキル高い順にソートし上位から採用
-            current_app.logger.info(
-                "[skilled_ai] fallback: only %d players above threshold, sorting all %d by skill_score desc",
-                len(skilled), len(entries)
-            )
-            by_skill = sorted(entries, key=lambda e: float(e.get("skill_score", 50.0)), reverse=True)
-            cap_by_courts = min(max_courts * 4, len(by_skill))
-            required_players = cap_by_courts - (cap_by_courts % 4)
-            if required_players < 4:
-                required_players = min(4, len(by_skill))
-            active_entries = by_skill[:required_players]
-            waiting_entries = by_skill[required_players:]
-            current_app.logger.info(
-                "[skilled_ai] fallback: active=%d waiting=%d",
-                len(active_entries), len(waiting_entries)
-            )
+        if required_players < 4:
+            required_players = min(4, len(by_skill))
+        active_entries = by_skill[:required_players]
+        waiting_entries = by_skill[required_players:]
+        current_app.logger.info(
+            "[skilled_ai] active=%d waiting=%d", len(active_entries), len(waiting_entries)
+        )
 
         # 5) Player変換
         players = []
@@ -3850,42 +3827,7 @@ def create_pairings_skilled():
             }
         )
 
-        # 9) 待機者処理
-        if waiting_players:
-            for wp in waiting_players:
-                entry_id = str(getattr(wp, "entry_id", "") or "")
-                if not entry_id:
-                    continue
-                entry_table.update_item(
-                    Key={"entry_id": entry_id},
-                    UpdateExpression=(
-                        "SET last_rest_match_id=:mid, last_rest_at=:now, last_rest_reason=:rr, updated_at=:now "
-                        "ADD rest_count :one"
-                    ),
-                    ExpressionAttributeValues={
-                        ":mid": str(match_id), ":now": now_jst,
-                        ":rr": "not_selected", ":one": 1,
-                    },
-                )
-                rest_event_id = str(uuid.uuid4())
-                rest_item = {
-                    "entry_id": rest_event_id,
-                    "type": "rest_event",
-                    "match_id": str(match_id),
-                    "display_name": wp.name,
-                    "entry_status": "resting",
-                    "reason": "not_selected",
-                    "court_number": 0,
-                    "team": "R",
-                    "created_at": now_jst,
-                    "updated_at": now_jst,
-                    "source_entry_id": entry_id,
-                }
-                uid = getattr(wp, "user_id", None)
-                if uid:
-                    rest_item["user_id"] = str(uid)
-                entry_table.put_item(Item=rest_item)
-
+        # 9) 待機者処理：スコア順AIは休憩回数・イベント・キューを更新しない
         current_app.logger.info(
             "ペアリング成功: %s試合, %s人待機 (mode=%s)", len(matches), len(waiting_players), mode
         )
