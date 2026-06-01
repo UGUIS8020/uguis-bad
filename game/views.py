@@ -3842,7 +3842,45 @@ def create_pairings_skilled():
             }
         )
 
-        # 9) 待機者処理：スコア順AIは休憩回数・イベント・キューを更新しない
+        # 9) 待機者処理：スコア>20の待機者はrest_count・rest_eventを更新する
+        #    （スコア≤20の強制除外者は更新しない。キューの書き戻しもしない）
+        if waiting_players:
+            for wp in waiting_players:
+                entry_id = str(getattr(wp, "entry_id", "") or "")
+                if not entry_id:
+                    continue
+
+                entry_table.update_item(
+                    Key={"entry_id": entry_id},
+                    UpdateExpression=(
+                        "SET last_rest_match_id=:mid, last_rest_at=:now, last_rest_reason=:rr, updated_at=:now "
+                        "ADD rest_count :one"
+                    ),
+                    ExpressionAttributeValues={
+                        ":mid": str(match_id), ":now": now_jst,
+                        ":rr": "not_selected", ":one": 1,
+                    },
+                )
+
+                rest_event_id = str(uuid.uuid4())
+                rest_item = {
+                    "entry_id": rest_event_id,
+                    "type": "rest_event",
+                    "match_id": str(match_id),
+                    "display_name": wp.name,
+                    "entry_status": "resting",
+                    "reason": "not_selected",
+                    "court_number": 0,
+                    "team": "R",
+                    "created_at": now_jst,
+                    "updated_at": now_jst,
+                    "source_entry_id": entry_id,
+                }
+                uid = getattr(wp, "user_id", None)
+                if uid:
+                    rest_item["user_id"] = str(uid)
+                entry_table.put_item(Item=rest_item)
+
         current_app.logger.info(
             "ペアリング成功: %s試合, %s人待機 (mode=%s)", len(matches), len(waiting_players), mode
         )
