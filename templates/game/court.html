@@ -353,7 +353,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="max_courts" value="{{ session.get('selected_max_courts', 3) }}">
                     <button type="submit"
-                        class="btn btn-warning btn-sm"
+                        class="btn btn-warning btn-lg"
                         {{ 'disabled' if has_ongoing_matches else '' }}
                         title="スキルスコア20以下を除外してAIペアリング">
                         <i class="fa-solid fa-star me-1"></i>スコア順AI
