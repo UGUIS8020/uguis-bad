@@ -171,6 +171,9 @@ def court():
                 next_mode = "ai"
             else:
                 next_mode = "random"
+            # 前回と次回が同じ → リセット直後に古いlast_modeが残っている状態なので非表示
+            if last_mode == next_mode:
+                last_mode = None
         except Exception:
             cycle_index = 0
             last_mode = None
