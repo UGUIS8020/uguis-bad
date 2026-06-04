@@ -409,68 +409,6 @@ def generate_random_pairs(players: List["Player"]) -> Tuple[List[Tuple["Player",
 
     return pairs, waiting_players
 
-
-# def generate_matches_by_pair_skill_balance(
-#     pairs: List[Tuple[Player, Player]],
-#     max_courts: int
-# ):
-#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
-#     scored.sort(key=lambda x: x[1])
-
-#     max_matches = min(len(scored) // 2, max_courts)
-#     matches: List[Tuple[Tuple[Player, Player], Tuple[Player, Player]]] = []
-#     used = [False] * len(scored)
-
-#     for _ in range(max_matches):
-#         # まだ使ってない最小のペアを探す
-#         i = next((k for k, u in enumerate(used) if not u), None)
-#         if i is None:
-#             break
-#         used[i] = True
-
-#         # i と最も差が小さい未使用ペアを探す
-#         best_j = None
-#         best_diff = float("inf")
-#         for j in range(i + 1, len(scored)):
-#             if used[j]:
-#                 continue
-#             diff = abs(scored[i][1] - scored[j][1])
-#             if diff < best_diff:
-#                 best_diff = diff
-#                 best_j = j
-#                 if best_diff == 0:
-#                     break
-
-#         if best_j is None:
-#             # 相手が見つからないなら戻す
-#             used[i] = False
-#             break
-
-#         used[best_j] = True
-#         matches.append((scored[i][0], scored[best_j][0]))
-
-#     unused_pairs = [scored[k][0] for k, u in enumerate(used) if not u]
-#     return matches, unused_pairs
-
-
-#スキル優先でペアリングされて強いペアが余ってしまう。旧コードはペアの重複を避けるための工夫が足りなかったため、以下の新コードではまず必要な人数分をランダムに選び、その中でスキルバランスを取る方式に変更しました。
-# def generate_matches_by_pair_skill_balance(pairs, max_courts):
-#     # スキル合計でソート
-#     scored = [(pair, pair_strength(pair[0], pair[1])) for pair in pairs]
-#     scored.sort(key=lambda x: x[1])
-
-#     matches = []    
-#     for i in range(0, min(len(scored), max_courts * 2) - 1, 2):
-#         matches.append((scored[i][0], scored[i+1][0]))
-    
-#     used_count = len(matches) * 2
-#     unused_pairs = [p[0] for p in scored[used_count:]]
-    
-#     return matches, unused_pairs
-
-
-#ペアの重複を避けるための新コード。
-
 def generate_matches_by_pair_skill_balance(pairs, max_courts):
     """
     ペアからスキルが近い同士でマッチを組む。
@@ -578,29 +516,79 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
-# def generate_full_random_pairings(players, max_courts):
-#     """
-#     ペアも対戦相手も完全ランダムで決定する。
-#     スキルスコアを一切考慮しない。
-#     """
-#     import random
+LOW_SKILL_COURT_THRESHOLD = 20.0  # スコア順AIと同じ閾値
 
-#     shuffled = players.copy()
-#     random.shuffle(shuffled)
+def preprocess_low_skill_grouping(players: List["Player"], max_courts: int):
+    """
+    スキルスコア20以下の選手が2人以上いる場合、同じコートに強制的にまとめる。
+    足りない場合は最もスキルが低い通常選手で補充する。
+    戻り値: (forced_matches, remaining_players, remaining_max_courts)
+    """
+    low = [p for p in players if float(getattr(p, "skill_score", 50.0)) <= LOW_SKILL_COURT_THRESHOLD]
+    regular = [p for p in players if float(getattr(p, "skill_score", 50.0)) > LOW_SKILL_COURT_THRESHOLD]
 
-#     num_courts = min(max_courts, len(shuffled) // 4)
-#     active = shuffled[:num_courts * 4]
-#     additional_waiting = shuffled[num_courts * 4:]
+    if len(low) < 2 or max_courts < 2:
+        return [], players, max_courts
 
-#     pairs = []
-#     for i in range(0, len(active), 2):
-#         pairs.append((active[i], active[i + 1]))
+    # 不足分を最低スキルの通常選手で補充
+    regular_by_skill = sorted(regular, key=lambda p: _conservative_key(p))
+    needed = max(0, 4 - len(low))
+    court_group = low[:4] + regular_by_skill[:needed]
 
-#     matches = []
-#     for i in range(0, len(pairs), 2):
-#         matches.append((pairs[i], pairs[i + 1]))
+    if len(court_group) < 4:
+        return [], players, max_courts
 
-#     return pairs, matches, additional_waiting
+    # コート内チームバランス最適化
+    p1, p2, p3, p4 = court_group[:4]
+    best = None; bd = float("inf")
+    for t1, t2 in [((p1, p2), (p3, p4)), ((p1, p3), (p2, p4)), ((p1, p4), (p2, p3))]:
+        s1 = _conservative_key(t1[0]) + _conservative_key(t1[1])
+        s2 = _conservative_key(t2[0]) + _conservative_key(t2[1])
+        d = abs(s1 - s2)
+        if d < bd:
+            bd = d; best = (t1, t2)
+
+    # 残りのプレイヤー（low 5人以上の場合は溢れた低スキル選手も戻す）
+    remaining = regular_by_skill[needed:] + low[4:]
+    return [best], remaining, max_courts - 1
+
+
+def generate_skill_grouped_pairings(players: List["Player"], max_courts: int):
+    """
+    スキル高い順に4人ずつコートへ割り当て、コート内でチームバランスを最適化する。
+    各コートはスキルが近い4人で構成される。
+    戻り値: (matches, waiting_players)
+    """
+    def _conservative_key(p):
+        c = getattr(p, "conservative", None)
+        if c is not None:
+            return float(c)
+        return float(getattr(p, "skill_score", 0) or 0)
+
+    sorted_players = sorted(players, key=_conservative_key, reverse=True)
+
+    num_courts = min(max_courts, len(sorted_players) // 4)
+    active = sorted_players[:num_courts * 4]
+    waiting = sorted_players[num_courts * 4:]
+
+    matches = []
+    for c in range(num_courts):
+        p1, p2, p3, p4 = active[c * 4:(c + 1) * 4]
+
+        # 3パターン試してコート内チームバランス最適を選ぶ
+        best_diff = float("inf")
+        best_pair = ((p1, p2), (p3, p4))
+        for t1, t2 in [((p1, p2), (p3, p4)), ((p1, p3), (p2, p4)), ((p1, p4), (p2, p3))]:
+            s1 = _conservative_key(t1[0]) + _conservative_key(t1[1])
+            s2 = _conservative_key(t2[0]) + _conservative_key(t2[1])
+            diff = abs(s1 - s2)
+            if diff < best_diff:
+                best_diff = diff
+                best_pair = (t1, t2)
+
+        matches.append(best_pair)
+
+    return matches, waiting
 
 
 FULL_RANDOM_SWAP_THRESHOLD = 20
@@ -729,110 +717,3 @@ def _load_rest_queue(meta_table, *, queue_key: str = "rest_queue") -> Dict[str, 
     except ClientError as e:
         current_app.logger.error("[rest_queue][LOAD_ERR] %s", e)
         return {"queue": [], "generation": 1, "version": 0, "cycle_started_at": None}
-
-
-# def _save_rest_queue_optimistic(
-#     meta_table,
-#     *,
-#     queue_key: str,
-#     queue: List[str],
-#     generation: int,
-#     prev_version: int,
-#     cycle_started_at: Optional[str] = None,
-# ) -> bool:
-#     """
-#     楽観ロックで rest_queue を保存する
-#     - match_id = meta#<queue_key>
-#     - version が prev_version と一致する場合のみ更新（初回は version 未存在でも可）
-#     - cycle_started_at は指定された場合のみ更新
-#     """
-#     pk = _rest_queue_pk(queue_key)
-#     new_version = int(prev_version) + 1
-
-#     expr_names = {"#q": "queue", "#g": "generation", "#v": "version"}
-#     expr_vals = {":q": list(queue), ":g": int(generation), ":nv": int(new_version), ":pv": int(prev_version)}
-
-#     if cycle_started_at is not None:
-#         expr_names["#cs"] = "cycle_started_at"
-#         expr_vals[":cs"] = cycle_started_at
-#         update_expr = "SET #q=:q, #g=:g, #v=:nv, #cs=:cs"
-#     else:
-#         update_expr = "SET #q=:q, #g=:g, #v=:nv"
-
-#     try:
-#         meta_table.update_item(
-#             Key={"match_id": pk},
-#             UpdateExpression=update_expr,
-#             ExpressionAttributeNames=expr_names,
-#             ExpressionAttributeValues=expr_vals,
-#             ConditionExpression="attribute_not_exists(#v) OR #v = :pv",
-#         )
-#         return True
-#     except ClientError as e:
-#         code = e.response.get("Error", {}).get("Code")
-#         if code == "ConditionalCheckFailedException":
-#             return False
-#         current_app.logger.error("[rest_queue][SAVE_ERR] %s", e)
-#         return False
-
-
-# def _weighted_sample_from_queue(
-#     *,
-#     queue: List[str],
-#     waiting_count: int,
-#     by_id: Dict[str, Dict[str, Any]],
-#     skill_key: str = "skill_score",
-#     bottom_n: int = 2,
-#     boost: float = 1.2,
-# ) -> Tuple[List[str], List[str]]:
-#     """
-#     queue から waiting_count 人を重み付きで非復元抽出。
-#     戻り値: (picked_uids, remaining_queue)
-#     ※ remaining_queue は picked を除いた queue（元の順序保持）
-#     """
-#     if waiting_count <= 0 or not queue:
-#         return [], list(queue)
-
-#     cand = list(queue)
-
-#     def get_skill(uid: str) -> float:
-#         v = by_id.get(uid, {}).get(skill_key, 50)
-#         try:
-#             return float(v)
-#         except Exception:
-#             return 50.0
-
-#     skills = {uid: get_skill(uid) for uid in cand}
-#     low_uids = set(sorted(cand, key=lambda u: skills[u])[: max(0, int(bottom_n))])
-#     weights = {uid: (boost if uid in low_uids else 1.0) for uid in cand}
-
-#     picked: List[str] = []
-#     remaining = list(cand)
-
-#     for _ in range(min(waiting_count, len(remaining))):
-#         total = sum(weights[uid] for uid in remaining)
-#         r = random.random() * total
-#         acc = 0.0
-#         chosen = remaining[-1]
-#         for uid in remaining:
-#             acc += weights[uid]
-#             if acc >= r:
-#                 chosen = uid
-#                 break
-#         picked.append(chosen)
-#         remaining = [u for u in remaining if u != chosen]
-
-#     picked_set = set(picked)
-#     remaining_queue = [uid for uid in queue if uid not in picked_set]
-#     return picked, remaining_queue
-
-
-# def _safe_float(v: Any, default: float) -> float:
-#     if v is None:
-#         return default
-#     try:
-#         if isinstance(v, Decimal):
-#             return float(v)
-#         return float(v)
-#     except Exception:
-#         return default

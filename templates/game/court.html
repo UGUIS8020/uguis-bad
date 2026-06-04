@@ -325,7 +325,7 @@
             <div class="card-body">
                 <!-- 進行中の試合がある場合の表示 -->                
                 
-                <div class="d-flex justify-content-center align-items-center flex-wrap gap-2">
+                <div class="d-flex flex-column align-items-center gap-2">
 
                 <form method="POST" action="{{ url_for('game.create_pairings') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -348,10 +348,22 @@
                     </button>
                 </form>
 
+                <!-- スキル除外AIペアリングボタン -->
+                <form method="POST" action="{{ url_for('game.create_pairings_skilled') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="max_courts" value="{{ session.get('selected_max_courts', 3) }}">
+                    <button type="submit"
+                        class="btn btn-warning btn-lg"
+                        {{ 'disabled' if has_ongoing_matches else '' }}
+                        title="スキルスコア20以下を除外してAIペアリング">
+                        <i class="fa-solid fa-star me-1"></i>スコア順AI
+                    </button>
+                </form>
+
                 <!-- ペアリングモード表示 -->
-                    {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング"} %}
-                    {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary"} %}
-                    {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot"} %}
+                    {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング", "skilled_ai": "上級者AIペアリング"} %}
+                    {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary", "skilled_ai": "warning"} %}
+                    {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot", "skilled_ai": "fa-star"} %}
                     <div class="text-center mt-1 w-100">
                         {% if last_mode %}
                         <span class="text-muted" style="font-size: 0.9rem;">{% if not has_ongoing_matches %}前回: {% endif %}

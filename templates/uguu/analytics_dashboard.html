@@ -1121,7 +1121,7 @@
 
 <script>
 (async function(){
-  const modeLabels = { random: "バランスシャッフル", full_random: "完全シャッフル", ai: "AIペアリング" };
+  const modeLabels = { random: "バランスシャッフル", full_random: "完全シャッフル", ai: "AIペアリング", skilled_ai: "上級者AIペアリング" };
   const modeColors = { random: "secondary", full_random: "info", ai: "primary" };
   try {
     const res = await fetch("{{ url_for('analytics.match_history') }}", { credentials: 'same-origin' });

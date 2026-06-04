@@ -1150,6 +1150,9 @@ def schedule_detail(schedule_id, date):
 
         # 参加者情報（全員取得・表示制御はテンプレート側で行う）
         participants_info = get_participants_info(schedule)
+        tara_participants_info = get_participants_info(
+            {**schedule, 'participants': schedule.get('tara_participants') or []}
+        )
 
         # 参加状態
         is_joined = current_user.is_authenticated and current_user.id in schedule.get('participants', [])
@@ -1209,6 +1212,7 @@ def schedule_detail(schedule_id, date):
             'schedule_detail.html',
             schedule=schedule,
             participants_info=participants_info,
+            tara_participants_info=tara_participants_info,
             is_joined=is_joined,
             is_tara=is_tara,
             is_full=is_full,
@@ -1481,9 +1485,11 @@ def tara_join():
             return jsonify({'status': 'error', 'message': 'スケジュールが見つかりません'}), 404
 
         schedule = response['Item']
-        tara_participants = schedule.get('tara_participants', [])
+        tara_participants = schedule.get('tara_participants') or []
 
         is_tara_joined = user_id in tara_participants
+        app.logger.info('[tara_join] user=%s schedule=%s date=%s current_tara=%s is_joined=%s',
+                        user_id, schedule_id, schedule_date, tara_participants, is_tara_joined)
 
         if is_tara_joined:
             # 解除
