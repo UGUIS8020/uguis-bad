@@ -2780,6 +2780,9 @@ def create_test_data():
         # 初心者 (≤20) ← スコア順AIで除外対象
         {'display_name': 'テスト15', 'skill_score': 18, 'skill_sigma': 12.0, 'gender': 'male'},
         {'display_name': 'テスト16', 'skill_score': 13, 'skill_sigma': 13.0, 'gender': 'female'},
+        # 戦闘力0（未経験者想定）
+        {'display_name': 'テスト17', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'male'},
+        {'display_name': 'テスト18', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'female'},
     ]
 
     now = datetime.now(timezone.utc).isoformat()
