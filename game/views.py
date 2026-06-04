@@ -2760,29 +2760,23 @@ def create_test_data():
 
     test_players = [
         # 上級 (60+)
-        {'display_name': 'テスト01', 'skill_score': 78, 'skill_sigma': 5.0,  'gender': 'male'},
-        {'display_name': 'テスト02', 'skill_score': 71, 'skill_sigma': 5.5,  'gender': 'female'},
-        {'display_name': 'テスト03', 'skill_score': 65, 'skill_sigma': 6.0,  'gender': 'male'},
-        {'display_name': 'テスト04', 'skill_score': 61, 'skill_sigma': 6.5,  'gender': 'female'},
+        {'display_name': 'テスト01', 'skill_score': 75, 'skill_sigma': 5.0,  'gender': 'male'},
+        {'display_name': 'テスト02', 'skill_score': 68, 'skill_sigma': 5.5,  'gender': 'female'},
+        {'display_name': 'テスト03', 'skill_score': 62, 'skill_sigma': 6.0,  'gender': 'male'},
         # 中上級 (45-59)
-        {'display_name': 'テスト05', 'skill_score': 57, 'skill_sigma': 7.0,  'gender': 'male'},
-        {'display_name': 'テスト06', 'skill_score': 53, 'skill_sigma': 7.5,  'gender': 'female'},
-        {'display_name': 'テスト07', 'skill_score': 49, 'skill_sigma': 8.0,  'gender': 'male'},
-        {'display_name': 'テスト08', 'skill_score': 45, 'skill_sigma': 8.333,'gender': 'female'},
+        {'display_name': 'テスト04', 'skill_score': 55, 'skill_sigma': 7.0,  'gender': 'female'},
+        {'display_name': 'テスト05', 'skill_score': 50, 'skill_sigma': 7.5,  'gender': 'male'},
+        {'display_name': 'テスト06', 'skill_score': 45, 'skill_sigma': 8.0,  'gender': 'female'},
         # 中級 (30-44)
-        {'display_name': 'テスト09', 'skill_score': 41, 'skill_sigma': 8.333,'gender': 'male'},
-        {'display_name': 'テスト10', 'skill_score': 37, 'skill_sigma': 9.0,  'gender': 'female'},
-        {'display_name': 'テスト11', 'skill_score': 33, 'skill_sigma': 9.5,  'gender': 'male'},
-        {'display_name': 'テスト12', 'skill_score': 30, 'skill_sigma': 10.0, 'gender': 'female'},
+        {'display_name': 'テスト07', 'skill_score': 40, 'skill_sigma': 8.333,'gender': 'male'},
+        {'display_name': 'テスト08', 'skill_score': 35, 'skill_sigma': 9.0,  'gender': 'female'},
+        {'display_name': 'テスト09', 'skill_score': 30, 'skill_sigma': 9.5,  'gender': 'male'},
         # 初心者寄り (21-29)
-        {'display_name': 'テスト13', 'skill_score': 26, 'skill_sigma': 10.5, 'gender': 'male'},
-        {'display_name': 'テスト14', 'skill_score': 22, 'skill_sigma': 11.0, 'gender': 'female'},
-        # 初心者 (≤20) ← スコア順AIで除外対象
-        {'display_name': 'テスト15', 'skill_score': 18, 'skill_sigma': 12.0, 'gender': 'male'},
-        {'display_name': 'テスト16', 'skill_score': 13, 'skill_sigma': 13.0, 'gender': 'female'},
-        # 戦闘力0（未経験者想定）
-        {'display_name': 'テスト17', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'male'},
-        {'display_name': 'テスト18', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'female'},
+        {'display_name': 'テスト10', 'skill_score': 25, 'skill_sigma': 10.5, 'gender': 'female'},
+        {'display_name': 'テスト11', 'skill_score': 22, 'skill_sigma': 11.0, 'gender': 'male'},
+        # 戦闘力0（未経験者）← スコア順AIで除外対象
+        {'display_name': 'テスト12', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'female'},
+        {'display_name': 'テスト13', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'male'},
     ]
 
     now = datetime.now(timezone.utc).isoformat()
