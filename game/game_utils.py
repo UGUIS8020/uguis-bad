@@ -516,16 +516,25 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
-LOW_SKILL_COURT_THRESHOLD = 20.0  # スコア順AIと同じ閾値
+def _conservative_key(p) -> float:
+    """conservativeまたはskill_scoreからソートキーを返す（0.0の誤検知を防ぐ）"""
+    c = getattr(p, "conservative", None)
+    if c is not None:
+        return float(c)
+    return float(getattr(p, "skill_score", 0) or 0)
+
+
+LOW_SKILL_CONSERVATIVE_THRESHOLD = -20.0  # conservative(μ-3σ)で判定
 
 def preprocess_low_skill_grouping(players: List["Player"], max_courts: int):
     """
-    スキルスコア20以下の選手が2人以上いる場合、同じコートに強制的にまとめる。
+    conservative値(μ-3σ)が-20以下の選手が2人以上いる場合、同じコートに強制的にまとめる。
+    skill_scoreではなくconservativeで判定するため試合後も正確に機能する。
     足りない場合は最もスキルが低い通常選手で補充する。
     戻り値: (forced_matches, remaining_players, remaining_max_courts)
     """
-    low = [p for p in players if float(getattr(p, "skill_score", 50.0)) <= LOW_SKILL_COURT_THRESHOLD]
-    regular = [p for p in players if float(getattr(p, "skill_score", 50.0)) > LOW_SKILL_COURT_THRESHOLD]
+    low = [p for p in players if _conservative_key(p) <= LOW_SKILL_CONSERVATIVE_THRESHOLD]
+    regular = [p for p in players if _conservative_key(p) > LOW_SKILL_CONSERVATIVE_THRESHOLD]
 
     if len(low) < 2 or max_courts < 2:
         return [], players, max_courts
@@ -559,12 +568,6 @@ def generate_skill_grouped_pairings(players: List["Player"], max_courts: int):
     各コートはスキルが近い4人で構成される。
     戻り値: (matches, waiting_players)
     """
-    def _conservative_key(p):
-        c = getattr(p, "conservative", None)
-        if c is not None:
-            return float(c)
-        return float(getattr(p, "skill_score", 0) or 0)
-
     sorted_players = sorted(players, key=_conservative_key, reverse=True)
 
     num_courts = min(max_courts, len(sorted_players) // 4)
