@@ -1661,7 +1661,7 @@ def finish_current_match():
                     "⚠️ Transaction canceled for match_id=%s: %s",
                     match_id, e.response.get("Error", {}).get("Message")
                 )                
-                return "finish transaction canceled", 409
+                return jsonify({"success": False, "error": "finish transaction canceled"}), 409
             raise        
         
         # =========================================================
