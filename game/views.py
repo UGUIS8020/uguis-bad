@@ -13,6 +13,7 @@ from .game_utils import (
     generate_balanced_pairs_and_matches,
     generate_full_random_pairings,
     generate_skill_grouped_pairings,
+    preprocess_low_skill_grouping,
     parse_players,
     sync_match_entries_with_updated_skills,
     update_trueskill_for_players_and_return_updates, _rest_queue_pk
@@ -3371,12 +3372,23 @@ def create_pairings():
        # 6) ペア生成
         match_id = generate_match_id()
 
+        # 低スキル選手（≤20）が2人以上いる場合は同じコートに強制グループ化
+        forced_matches, players, effective_courts = preprocess_low_skill_grouping(players, max_courts)
+        if forced_matches:
+            current_app.logger.info(
+                "[low-skill-group] 低スキル選手を同じコートに集約 (forced_courts=%d remaining_courts=%d)",
+                len(forced_matches), effective_courts
+            )
+
         if mode == "ai":
-            matches, additional_waiting_players = generate_ai_best_pairings(players, max_courts, iterations=1000)
+            matches, additional_waiting_players = generate_ai_best_pairings(players, effective_courts, iterations=1000)
         elif mode == "full_random":
-            pairs, matches, additional_waiting_players = generate_full_random_pairings(players, max_courts)
+            pairs, matches, additional_waiting_players = generate_full_random_pairings(players, effective_courts)
         else:  # random
-            pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, max_courts)
+            pairs, matches, additional_waiting_players = generate_balanced_pairs_and_matches(players, effective_courts)
+
+        # 低スキル強制コートを先頭に結合
+        matches = forced_matches + list(matches)
 
         current_app.logger.debug(
             "[matches] match_id=%s courts=%d additional_waiting=%d mode=%s",

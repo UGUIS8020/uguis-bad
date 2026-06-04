@@ -516,6 +516,43 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     return best_matches, best_waiting
 
 
+LOW_SKILL_COURT_THRESHOLD = 20.0  # スコア順AIと同じ閾値
+
+def preprocess_low_skill_grouping(players: List["Player"], max_courts: int):
+    """
+    スキルスコア20以下の選手が2人以上いる場合、同じコートに強制的にまとめる。
+    足りない場合は最もスキルが低い通常選手で補充する。
+    戻り値: (forced_matches, remaining_players, remaining_max_courts)
+    """
+    low = [p for p in players if float(getattr(p, "skill_score", 50.0)) <= LOW_SKILL_COURT_THRESHOLD]
+    regular = [p for p in players if float(getattr(p, "skill_score", 50.0)) > LOW_SKILL_COURT_THRESHOLD]
+
+    if len(low) < 2 or max_courts < 2:
+        return [], players, max_courts
+
+    # 不足分を最低スキルの通常選手で補充
+    regular_by_skill = sorted(regular, key=lambda p: _conservative_key(p))
+    needed = max(0, 4 - len(low))
+    court_group = low[:4] + regular_by_skill[:needed]
+
+    if len(court_group) < 4:
+        return [], players, max_courts
+
+    # コート内チームバランス最適化
+    p1, p2, p3, p4 = court_group[:4]
+    best = None; bd = float("inf")
+    for t1, t2 in [((p1, p2), (p3, p4)), ((p1, p3), (p2, p4)), ((p1, p4), (p2, p3))]:
+        s1 = _conservative_key(t1[0]) + _conservative_key(t1[1])
+        s2 = _conservative_key(t2[0]) + _conservative_key(t2[1])
+        d = abs(s1 - s2)
+        if d < bd:
+            bd = d; best = (t1, t2)
+
+    # 残りのプレイヤー（low 5人以上の場合は溢れた低スキル選手も戻す）
+    remaining = regular_by_skill[needed:] + low[4:]
+    return [best], remaining, max_courts - 1
+
+
 def generate_skill_grouped_pairings(players: List["Player"], max_courts: int):
     """
     スキル高い順に4人ずつコートへ割り当て、コート内でチームバランスを最適化する。
