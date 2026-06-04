@@ -3893,7 +3893,7 @@ def create_pairings_skilled():
                 entry_table.put_item(Item=rest_item)
 
         current_app.logger.info(
-            "ペアリング成功: %s試合, %s人待機 (mode=skilled_ai/base=%s)", len(matches), len(waiting_players), mode
+            "ペアリング成功: %s試合, %s人待機 (mode=skilled_ai)", len(matches), len(waiting_players)
         )
         return redirect(url_for("game.court"))
 
