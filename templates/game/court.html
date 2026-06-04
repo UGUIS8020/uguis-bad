@@ -759,8 +759,8 @@
                     },
                     body: new URLSearchParams({ csrf_token: CSRF_TOKEN }),
                 });
-                // 他端末が先に終了済みの場合も正常扱いでリダイレクト
-                if (!res.ok && res.status === 400) {
+                // 他端末が先に終了済み（409）または試合が見つからない（400）場合もリダイレクト
+                if (!res.ok && (res.status === 400 || res.status === 409)) {
                     window.location.href = "/game/court";
                     return;
                 }
