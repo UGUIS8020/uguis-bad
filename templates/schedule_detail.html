@@ -124,6 +124,10 @@
             <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
               {{ p.display_name }}{% if p.join_count == 1 %} <span style="color:#FFD700;">★</span>{% endif %}
             </div>
+            <button type="button"
+                    onclick="removeParticipant('{{ schedule.schedule_id }}', '{{ p.user_id }}', '{{ schedule.date }}')"
+                    class="btn btn-outline-danger btn-sm mt-1"
+                    style="font-size:0.6rem; padding:1px 4px; line-height:1.2;">削除</button>
           {% else %}
             <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                  alt=""
@@ -209,6 +213,29 @@
 </div>
 
 <script>
+async function removeParticipant(scheduleId, userId, date) {
+  if (!confirm('この参加者をキャンセルしますか？')) return;
+  try {
+    const resp = await fetch(`/schedule/${scheduleId}/participant/${userId}/remove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+      },
+      body: JSON.stringify({ date })
+    });
+    const data = await resp.json();
+    if (data.status === 'success') {
+      location.reload();
+    } else {
+      alert('エラー: ' + data.message);
+    }
+  } catch (e) {
+    alert('通信エラー: ' + e.message);
+  }
+}
+
 async function removeNoshow(scheduleId, date, userId, btn) {
   if (!confirm('この参加記録を削除しますか？\n（スケジュール・履歴・参加回数が修正されます）')) return;
   btn.disabled = true;
