@@ -45,7 +45,7 @@ def setup_test_admin_with_hash(user_id):
             },
             ReturnValues="UPDATED_NEW"
         )
-        print("✅ ハッシュ化パスワードでの更新が完了しました！")
+        print("ハッシュ化パスワードでの更新が完了しました！")
         print(f"設定パスワード: {raw_password}")
         print("更新された属性:", response.get('Attributes'))
         

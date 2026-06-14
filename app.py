@@ -654,7 +654,7 @@ def get_participants_info(schedule):
         batch_request = {
             table_name: {
                 "Keys": [{"user#user_id": id} for id in ids],
-                "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count",
+                "ProjectionExpression": "#uid, display_name, profile_image_url, skill_score, practice_count, gender",
                 "ExpressionAttributeNames": {"#uid": "user#user_id"}
             }
         }
@@ -694,6 +694,7 @@ def get_participants_info(schedule):
                     "skill_score": skill_score,
                     "join_count": join_count,
                     "profile_image_url": profile_image_url,
+                    "gender": user.get("gender", ""),
                     "is_valid": True,
                 })
             else:
@@ -935,7 +936,8 @@ def index():
                     "team_id": user.get("team_id"),  # ★ 追加：所属チームIDを取得
                     "organization": user.get("organization"), # ★ 追加：組織名（鶯など）を取得
                     "join_count": _to_int(user.get("practice_count"), 0),
-                })           
+                    "gender": user.get("gender", ""),
+                })
 
             participants_info.sort(
                 key=lambda x: (

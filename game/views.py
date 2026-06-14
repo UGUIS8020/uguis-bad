@@ -2374,7 +2374,7 @@ def submit_score(match_id, court_number):
         }
 
         res = result_table.put_item(Item=result_item)
-        current_app.logger.info(f"✅ [DEBUG] 保存完了レスポンス: {res.get('ResponseMetadata', {}).get('HTTPStatusCode')}")
+        current_app.logger.info(f"[DEBUG] 保存完了レスポンス: {res.get('ResponseMetadata', {}).get('HTTPStatusCode')}")
         
         # 成功時はこの1行のみ
         current_app.logger.info("Score: Match=%s, Court=%d, %d-%d (Win:%s)", 
@@ -2397,7 +2397,7 @@ def submission_status():
     if not match_id:
         return jsonify({"error": "match_idが必要です"}), 400
 
-    current_app.logger.info(f"🔍 [submission_status] GSIを利用した照会開始: match_id={match_id}")
+    current_app.logger.info(f"[submission_status] GSIを利用した照会開始: match_id={match_id}")
 
     if not has_ongoing_matches():
         return jsonify({"match_id": match_id, "submitted_count": 0, "match_active": False})
@@ -2425,8 +2425,8 @@ def submission_status():
         )
         items = resp.get("Items", [])
 
-    # 📊 デバッグログ（取得できた中身の確認）
-    current_app.logger.info(f"📊 [submission_status] 取得件数: {len(items)}件")
+    # デバッグログ（取得できた中身の確認）
+    current_app.logger.info(f"[submission_status] 取得件数: {len(items)}件")
     for i, item in enumerate(items):
         c_num = item.get('court_number')
         current_app.logger.info(f"   item[{i}]: court_number={c_num}")
@@ -2442,7 +2442,7 @@ def submission_status():
     match_data = get_organized_match_data(match_id)
     total_courts = len(match_data)
     
-    current_app.logger.info(f"✅ [submission_status] 最終判定: {len(submitted_courts)}/{total_courts} (コート: {submitted_courts})")
+    current_app.logger.info(f"[submission_status] 最終判定: {len(submitted_courts)}/{total_courts} (コート: {submitted_courts})")
 
     return jsonify({
         "match_id": match_id,
@@ -2778,7 +2778,7 @@ def create_test_data():
         # 初心者寄り (21-29)
         {'display_name': 'テスト10', 'skill_score': 25, 'skill_sigma': 10.5, 'gender': 'female'},
         {'display_name': 'テスト11', 'skill_score': 22, 'skill_sigma': 11.0, 'gender': 'male'},
-        # 戦闘力0（未経験者）← スコア順AIで除外対象
+        # 戦闘力0（未経験者）← ランキングモードAIで除外対象
         {'display_name': 'テスト12', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'female'},
         {'display_name': 'テスト13', 'skill_score': 0,  'skill_sigma': 25.0, 'gender': 'male'},
     ]

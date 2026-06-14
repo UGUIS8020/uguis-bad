@@ -221,16 +221,41 @@
                     </button>
 
                 {% elif is_registered %}
-                    <button class="btn btn-success btn-lg px-5 py-3" disabled>
+                    <div class="d-flex flex-column align-items-center gap-3">
+                    {% if has_ongoing_matches and last_mode == "skilled_ai" and training_menu %}
+                    {% set training_links = {"ドライブ": "https://www.youtube.com/watch?v=n0ofEDUoOWA&t=57"} %}
+                    <div class="alert alert-danger text-center mb-0 w-100" style="padding-top: 2.25rem; padding-bottom: 2.25rem;">
+                        今回はトレーニングモードです。<br>
+                        サブコートで<strong>「{{ training_menu }}」</strong>練習をしてください。
+                        {% if training_links.get(training_menu) %}
+                        {% set vid_url = training_links.get(training_menu) %}
+                        {% set vid_id = vid_url.split('v=')[1].split('&')[0] %}
+                        <div class="mt-3">
+                            <a href="{{ vid_url }}" target="_blank" rel="noopener"
+                               style="position:relative; display:inline-block;">
+                                <img src="https://img.youtube.com/vi/{{ vid_id }}/hqdefault.jpg"
+                                     alt="参考動画"
+                                     class="img-fluid rounded"
+                                     style="max-width:240px; display:block;">
+                                <span style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                                             width:52px; height:52px; background:rgba(0,0,0,0.65); border-radius:50%;
+                                             display:flex; align-items:center; justify-content:center; pointer-events:none;">
+                                    <span style="display:inline-block; width:0; height:0;
+                                                 border-top:13px solid transparent;
+                                                 border-bottom:13px solid transparent;
+                                                 border-left:22px solid white;
+                                                 margin-left:4px;"></span>
+                                </span>
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    <button class="btn btn-success btn-lg px-5 py-3 w-100" disabled>
                     <i class="fas fa-check-circle me-2"></i>
                     <span class="fw-bold">試合開始までお待ちください</span>
                     </button>
-                    {% if has_ongoing_matches and last_mode == "skilled_ai" and training_menu %}
-                    <div class="alert alert-info mt-3 text-center">
-                        今回はトレーニングモードです。<br>
-                        サブコートで<strong>「{{ training_menu }}」</strong>練習をしてください。
                     </div>
-                    {% endif %}
 
                 {% else %}
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
@@ -362,7 +387,7 @@
                         class="btn btn-warning btn-lg"
                         {{ 'disabled' if has_ongoing_matches else '' }}
                         title="スキルスコア20以下を除外してAIペアリング">
-                        <i class="fa-solid fa-star me-1"></i>スコア順AI
+                        <i class="fa-solid fa-star me-1"></i>ランキングモード
                     </button>
                 </form>
 
