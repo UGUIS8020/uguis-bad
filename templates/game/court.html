@@ -225,6 +225,12 @@
                     <i class="fas fa-check-circle me-2"></i>
                     <span class="fw-bold">試合開始までお待ちください</span>
                     </button>
+                    {% if has_ongoing_matches and last_mode == "skilled_ai" and training_menu %}
+                    <div class="alert alert-info mt-3 text-center">
+                        今回はトレーニングモードです。<br>
+                        サブコートで<strong>「{{ training_menu }}」</strong>練習をしてください。
+                    </div>
+                    {% endif %}
 
                 {% else %}
                     <form method="POST" action="{{ url_for('game.entry') }}" class="m-0">
@@ -361,7 +367,7 @@
                 </form>
 
                 <!-- ペアリングモード表示 -->
-                    {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング", "skilled_ai": "上級者AIペアリング"} %}
+                    {% set mode_labels = {"random": "バランスシャッフル", "full_random": "完全シャッフル", "ai": "AIペアリング", "skilled_ai": "ランキング"} %}
                     {% set mode_colors = {"random": "secondary", "full_random": "info", "ai": "primary", "skilled_ai": "warning"} %}
                     {% set mode_icons = {"random": "fa-shuffle", "full_random": "fa-dice", "ai": "fa-robot", "skilled_ai": "fa-star"} %}
                     <div class="text-center mt-1 w-100">

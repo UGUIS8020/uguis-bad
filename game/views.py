@@ -203,16 +203,18 @@ def court():
             and all(c.get("score_submitted", False) for c in match_courts.values())
         )
 
-        # ★ 管理者用：前回試合修正ボタン表示判定
+        # ★ 管理者用：前回試合修正ボタン表示判定 / training_menu 取得
         last_match_id_for_correction = None
-        if getattr(current_user, 'administrator', False) and not has_ongoing:
-            try:
-                _meta_table = current_app.dynamodb.Table("bad-game-matches")
-                meta_item = _meta_table.get_item(Key={"match_id": "meta#current"}).get("Item", {})
-                if meta_item.get("status") == "idle":
-                    last_match_id_for_correction = meta_item.get("last_match_id")
-            except Exception:
-                pass
+        training_menu = None
+        try:
+            _meta_table = current_app.dynamodb.Table("bad-game-matches")
+            meta_item = _meta_table.get_item(Key={"match_id": "meta#current"}).get("Item", {})
+            if meta_item.get("status") == "idle" and getattr(current_user, 'administrator', False):
+                last_match_id_for_correction = meta_item.get("last_match_id")
+            if meta_item.get("status") == "playing" and meta_item.get("pairing_mode") == "skilled_ai":
+                training_menu = meta_item.get("training_menu")
+        except Exception:
+            pass
 
         logger.debug(
             "[court] total=%d pending=%d resting=%d playing=%d user=%s state=%s ongoing=%s progress=%s/%s match_id=%s",
@@ -254,6 +256,7 @@ def court():
             last_mode=last_mode,
             next_mode=next_mode,
             last_match_id_for_correction=last_match_id_for_correction,
+            training_menu=training_menu,
         )
 
     except Exception:
@@ -3663,20 +3666,11 @@ def create_pairings_skilled():
             flash("4人以上のエントリーが必要です。", "warning")
             return redirect(url_for("game.court"))
 
-        # 2) 待機者計算・選出（全員対象、スコア順でコート割り当ては generate_skill_grouped_pairings が行う）
-        sorted_entries = sorted(entries, key=lambda e: (e.get("match_count", 0), random.random()))
-        cap_by_courts = min(max_courts * 4, len(sorted_entries))
-        required_players = cap_by_courts - (cap_by_courts % 4)
-        waiting_count = len(sorted_entries) - required_players
-        if waiting_count > 0:
-            active_entries, waiting_entries = _select_waiting_entries(sorted_entries, waiting_count)
-        else:
-            active_entries, waiting_entries = sorted_entries, []
-            current_app.logger.info("[wait] waiting_count=0 (none)")
-        current_app.logger.info(
-            "[skilled_ai] total=%d active=%d waiting=%d",
-            len(entries), len(active_entries), len(waiting_entries)
-        )
+        # 2) 全員をそのまま渡す（休み考慮なし）
+        # generate_skill_grouped_pairings がスキル順に並べ、下位スコアの選手が待機になる
+        active_entries = entries
+        waiting_entries = []
+        current_app.logger.info("[skilled_ai] total=%d (rest_queue skip)", len(entries))
 
         # 5) Player変換
         players = []
@@ -3779,19 +3773,22 @@ def create_pairings_skilled():
         dynamodb_client = boto3.client('dynamodb', region_name='ap-northeast-1')
         tx_items = []
 
+        _training_menus = ["ドライブ", "クリア"]
+        training_menu = random.choice(_training_menus)
+
         tx_items.append({
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": "meta#current"}},
                 "UpdateExpression": (
                     "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #sa = :now, "
-                    "#pm = :mode, #wp = :waiting"
+                    "#pm = :mode, #wp = :waiting, #tm = :tm"
                 ),
                 "ConditionExpression": "attribute_not_exists(#st) OR #st <> :playing",
                 "ExpressionAttributeNames": {
                     "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
                     "#ua": "updated_at", "#sa": "started_at",
-                    "#pm": "pairing_mode", "#wp": "waiting_players",
+                    "#pm": "pairing_mode", "#wp": "waiting_players", "#tm": "training_menu",
                 },
                 "ExpressionAttributeValues": {
                     ":playing": {"S": "playing"},
@@ -3800,6 +3797,7 @@ def create_pairings_skilled():
                     ":now": {"S": now_jst},
                     ":mode": {"S": mode},
                     ":waiting": {"L": [{"S": p.name} for p in waiting_players]},
+                    ":tm": {"S": training_menu},
                 },
             }
         })
@@ -3848,41 +3846,11 @@ def create_pairings_skilled():
             }
         )
 
-        # 9) 待機者処理（通常ペアリングと同じ）
-        if waiting_players:
-            for wp in waiting_players:
-                entry_id = str(getattr(wp, "entry_id", "") or "")
-                if not entry_id:
-                    continue
-                entry_table.update_item(
-                    Key={"entry_id": entry_id},
-                    UpdateExpression=(
-                        "SET last_rest_match_id=:mid, last_rest_at=:now, last_rest_reason=:rr, updated_at=:now "
-                        "ADD rest_count :one"
-                    ),
-                    ExpressionAttributeValues={
-                        ":mid": str(match_id), ":now": now_jst,
-                        ":rr": "not_selected", ":one": 1,
-                    },
-                )
-                rest_event_id = str(uuid.uuid4())
-                rest_item = {
-                    "entry_id": rest_event_id,
-                    "type": "rest_event",
-                    "match_id": str(match_id),
-                    "display_name": wp.name,
-                    "entry_status": "resting",
-                    "reason": "not_selected",
-                    "court_number": 0,
-                    "team": "R",
-                    "created_at": now_jst,
-                    "updated_at": now_jst,
-                    "source_entry_id": entry_id,
-                }
-                uid = getattr(wp, "user_id", None)
-                if uid:
-                    rest_item["user_id"] = str(uid)
-                entry_table.put_item(Item=rest_item)
+        # 9) 待機者処理（ランキングモードは休みカウントしない）
+        current_app.logger.info(
+            "[skilled_ai] waiting=%d (rest_count not incremented)",
+            len(waiting_players)
+        )
 
         current_app.logger.info(
             "ペアリング成功: %s試合, %s人待機 (mode=skilled_ai)", len(matches), len(waiting_players)
