@@ -108,10 +108,21 @@
       {# ── 参加者一覧 ── #}
       {% if participants_info %}
       <hr>
-      <p class="text-muted small mb-2">参加予定 ({{ count }}人)</p>
-      <div class="d-flex flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <p class="text-muted small mb-0">参加予定 ({{ count }}人)</p>
+        {% if current_user.is_authenticated and current_user.administrator %}
+        <button id="sortToggleBtn" type="button"
+                class="btn btn-outline-secondary btn-sm"
+                style="font-size:0.7rem; padding:2px 8px;"
+                onclick="toggleSort()">戦闘力順</button>
+        {% endif %}
+      </div>
+      <div id="participantsList" class="d-flex flex-wrap gap-2">
         {% for p in participants_info %}
-        <div class="text-center" style="width:48px;">
+        <div class="text-center" style="width:48px;"
+             data-skill="{{ p.skill_score or 0 }}"
+             data-join="{{ p.join_count or 0 }}"
+             data-name="{{ p.display_name }}">
           {% if current_user.is_authenticated and current_user.administrator %}
             <a href="{{ url_for('users.user_profile', user_id=p.user_id) }}">
               <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
@@ -217,6 +228,30 @@
 </div>
 
 <script>
+let _sortMode = 'join';
+function toggleSort() {
+  const btn = document.getElementById('sortToggleBtn');
+  const list = document.getElementById('participantsList');
+  if (!list) return;
+  const items = Array.from(list.children);
+
+  if (_sortMode === 'join') {
+    items.sort((a, b) => (parseFloat(b.dataset.skill) || 0) - (parseFloat(a.dataset.skill) || 0));
+    _sortMode = 'skill';
+    btn.textContent = '参加順';
+    btn.classList.replace('btn-outline-secondary', 'btn-outline-primary');
+  } else {
+    items.sort((a, b) => {
+      const jd = (parseInt(a.dataset.join) || 0) - (parseInt(b.dataset.join) || 0);
+      return jd !== 0 ? jd : (a.dataset.name || '').localeCompare(b.dataset.name || '');
+    });
+    _sortMode = 'join';
+    btn.textContent = '戦闘力順';
+    btn.classList.replace('btn-outline-primary', 'btn-outline-secondary');
+  }
+  items.forEach(item => list.appendChild(item));
+}
+
 async function removeParticipant(scheduleId, userId, date) {
   if (!confirm('この参加者をキャンセルしますか？')) return;
   try {
