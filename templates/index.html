@@ -320,7 +320,16 @@
                             {% if plist %}
                                 <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
                                 {% for p in plist[:7] %}
-                                    <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px;">
+                                    {% if p.join_count == 1 %}
+                                        {% set ring_color = '#2ecc71' %}
+                                    {% elif p.gender == 'female' %}
+                                        {% set ring_color = '#e74c3c' %}
+                                    {% elif p.gender == 'male' %}
+                                        {% set ring_color = '#3498db' %}
+                                    {% else %}
+                                        {% set ring_color = '#dee2e6' %}
+                                    {% endif %}
+                                    <span class="avatar-ig" style="--size:28px;--ring:2px;--gap:1px; background:{{ ring_color }};">
                                     <img
                                         src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
                                         alt="{{ p.display_name }}"

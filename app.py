@@ -941,7 +941,7 @@ def index():
 
             participants_info.sort(
                 key=lambda x: (
-                    not x.get("is_admin", False),
+                    x.get("join_count") is None,
                     (x.get("join_count") or 0),
                     x.get("display_name", "")
                 )
@@ -1366,8 +1366,8 @@ def join_schedule(schedule_id):
                     f"✓ ユーザー {user_id} の「たら」を自動削除しました (schedule_id={schedule_id}, date={date})"
                 )
 
-            # 参加回数カウントは初回だけ（従来仕様）
-            if not previously_joined(schedule_id, user_id):
+            # 参加回数カウントは初回だけ（この日付に未参加の場合のみ）
+            if not previously_joined(schedule_id, date, user_id):
                 try:
                     increment_practice_count(user_id)
                 except Exception as e:
@@ -1555,16 +1555,17 @@ def tara_join():
         app.logger.error(f"「たら」参加処理エラー: {e}")
         return jsonify({'status': 'error', 'message': '処理中にエラーが発生しました'}), 500
 
-def previously_joined(schedule_id, user_id):
+def previously_joined(schedule_id, date, user_id):
     """
-    過去にそのスケジュールに参加していたかを確認する。
+    指定日付のスケジュールにすでに参加済みかを確認する。
+    同一 schedule_id の別日付は別カウントとして扱う。
     """
     schedule_table = app.dynamodb.Table(app.table_name_schedule)
 
-    response = schedule_table.scan(
-        FilterExpression=Attr('schedule_id').eq(schedule_id) & Attr('participants').contains(user_id)
-    )
-    return bool(response.get('Items'))
+    response = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
+    item = response.get('Item') or {}
+    participants = item.get('participants') or []
+    return user_id in participants
 
 def _user_pk(user_id: str) -> dict:
     return {"user#user_id": user_id}
@@ -2906,6 +2907,89 @@ def admin_reconcile_practice_count():
                 updated += 1
         except Exception as e:
             errors += 1
+    return f"checked={checked}, updated={updated}, errors={errors}"
+
+@app.route("/admin/reconcile_practice_count_with_future")
+def admin_reconcile_with_future():
+    """
+    practice_count を「過去の参加履歴 + 未来の有効参加」で再計算する。
+    通常の reconcile は未来日付を除外するため、未来スケジュールに参加中のユーザーが
+    正しくカウントされない問題をこのエンドポイントで補完する。
+    """
+    from uguu.reconcile_practice_count import _scan_all
+    from uguu.dynamo import db as uguu_db
+    from datetime import date as date_cls
+    from boto3.dynamodb.conditions import Attr as DynAttr
+
+    today_str = date_cls.today().isoformat()
+
+    users_table    = current_app.dynamodb.Table(current_app.config["TABLE_NAME_USER"])
+    schedule_table = current_app.dynamodb.Table(current_app.config["TABLE_NAME_SCHEDULE"])
+    history_table  = current_app.dynamodb.Table("bad-users-history")
+
+    # 1) 未来スケジュールを全スキャンし、ユーザーごとの有効参加日セットを収集
+    future_dates_by_user: dict[str, set] = {}
+    resp = schedule_table.scan(FilterExpression=DynAttr("date").gt(today_str))
+    future_schedules = resp.get("Items", [])
+    while resp.get("LastEvaluatedKey"):
+        resp = schedule_table.scan(
+            FilterExpression=DynAttr("date").gt(today_str),
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        future_schedules.extend(resp.get("Items", []))
+
+    for sched in future_schedules:
+        sched_date = sched.get("date", "")
+        for uid in (sched.get("participants") or []):
+            if not uid:
+                continue
+            uid = str(uid)
+            future_dates_by_user.setdefault(uid, set()).add(sched_date)
+
+    # キャンセル済みの未来履歴は除外（history の cancelled レコードをチェック）
+    # シンプルに: history に cancelled status のある日は future_dates から除去
+    for uid, dates in list(future_dates_by_user.items()):
+        try:
+            resp2 = history_table.query(
+                KeyConditionExpression=__import__("boto3").dynamodb.conditions.Key("user_id").eq(uid)
+            )
+            for item in (resp2.get("Items") or []):
+                if (item.get("status") or "").lower() == "cancelled":
+                    cancel_date = item.get("date") or item.get("event_date") or ""
+                    dates.discard(cancel_date)
+        except Exception:
+            pass
+        if not dates:
+            del future_dates_by_user[uid]
+
+    # 2) 全ユーザーの past_count + future_count で practice_count を更新
+    users   = _scan_all(users_table)
+    checked = updated = errors = 0
+
+    for u in users:
+        user_id = u.get("user#user_id")
+        if not user_id:
+            continue
+        checked += 1
+        try:
+            past_records = uguu_db.get_user_participation_history_with_timestamp(str(user_id)) or []
+            past_count   = len(past_records)
+            future_count = len(future_dates_by_user.get(str(user_id), set()))
+            correct      = past_count + future_count
+
+            cur_raw = u.get("practice_count")
+            cur     = int(cur_raw) if cur_raw is not None else None
+            if cur != correct:
+                users_table.update_item(
+                    Key={"user#user_id": str(user_id)},
+                    UpdateExpression="SET practice_count = :c",
+                    ExpressionAttributeValues={":c": int(correct)},
+                )
+                updated += 1
+        except Exception as e:
+            current_app.logger.error(f"[reconcile_with_future] {user_id}: {e}")
+            errors += 1
+
     return f"checked={checked}, updated={updated}, errors={errors}"
 
 @app.route("/admin/fix_news_images")
