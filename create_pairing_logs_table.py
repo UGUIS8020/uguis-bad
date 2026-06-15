@@ -31,7 +31,7 @@ try:
         BillingMode='PAY_PER_REQUEST',
     )
     table.wait_until_exists()
-    print(f"✅ テーブル '{TABLE_NAME}' を作成しました")
+    print(f"テーブル '{TABLE_NAME}' を作成しました")
 
 except ClientError as e:
     if e.response['Error']['Code'] == 'ResourceInUseException':

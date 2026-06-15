@@ -224,7 +224,7 @@ def fix_status(db, invalid_records, batch_size=50):
         # バッチサイズごとに確認
         if i % batch_size == 0 and i < total_records:
             print(f"\n\n{'='*80}")
-            print(f"📊 進捗レポート ({i}/{total_records}件処理完了)")
+            print(f"進捗レポート ({i}/{total_records}件処理完了)")
             print(f"{'='*80}")
             print(f"更新完了: {updated_count}レコード")
             print(f"エラー: {error_count}件")

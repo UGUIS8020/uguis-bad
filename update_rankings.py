@@ -88,4 +88,4 @@ for rank, u in enumerate(active_users, 1):
     except Exception as e:
         print(f"  ❌ {name} 更新失敗: {e}")
 
-print(f"\n✅ 完了: {total} 人のランキングを更新しました")
+print(f"\n完了: {total} 人のランキングを更新しました")

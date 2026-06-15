@@ -12,7 +12,7 @@ match_entry_table = dynamodb.Table("bad-game-match_entries")
 result_table = dynamodb.Table("bad-game-results")
 
 def search_targets():
-    print("🔍 厳選した削除候補を検索中...")
+    print("厳選した削除候補を検索中...")
     users = user_table.scan().get("Items", [])
     targets = []
     
@@ -40,7 +40,7 @@ def main():
     targets = search_targets()
     
     if not targets:
-        print("✅ 削除候補のテストユーザーは見つかりませんでした。")
+        print("削除候補のテストユーザーは見つかりませんでした。")
         return
 
     print(f"\n📋 以下の {len(targets)} 名が見つかりました:")
@@ -108,7 +108,7 @@ def main():
                 result_table.delete_item(Key={'result_id': r['result_id']})
                 res_count += 1
         
-        print(f"✅ 削除完了: {name} (関連Results: {res_count}件)")
+        print(f"削除完了: {name} (関連Results: {res_count}件)")
 
     print("\n✨ すべてのクリーンアップが完了しました！")
 

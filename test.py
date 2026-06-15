@@ -156,7 +156,7 @@ def show_summary():
             pct  = d["no_sid"] / d["total"] * 100
             print(f"  {name:<16} {d['no_sid']:>6} {d['total']:>6}  {pct:>5.1f}%")
     else:
-        print("\n✅ schedule_idなしのレコードはありません")
+        print("\nschedule_idなしのレコードはありません")
 
 # ── メイン ────────────────────────────────────────────────────────────
 if __name__ == "__main__":

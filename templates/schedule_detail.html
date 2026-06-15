@@ -118,7 +118,7 @@
                    alt="{{ p.display_name }}"
                    width="40" height="40"
                    class="rounded-circle"
-                   style="object-fit:cover; border: 2px solid {{ '#FFD700' if p.join_count == 1 else '#dee2e6' }};"
+                   style="object-fit:cover; border: 3px solid {{ '#2ecc71' if p.join_count == 1 else ('#e74c3c' if p.gender == 'female' else ('#3498db' if p.gender == 'male' else '#dee2e6')) }};"
                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
             </a>
             <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
@@ -133,7 +133,7 @@
                  alt=""
                  width="40" height="40"
                  class="rounded-circle"
-                 style="object-fit:cover; border: 2px solid {{ '#FFD700' if p.join_count == 1 else '#dee2e6' }};"
+                 style="object-fit:cover; border: 3px solid {{ '#2ecc71' if p.join_count == 1 else ('#e74c3c' if p.gender == 'female' else ('#3498db' if p.gender == 'male' else '#dee2e6')) }};"
                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
           {% endif %}
         </div>
@@ -145,21 +145,25 @@
       {% if tara_participants_info %}
       <hr>
       <p class="text-muted small mb-2">たら参加 ({{ tara_participants_info|length }}人)</p>
+      {% if current_user.is_authenticated and current_user.administrator %}
       <div class="d-flex flex-wrap gap-2">
         {% for p in tara_participants_info %}
         <div class="text-center" style="width:48px; opacity:0.75;">
-          <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
-               alt="{{ p.display_name }}"
-               width="36" height="36"
-               class="rounded-circle"
-               style="object-fit:cover; border: 2px solid #ffc107;"
-               onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+          <a href="{{ url_for('users.user_profile', user_id=p.user_id) }}">
+            <img src="{{ p.profile_image_url or url_for('static', filename='images/default.jpg') }}"
+                 alt="{{ p.display_name }}"
+                 width="36" height="36"
+                 class="rounded-circle"
+                 style="object-fit:cover; border: 2px solid #ffc107;"
+                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
+          </a>
           <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
             {{ p.display_name }}
           </div>
         </div>
         {% endfor %}
       </div>
+      {% endif %}
       {% endif %}
 
     </div>
@@ -194,7 +198,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="text-success small mb-0">全員参加が確認されました ✅</p>
+      <p class="text-success small mb-0">全員参加が確認されました</p>
       {% endif %}
     </div>
   </div>
@@ -254,7 +258,7 @@ async function removeNoshow(scheduleId, date, userId, btn) {
       if (row) row.remove();
       const list = document.getElementById('noshow-list');
       if (list && list.children.length === 0) {
-        list.innerHTML = '<p class="text-success small mb-0">全員参加が確認されました ✅</p>';
+        list.innerHTML = '<p class="text-success small mb-0">全員参加が確認されました</p>';
       }
     } else {
       alert('エラー: ' + data.message);

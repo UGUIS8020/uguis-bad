@@ -123,7 +123,7 @@ def main():
     elif actual_rate > expected_rate * 1.1:
         print("  △  実際の重複率が理論値より若干高い → 許容範囲内だが注意")
     else:
-        print("  ✅  実際の重複率は理論値と同等 → アルゴリズムは正常")
+        print("実際の重複率は理論値と同等 → アルゴリズムは正常")
     print()
 
     print("【重複が多いペア TOP10】")

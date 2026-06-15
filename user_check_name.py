@@ -51,7 +51,7 @@ def search_anywhere(target_name):
         print(f"❌ '{target_name}' を含むデータは、どの項目（名前、メール、ID、権限等）にも見つかりませんでした。")
         return
 
-    print(f"✅ {len(matches)} 件のデータが見つかりました：\n")
+    print(f"{len(matches)} 件のデータが見つかりました：\n")
     print("-" * 75)
     
     for i, item in enumerate(matches):
