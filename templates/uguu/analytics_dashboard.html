@@ -317,16 +317,25 @@
 
   <!-- リピート率セクション -->
   <div class="row g-3 mb-4" id="repeatRow">
-    <div class="col-md-6 col-lg-3">
-      <div class="card kpi-card success">
-        <i class="fas fa-redo kpi-icon"></i>
-        <div class="kpi-label">全体リピート率</div>
-        <div class="kpi-value"><span id="kpiRepeatRate">-</span><small style="font-size:1rem;">%</small></div>
-        <div class="kpi-subtitle">2回以上参加 / 総メンバー</div>
-        <div class="kpi-detail"><span id="kpiRepeatUsers">-</span> / <span id="kpiTotalUsers">-</span> 人</div>
+    <div class="col-md-6 col-lg-4">
+      <div class="card chart-card h-100">
+        <div class="chart-title">
+          <i class="fas fa-redo"></i>
+          <span>全体リピート率</span>
+        </div>
+        <div style="position:relative; width:180px; margin:0 auto;">
+          <canvas id="chartRepeatRate" height="180"></canvas>
+          <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; pointer-events:none;">
+            <div style="font-size:1.6rem; font-weight:700; color:#50C878;" id="kpiRepeatRate">-</div>
+            <div style="font-size:0.7rem; color:#6c757d;">%</div>
+          </div>
+        </div>
+        <div class="text-center mt-2 text-muted small">
+          2回以上参加 <strong id="kpiRepeatUsers">-</strong> 人 / 総メンバー <strong id="kpiTotalUsers">-</strong> 人
+        </div>
       </div>
     </div>
-    <div class="col-md-6 col-lg-9">
+    <div class="col-md-6 col-lg-8">
       <div class="card chart-card">
         <div class="chart-title">
           <i class="fas fa-chart-line"></i>
@@ -350,11 +359,22 @@
       </div>
     </div>
     <div class="col-md-4">
-      <div class="card kpi-card success">
-        <i class="fas fa-user-check kpi-icon"></i>
-        <div class="kpi-label">新規定着率</div>
-        <div class="kpi-value"><span id="kpiRetentionRate">-</span><small style="font-size:1rem;">%</small> <small style="font-size:1rem;">(<span id="kpiRetained">-</span>人)</small></div>
-        <div class="kpi-subtitle">累計3回以上参加 / 直近6ヶ月2回以上参加 <span id="kpiRetentionTotal"></span></div>
+      <div class="card chart-card h-100">
+        <div class="chart-title">
+          <i class="fas fa-user-check"></i>
+          <span>新規定着率</span>
+        </div>
+        <div style="position:relative; width:160px; margin:0 auto;">
+          <canvas id="chartRetentionRate" height="160"></canvas>
+          <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; pointer-events:none;">
+            <div style="font-size:1.4rem; font-weight:700; color:#50C878;" id="kpiRetentionRate">-</div>
+            <div style="font-size:0.7rem; color:#6c757d;">%</div>
+          </div>
+        </div>
+        <div class="text-center mt-2 text-muted small">
+          定着 <strong id="kpiRetained">-</strong> 人 / 対象 <strong id="kpiRetentionTotal">-</strong> 人
+        </div>
+        <div class="text-center text-muted" style="font-size:0.7rem;">累計3回以上 / 直近6ヶ月2回以上参加</div>
       </div>
     </div>
     <div class="col-md-4">
@@ -367,18 +387,7 @@
     </div>
 
     <!-- 月次グラフ -->
-    <div class="col-lg-6">
-      <div class="card chart-card">
-        <div class="chart-title">
-          <i class="fas fa-chart-area"></i>
-          <span>月次アクティブ率（参加経験者比）</span>
-        </div>
-        <div class="chart-container">
-          <canvas id="chartActiveRate"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-6">
+    <div class="col-lg-12">
       <div class="card chart-card">
         <div class="chart-title">
           <i class="fas fa-user-plus"></i>
@@ -412,115 +421,8 @@
 
   <!-- チャート セクション -->
   <div class="row g-3 mb-4">
-    <!-- 月別参加数 -->
-    <div class="col-lg-6">
-      <div class="card chart-card">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-          <div class="chart-title">
-            <i class="fas fa-chart-bar"></i>
-            <span>月別参加数</span>
-          </div>
-          <div class="chart-toolbar">
-            <button class="btn btn-chart active" id="btnMonthlyCompact">
-              <i class="fas fa-compress"></i> コンパクト
-            </button>
-            <button class="btn btn-chart" id="btnMonthlyFull">
-              <i class="fas fa-expand"></i> フル
-            </button>
-          </div>
-        </div>
-        <div class="chart-container">
-          <canvas id="chartMonthly"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <!-- 曜日別参加数 -->
-    <div class="col-lg-6">
-      <div class="card chart-card">
-        <div class="chart-title">
-          <i class="fas fa-calendar-week"></i>
-          <span>曜日別参加数</span>
-        </div>
-        <div class="chart-container">
-          <canvas id="chartWeekday"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <!-- 時間帯別 -->
-    <div class="col-lg-12">
-      <div class="card chart-card">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-          <div class="chart-title">
-            <i class="fas fa-clock"></i>
-            <span>時間帯別参加（登録時刻）</span>
-          </div>
-          <div class="chart-toolbar">
-            <button class="btn btn-chart active" id="btnHourCompact">
-              <i class="fas fa-compress"></i> コンパクト
-            </button>
-            <button class="btn btn-chart" id="btnHourFull">
-              <i class="fas fa-expand"></i> フル
-            </button>
-          </div>
-        </div>
-        <div class="chart-container-large">
-          <canvas id="chartHour"></canvas>
-        </div>
-      </div>
-    </div>
   </div>
 
-</div>
-
-<!-- 参加人数トレンド -->
-<div class="container pb-4">
-  <div class="row g-3">
-    <!-- サマリーカード -->
-    <div class="col-12">
-      <div class="card chart-card">
-        <div class="chart-title">
-          <i class="fas fa-chart-line"></i>
-          <span>参加人数トレンド</span>
-        </div>
-        <div class="d-flex gap-4 mb-3 flex-wrap px-1" id="trendSummary">
-          <div class="text-center">
-            <div class="fw-bold fs-5" id="trendAvg3">-</div>
-            <div class="text-muted small">直近3ヶ月平均</div>
-          </div>
-          <div class="text-center">
-            <div class="fw-bold fs-5" id="trendAvg6">-</div>
-            <div class="text-muted small">直近6ヶ月平均</div>
-          </div>
-          <div class="text-center">
-            <div class="fw-bold fs-5" id="trendMoM">-</div>
-            <div class="text-muted small">前月比</div>
-          </div>
-          <div class="text-center ms-auto">
-            <div class="fw-bold fs-5" id="trendDir">-</div>
-            <div class="text-muted small">トレンド</div>
-          </div>
-        </div>
-        <!-- 月次参加数 + トレンドライン -->
-        <div class="chart-container-large">
-          <canvas id="chartTrend"></canvas>
-        </div>
-      </div>
-    </div>
-    <!-- 前月比増減 -->
-    <div class="col-12">
-      <div class="card chart-card">
-        <div class="chart-title">
-          <i class="fas fa-arrows-alt-v"></i>
-          <span>前月比増減（人）</span>
-        </div>
-        <div class="chart-container">
-          <canvas id="chartDelta"></canvas>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <!-- 試合履歴 -->
@@ -565,9 +467,6 @@
 (function(){
   const userId = "{{ user_id }}";
   const apiUrl = "{{ url_for('analytics.analytics_user_participation', user_id=user_id, group='month') }}";
-
-  const JP_WEEKDAYS = ["月","火","水","木","金","土","日"];
-  const HOUR_KEYS = Array.from({length: 24}, (_,i)=> String(i).padStart(2, '0'));
 
   const chartColors = {
     primary: 'rgba(74, 144, 226, 0.8)',
@@ -619,18 +518,6 @@
 
   function takeLast(arr, n){ return arr.slice(Math.max(arr.length - n, 0)); }
 
-  function bucketHours(byHour, buckets) {
-    const out = [];
-    for (const b of buckets) {
-      let sum = 0;
-      for (let h=b.from; h<=b.to; h++){
-        const k = String(h).padStart(2,'0');
-        sum += (byHour[k] || 0);
-      }
-      out.push({label: b.label, count: sum});
-    }
-    return out;
-  }
 
   function setKPI(json){
     const t = json.totals || {};
@@ -654,203 +541,6 @@
   function toggleButtons(activeBtn, inactiveBtn) {
     activeBtn.classList.add('active');
     inactiveBtn.classList.remove('active');
-  }
-
-  let chartMonthly = null;
-  function buildMonthlyChart(json, overall, mode='compact'){
-    const ctx = document.getElementById('chartMonthly').getContext('2d');
-    const byGroup = (json.distributions?.by_group || []).slice().sort((a,b)=> a.group.localeCompare(b.group));
-    // 全体データから月別セッション数と参加延べ数を取得して平均を計算
-    const overallByGroup = {};
-    for (const item of (overall?.distributions?.by_group || [])) {
-      overallByGroup[item.group] = item.count;
-    }
-    const evByGroup = overall?.distributions?.events_by_group || {};
-    const src = (mode === 'compact') ? takeLast(byGroup, 6) : byGroup;
-    const labels = src.map(x => x.group);
-    const data   = src.map(x => x.count);
-    const avgData = src.map(x => {
-      const ev = evByGroup[x.group] || 0;
-      const total = overallByGroup[x.group] || 0;
-      return ev > 0 ? Math.round(total / ev * 10) / 10 : null;
-    });
-
-    if (chartMonthly) chartMonthly.destroy();
-    const gradient = chartColors.gradient(ctx);
-    chartMonthly = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          {
-            type: 'bar',
-            label: '月間参加数',
-            data,
-            backgroundColor: gradient,
-            borderColor: chartColors.primaryBorder,
-            borderWidth: 2,
-            borderRadius: 8,
-            barPercentage: 0.7,
-            categoryPercentage: 0.8,
-            yAxisID: 'yTotal',
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: '1回平均',
-            data: avgData,
-            borderColor: 'rgba(255,99,132,1)',
-            backgroundColor: 'rgba(255,99,132,0.1)',
-            borderWidth: 2,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(255,99,132,1)',
-            fill: false,
-            tension: 0.3,
-            yAxisID: 'yAvg',
-            order: 1,
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          yTotal: {
-            beginAtZero: true,
-            position: 'left',
-            ticks: { stepSize: 5, font: { size: 11, weight: '500' }, color: '#6c757d' },
-            grid: { color: 'rgba(0, 0, 0, 0.05)' },
-          },
-          yAvg: {
-            beginAtZero: true,
-            position: 'right',
-            ticks: { font: { size: 11 }, color: 'rgba(255,99,132,1)' },
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: '平均人数', color: 'rgba(255,99,132,1)', font: { size: 10 } },
-          },
-          x: {
-            grid: { display: false },
-            ticks: { autoSkip: true, maxTicksLimit: 12, font: { size: 11, weight: '500' }, color: '#6c757d' }
-          }
-        },
-        plugins: {
-          legend: { display: true, position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12, padding: 12 } },
-          tooltip: {
-            mode: 'index',
-            intersect: false,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            padding: 12,
-            cornerRadius: 8,
-            titleFont: { size: 13, weight: 'bold' },
-            bodyFont: { size: 12 }
-          }
-        }
-      }
-    });
-  }
-
-  let chartWeekday = null;
-  function buildWeekdayChart(json){
-    const ctx = document.getElementById('chartWeekday').getContext('2d');
-    const byW  = json.distributions?.by_weekday || {};
-    const labels = JP_WEEKDAYS;
-    const data   = labels.map(k => byW[k] ?? 0);
-
-    if (chartWeekday) chartWeekday.destroy();
-    const colors = [
-      'rgba(74, 144, 226, 0.8)',
-      'rgba(80, 200, 120, 0.8)',
-      'rgba(255, 165, 0, 0.8)',
-      'rgba(123, 104, 238, 0.8)',
-      'rgba(255, 99, 132, 0.8)',
-      'rgba(54, 162, 235, 0.8)',
-      'rgba(255, 206, 86, 0.8)'
-    ];
-
-    chartWeekday = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          data,
-          backgroundColor: colors,
-          borderColor: colors.map(c => c.replace('0.8', '1')),
-          borderWidth: 2,
-          borderRadius: 8,
-          barPercentage: 0.7,
-          categoryPercentage: 0.8
-        }]
-      },
-      options: {
-        ...commonBarOpts,
-        indexAxis: 'y',
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: { stepSize: 1, font: { size: 11, weight: '500' }, color: '#6c757d' },
-            grid: { color: 'rgba(0, 0, 0, 0.05)' }
-          },
-          y: {
-            grid: { display: false },
-            ticks: { font: { size: 12, weight: '600' }, color: '#2c3e50' }
-          }
-        }
-      }
-    });
-  }
-
-  let chartHour = null;
-  function buildHourChart(json, mode='compact'){
-    const ctx = document.getElementById('chartHour').getContext('2d');
-    const byH = json.distributions?.by_hour || {};
-
-    let labels, data;
-    if (mode === 'compact') {
-      const buckets = [
-        {label:'深夜 (0-5)',  from:0,  to:5},
-        {label:'朝 (6-11)',   from:6,  to:11},
-        {label:'昼 (12-17)',  from:12, to:17},
-        {label:'夜 (18-23)',  from:18, to:23},
-      ];
-      const agg = bucketHours(byH, buckets);
-      labels = agg.map(x=>x.label);
-      data   = agg.map(x=>x.count);
-    } else {
-      labels = HOUR_KEYS.map(h => h + '時');
-      data   = HOUR_KEYS.map(k => byH[k] ?? 0);
-    }
-
-    if (chartHour) chartHour.destroy();
-    const gradient = chartColors.gradient(ctx);
-    chartHour = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          data,
-          backgroundColor: gradient,
-          borderColor: chartColors.primaryBorder,
-          borderWidth: 2,
-          borderRadius: 8,
-          barPercentage: 0.7,
-          categoryPercentage: 0.8
-        }]
-      },
-      options: {
-        ...commonBarOpts,
-        scales: {
-          x: {
-            grid: { display: false },
-            ticks: { autoSkip: mode === 'full', maxRotation: 0, font: { size: 11, weight: '500' }, color: '#6c757d' }
-          },
-          y: {
-            beginAtZero: true,
-            ticks: { stepSize: 1, font: { size: 11, weight: '500' }, color: '#6c757d' },
-            grid: { color: 'rgba(0, 0, 0, 0.05)' }
-          }
-        }
-      }
-    });
   }
 
   function buildDates(json){
@@ -900,28 +590,9 @@
 
   async function main(){
     try{
-      const overallUrl = "{{ url_for('analytics.analytics_overall', group='month') }}";
-      const [res, overallRes] = await Promise.all([
-        fetch(apiUrl, { credentials: 'same-origin' }),
-        fetch(overallUrl, { credentials: 'same-origin' }),
-      ]);
+      const res = await fetch(apiUrl, { credentials: 'same-origin' });
       if(!res.ok) throw new Error('API error: ' + res.status);
       const json = await res.json();
-      const overall = overallRes.ok ? await overallRes.json() : null;
-
-      buildMonthlyChart(json, overall, 'compact');
-      buildWeekdayChart(json);
-      buildHourChart(json, 'compact');
-
-      const btnMonthlyCompact = document.getElementById('btnMonthlyCompact');
-      const btnMonthlyFull = document.getElementById('btnMonthlyFull');
-      btnMonthlyCompact.onclick = ()=> { buildMonthlyChart(json, overall, 'compact'); toggleButtons(btnMonthlyCompact, btnMonthlyFull); };
-      btnMonthlyFull.onclick = ()=> { buildMonthlyChart(json, overall, 'full'); toggleButtons(btnMonthlyFull, btnMonthlyCompact); };
-
-      const btnHourCompact = document.getElementById('btnHourCompact');
-      const btnHourFull = document.getElementById('btnHourFull');
-      btnHourCompact.onclick = ()=> { buildHourChart(json, 'compact'); toggleButtons(btnHourCompact, btnHourFull); };
-      btnHourFull.onclick = ()=> { buildHourChart(json, 'full'); toggleButtons(btnHourFull, btnHourCompact); };
 
     }catch(err){
       console.error(err);
@@ -958,6 +629,33 @@
     document.getElementById('kpiRetained').textContent      = r.retained ?? '-';
     document.getElementById('kpiRetentionTotal').textContent= r.total ?? '-';
 
+    // 新規定着率 ドーナツチャート
+    if ((r.total ?? 0) > 0) {
+      const retained   = r.retained ?? 0;
+      const notRetained = (r.total ?? 0) - retained;
+      new Chart(document.getElementById('chartRetentionRate').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: ['定着', '未定着'],
+          datasets: [{
+            data: [retained, notRetained],
+            backgroundColor: ['#50C878', '#dee2e6'],
+            borderWidth: 0,
+          }]
+        },
+        options: {
+          responsive: false,
+          cutout: '70%',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}人` }
+            }
+          }
+        }
+      });
+    }
+
     document.getElementById('kpiActiveRate').textContent    = a.rate ?? '-';
     document.getElementById('kpiActiveUsers').textContent   = a.active ?? '-';
     document.getElementById('kpiActiveTotal').textContent   = a.total ?? '-';
@@ -969,32 +667,6 @@
     const monthlyFiltered = monthly.length > 1 ? monthly.slice(1) : monthly;
     const labels = monthlyFiltered.map(x => x.month);
 
-    // アクティブ率グラフ
-    new Chart(document.getElementById('chartActiveRate').getContext('2d'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: 'アクティブ率（参加経験者比） (%)',
-          data: monthlyFiltered.map(x => x.active_rate),
-          borderColor: 'rgba(74,144,226,1)',
-          backgroundColor: 'rgba(74,144,226,0.12)',
-          borderWidth: 2,
-          pointRadius: 4,
-          fill: true,
-          tension: 0.3,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          y: { min: 0, max: 100, ticks: { callback: v => v + '%', font: {size:11}, color:'#6c757d' }, grid: { color:'rgba(0,0,0,0.05)' } },
-          x: { grid: { display: false }, ticks: { font:{size:11}, color:'#6c757d' } }
-        },
-        plugins: { legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ctx.parsed.y + '%' }, backgroundColor:'rgba(0,0,0,0.8)', padding:10, cornerRadius:8 } }
-      }
-    });
-
     // 新規メンバー推移グラフ（コンボ：棒＋累積折れ線）
     // 最初の月は履歴開始月のため既存メンバーが一括計上される → 除外
     const monthlyNm = monthly.length > 1 ? monthly.slice(1) : monthly;
@@ -1002,6 +674,7 @@
     const nmLabels = nmRecent.map(x => x.month);
     const nmNew    = nmRecent.map(x => x.new_members);
     const nmCumul  = nmRecent.map(x => x.cumulative_users);
+    const nmNames  = nmRecent.map(x => x.new_member_names || []);
 
     // サマリー計算
     const nm1  = monthlyNm[monthlyNm.length - 1]?.new_members ?? 0;
@@ -1044,7 +717,18 @@
         },
         plugins: {
           legend: { display: false },
-          tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding:10, cornerRadius:8 }
+          tooltip: {
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            padding: 12,
+            cornerRadius: 8,
+            callbacks: {
+              label: ctx => ` 新規: ${ctx.parsed.y}人`,
+              afterLabel: ctx => {
+                const names = nmNames[ctx.dataIndex] || [];
+                return names.length ? names.join(', ') : '';
+              }
+            }
+          }
         }
       }
     });
@@ -1065,6 +749,33 @@
     document.getElementById('kpiRepeatRate').textContent = o.rate ?? '-';
     document.getElementById('kpiRepeatUsers').textContent = o.repeat_users ?? '-';
     document.getElementById('kpiTotalUsers').textContent = o.total_users ?? '-';
+
+    // 全体リピート率 ドーナツチャート
+    if (o.total_users > 0) {
+      const repeatUsers = o.repeat_users ?? 0;
+      const onceUsers   = (o.total_users ?? 0) - repeatUsers;
+      new Chart(document.getElementById('chartRepeatRate').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: ['リピーター', '初回のみ'],
+          datasets: [{
+            data: [repeatUsers, onceUsers],
+            backgroundColor: ['#50C878', '#dee2e6'],
+            borderWidth: 0,
+          }]
+        },
+        options: {
+          responsive: false,
+          cutout: '70%',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}人` }
+            }
+          }
+        }
+      });
+    }
 
     const monthly = json.monthly || [];
     if (monthly.length > 0) {
@@ -1210,136 +921,6 @@
     document.getElementById('myStatsAccessTable').classList.remove('d-none');
   } catch(e) {
     document.getElementById('myStatsAccessLoading').textContent = '取得に失敗しました';
-  }
-})();
-</script>
-
-<script>
-(async function(){
-  function linReg(data) {
-    const n = data.length;
-    if (n < 2) return { line: data.slice(), slope: 0 };
-    const xs = data.map((_, i) => i);
-    const sumX  = xs.reduce((a, b) => a + b, 0);
-    const sumY  = data.reduce((a, b) => a + b, 0);
-    const sumXY = xs.reduce((s, x, i) => s + x * data[i], 0);
-    const sumXX = xs.reduce((s, x) => s + x * x, 0);
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
-    return { line: xs.map(x => Math.round((slope * x + intercept) * 10) / 10), slope };
-  }
-
-  try {
-    const res = await fetch("{{ url_for('analytics.analytics_overall', group='month') }}", { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('API error');
-    const json = await res.json();
-
-    // 月次参加数（最初の月は履歴開始月のため除外）
-    const byGroup = (json.distributions?.by_group || [])
-      .sort((a, b) => a.group.localeCompare(b.group))
-      .slice(1);
-
-    const labels = byGroup.map(x => x.group);
-    const counts = byGroup.map(x => x.count);
-
-    // サマリー計算
-    const last  = counts[counts.length - 1] ?? 0;
-    const prev  = counts[counts.length - 2] ?? 0;
-    const avg3  = counts.slice(-3).reduce((s, v) => s + v, 0) / Math.min(3, counts.length);
-    const avg6  = counts.slice(-6).reduce((s, v) => s + v, 0) / Math.min(6, counts.length);
-    const mom   = last - prev;
-    const { line: trendLine, slope } = linReg(counts);
-
-    document.getElementById('trendAvg3').textContent = Math.round(avg3) + '人';
-    document.getElementById('trendAvg6').textContent = Math.round(avg6) + '人';
-    const momEl = document.getElementById('trendMoM');
-    momEl.textContent = (mom >= 0 ? '+' : '') + mom + '人';
-    momEl.style.color = mom > 0 ? '#50C878' : mom < 0 ? '#e74c3c' : '#6c757d';
-
-    const dirEl = document.getElementById('trendDir');
-    if (slope > 0.5)       { dirEl.textContent = '↑ 増加傾向'; dirEl.style.color = '#50C878'; }
-    else if (slope < -0.5) { dirEl.textContent = '↓ 減少傾向'; dirEl.style.color = '#e74c3c'; }
-    else                   { dirEl.textContent = '→ 横ばい';   dirEl.style.color = '#6c757d'; }
-
-    // トレンドチャート（棒 + 回帰直線）
-    new Chart(document.getElementById('chartTrend').getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          {
-            type: 'bar',
-            label: '参加人数',
-            data: counts,
-            backgroundColor: 'rgba(74,144,226,0.65)',
-            borderColor: 'rgba(74,144,226,1)',
-            borderWidth: 1,
-            borderRadius: 4,
-            barPercentage: 0.7,
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: 'トレンド',
-            data: trendLine,
-            borderColor: 'rgba(255,99,132,1)',
-            borderWidth: 2,
-            borderDash: [6, 3],
-            pointRadius: 0,
-            fill: false,
-            tension: 0,
-            order: 1,
-          }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true, ticks:{ stepSize:5, font:{size:11}, color:'#6c757d' }, grid:{ color:'rgba(0,0,0,0.05)' } },
-          x: { grid:{ display:false }, ticks:{ font:{size:11}, color:'#6c757d' } }
-        },
-        plugins: {
-          legend: { display:true, position:'bottom', labels:{ font:{size:11}, boxWidth:12, padding:12 } },
-          tooltip: { backgroundColor:'rgba(0,0,0,0.8)', padding:10, cornerRadius:8 }
-        }
-      }
-    });
-
-    // 前月比増減チャート
-    const deltaLabels = labels.slice(1);
-    const deltaData   = counts.slice(1).map((v, i) => v - counts[i]);
-    new Chart(document.getElementById('chartDelta').getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels: deltaLabels,
-        datasets: [{
-          label: '前月比',
-          data: deltaData,
-          backgroundColor: deltaData.map(v => v >= 0 ? 'rgba(80,200,120,0.75)' : 'rgba(231,76,60,0.75)'),
-          borderColor:     deltaData.map(v => v >= 0 ? 'rgba(80,200,120,1)'    : 'rgba(231,76,60,1)'),
-          borderWidth: 1,
-          borderRadius: 4,
-          barPercentage: 0.7,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          y: { ticks:{ stepSize:5, font:{size:11}, color:'#6c757d' }, grid:{ color:'rgba(0,0,0,0.05)' } },
-          x: { grid:{ display:false }, ticks:{ font:{size:11}, color:'#6c757d' } }
-        },
-        plugins: {
-          legend: { display:false },
-          tooltip: {
-            backgroundColor:'rgba(0,0,0,0.8)', padding:10, cornerRadius:8,
-            callbacks: { label: ctx => (ctx.parsed.y >= 0 ? '+' : '') + ctx.parsed.y + '人' }
-          }
-        }
-      }
-    });
-
-  } catch(e) {
-    console.error('参加トレンド取得失敗:', e);
   }
 })();
 </script>
