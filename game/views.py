@@ -3773,7 +3773,7 @@ def create_pairings_skilled():
         dynamodb_client = boto3.client('dynamodb', region_name='ap-northeast-1')
         tx_items = []
 
-        _training_menus = ["ドライブ", "クリア"]
+        _training_menus = ["ドライブ", "クリア", "ステップ"]
         training_menu = random.choice(_training_menus)
 
         tx_items.append({

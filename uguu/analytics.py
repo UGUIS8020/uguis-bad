@@ -352,14 +352,42 @@ def analytics_member_health():
     # 参加経験者全員（固定分母）
     total_participants = len(user_dates)
 
+    # 月ごとの新規UID一覧を収集
+    monthly_new_uids = {}
+    cumulative_users = set()
+    for m in months_sorted:
+        users_this_month = monthly_users[m]
+        cumulative_users |= users_this_month
+        monthly_new_uids[m] = [uid for uid in users_this_month if user_first_month.get(uid) == m]
+
+    # 全新規UIDをbatch_get_itemで名前取得
+    all_new_uids = list({uid for uids in monthly_new_uids.values() for uid in uids})
+    uid_to_name = {}
+    if all_new_uids:
+        users_table_name = "bad-users"
+        region = os.getenv("AWS_REGION", "ap-northeast-1")
+        ddb = boto3.resource("dynamodb", region_name=region)
+        # batch_get_item は100件上限なので分割
+        for i in range(0, len(all_new_uids), 100):
+            chunk = all_new_uids[i:i+100]
+            resp = ddb.batch_get_item(RequestItems={
+                users_table_name: {
+                    "Keys": [{"user#user_id": uid} for uid in chunk],
+                    "ProjectionExpression": "#uid, display_name",
+                    "ExpressionAttributeNames": {"#uid": "user#user_id"},
+                }
+            })
+            for item in resp.get("Responses", {}).get(users_table_name, []):
+                uid_to_name[item["user#user_id"]] = item.get("display_name", "名前なし")
+
     monthly_data = []
     cumulative_users = set()
     for m in months_sorted:
         users_this_month = monthly_users[m]
         cumulative_users |= users_this_month
 
-        # 新規（このサークル初参加）
-        new_this_month = sum(1 for uid in users_this_month if user_first_month.get(uid) == m)
+        new_uids = monthly_new_uids[m]
+        new_names = [uid_to_name.get(uid, uid) for uid in new_uids]
 
         # アクティブ率（参加経験者全員のうち当月参加者）
         act_rate = round(len(users_this_month) / total_participants * 100, 1) if total_participants else 0
@@ -370,7 +398,8 @@ def analytics_member_health():
             "cumulative_users": len(cumulative_users),
             "total_participants": total_participants,
             "active_rate": act_rate,
-            "new_members": new_this_month,
+            "new_members": len(new_uids),
+            "new_member_names": new_names,
         })
 
     return jsonify({
