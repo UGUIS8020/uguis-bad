@@ -167,6 +167,7 @@ def court():
             ).get("Item", {}) or {}
             cycle_index = int(pairing_meta.get("cycle_index", 0))
             last_mode = pairing_meta.get("last_mode", None)
+            session_round = int(pairing_meta.get("round_count", 0))
             if cycle_index == 1:
                 next_mode = "full_random"
             elif cycle_index == 2:
@@ -177,6 +178,7 @@ def court():
             cycle_index = 0
             last_mode = None
             next_mode = "random"
+            session_round = 0
 
         # --- 進行中試合関連（INFO最小、詳細はDEBUG） ---
         has_ongoing = has_ongoing_matches()
@@ -206,13 +208,16 @@ def court():
         # ★ 管理者用：前回試合修正ボタン表示判定 / training_menu 取得
         last_match_id_for_correction = None
         training_menu = None
+        match_started_at = None
         try:
             _meta_table = current_app.dynamodb.Table("bad-game-matches")
             meta_item = _meta_table.get_item(Key={"match_id": "meta#current"}).get("Item", {})
             if meta_item.get("status") == "idle" and getattr(current_user, 'administrator', False):
                 last_match_id_for_correction = meta_item.get("last_match_id")
-            if meta_item.get("status") == "playing" and meta_item.get("pairing_mode") == "skilled_ai":
-                training_menu = meta_item.get("training_menu")
+            if meta_item.get("status") == "playing":
+                match_started_at = meta_item.get("started_at")
+                if meta_item.get("pairing_mode") == "skilled_ai":
+                    training_menu = meta_item.get("training_menu")
         except Exception:
             pass
 
@@ -257,6 +262,8 @@ def court():
             next_mode=next_mode,
             last_match_id_for_correction=last_match_id_for_correction,
             training_menu=training_menu,
+            match_started_at=match_started_at,
+            session_round=session_round,
         )
 
     except Exception:
@@ -1805,6 +1812,13 @@ def start_next_match():
             ExpressionAttributeValues={":idle": "idle", ":now": now_jst},
         )
 
+        # 5. round_count を -1（壊れた試合はカウントしない）
+        meta_table.update_item(
+            Key={"match_id": "meta#pairing"},
+            UpdateExpression="ADD round_count :minus_one",
+            ExpressionAttributeValues={":minus_one": -1},
+        )
+
         current_app.logger.info(
             "[困ったとき] リセット完了: playing→pending=%d人, 結果削除=%d件",
             reset_count, deleted_results
@@ -2544,7 +2558,7 @@ def reset_participants():
             # (C) meta#pairing の cycle_index を 0 にリセット、last_mode も削除
             meta_table.update_item(
                 Key={"match_id": "meta#pairing"},
-                UpdateExpression="SET cycle_index = :zero REMOVE last_mode",
+                UpdateExpression="SET cycle_index = :zero, round_count = :zero REMOVE last_mode",
                 ExpressionAttributeValues={":zero": 0},
             )
             current_app.logger.info("[reset] cycle_index を 0、last_mode をリセットしました")
@@ -3162,48 +3176,83 @@ def game_view():
 @bp_game.route('/reset_ongoing_matches', methods=['POST'])
 @login_required
 def reset_ongoing_matches():
-    """管理者が進行中の試合を強制リセット"""
+    """ペアリングを破棄して全員を待機状態に戻す（組み合わせ変更用）"""
     if not current_user.administrator:
         flash('管理者権限が必要です。', 'error')
         return redirect(url_for('game.court'))
-    
+
     try:
-        match_table = current_app.dynamodb.Table("bad-game-match_entries")
-        
-        # playing状態のエントリーを取得
-        response = match_table.scan(
+        now = datetime.now(JST).isoformat()
+        entry_table = current_app.dynamodb.Table("bad-game-match_entries")
+        meta_table  = current_app.dynamodb.Table("bad-game-matches")
+
+        # 1) playing 全員を pending に戻す（コート・チーム情報も削除）
+        response = entry_table.scan(
             FilterExpression=Attr("entry_status").eq("playing")
         )
-        
         playing_entries = response.get("Items", [])
         reset_count = 0
-        now = datetime.now(JST).isoformat()
-        
-        # 各エントリーをpendingに戻す
         for entry in playing_entries:
             try:
-                match_table.update_item(
-                    Key={
-                        'user_id': entry['user_id'],
-                        'joined_at': entry['joined_at']
-                    },
-                    UpdateExpression="SET entry_status=:pending, updated_at=:now",
-                    ExpressionAttributeValues={
-                        ':pending': 'pending',
-                        ":now": now,
-                    }
+                entry_table.update_item(
+                    Key={'entry_id': entry['entry_id']},
+                    UpdateExpression=(
+                        "SET entry_status=:pending, updated_at=:now "
+                        "REMOVE match_id, court_number, team"
+                    ),
+                    ExpressionAttributeValues={':pending': 'pending', ':now': now},
                 )
                 reset_count += 1
-            except Exception as update_error:
-                current_app.logger.error(f"エントリーリセット失敗 {entry.get('user_id')}: {update_error}")
-        
-        flash(f'進行中の試合をリセットしました。{reset_count}人をエントリー待ちに戻しました。', 'warning')
-        current_app.logger.info(f"管理者による試合リセット: {reset_count}人")
-        
+            except Exception as e:
+                current_app.logger.error(f"[pairing_cancel] entry reset failed {entry.get('entry_id')}: {e}")
+
+        # 2) meta#current を idle に戻す
+        meta_table.update_item(
+            Key={"match_id": "meta#current"},
+            UpdateExpression=(
+                "SET #st = :idle REMOVE current_match_id, court_count, "
+                "started_at, pairing_mode, waiting_players, training_menu"
+            ),
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={":idle": "idle"},
+        )
+
+        # 3) round_count を -1（キャンセル分を戻す）
+        meta_table.update_item(
+            Key={"match_id": "meta#pairing"},
+            UpdateExpression="ADD round_count :minus_one",
+            ExpressionAttributeValues={":minus_one": -1},
+        )
+
+        # 4) rest_queue 復元（キャンセルされた待機者をキューの先頭に戻す）
+        try:
+            rest_queue_pk = _rest_queue_pk("rest_queue")
+            rq_resp = meta_table.get_item(Key={"match_id": rest_queue_pk}, ConsistentRead=True)
+            rq_item = rq_resp.get("Item") or {}
+            prev_waiters = rq_item.get("last_waiters", [])
+            current_queue = list(rq_item.get("queue", []))
+            if prev_waiters:
+                restored_queue = [uid for uid in prev_waiters if uid not in current_queue] + current_queue
+                _save_rest_queue_optimistic(
+                    meta_table,
+                    queue_key="rest_queue",
+                    queue=restored_queue,
+                    generation=int(rq_item.get("generation", 1)),
+                    prev_version=int(rq_item.get("version", 0)),
+                    cycle_started_at=rq_item.get("cycle_started_at"),
+                    last_waiters=prev_waiters,
+                )
+                current_app.logger.info("[pairing_cancel] rest_queue 復元: %s をキュー先頭に戻しました", prev_waiters)
+        except Exception as e:
+            current_app.logger.warning(f"[pairing_cancel] rest_queue 復元失敗: {e}")
+
+        current_app.logger.info("[pairing_cancel] %d人を待機状態に戻しました", reset_count)
+        flash(f'ペアリングを破棄しました。{reset_count}人を待機状態に戻しました。', 'warning')
+
     except Exception as e:
-        current_app.logger.error(f"試合リセットエラー: {str(e)}")
-        flash('試合リセット中にエラーが発生しました。', 'error')
-    
+        current_app.logger.error(f"[pairing_cancel] エラー: {e}", exc_info=True)
+        flash('リセット中にエラーが発生しました。', 'error')
+
     return redirect(url_for('game.court'))
 
 # スコア入力完了時の処理を更新する関数（既存のスコア入力処理に追加）
@@ -3560,12 +3609,13 @@ def create_pairings():
         # =========================================================
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
-            UpdateExpression="SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now",
+            UpdateExpression="SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now ADD round_count :one",
             ExpressionAttributeValues={
                 ":ci": next_cycle_index,
                 ":m": mode,
                 ":mid": str(match_id),
                 ":now": now_jst,
+                ":one": 1,
             }
         )
 
@@ -3838,11 +3888,12 @@ def create_pairings_skilled():
         # 8) last_modeを"skilled_ai"で保存（cycle_indexは進めない）
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
-            UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now",
+            UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now ADD round_count :one",
             ExpressionAttributeValues={
                 ":m": "skilled_ai",
                 ":mid": str(match_id),
                 ":now": now_jst,
+                ":one": 1,
             }
         )
 
