@@ -382,7 +382,7 @@
         <i class="fas fa-users kpi-icon"></i>
         <div class="kpi-label">アクティブ率</div>
         <div class="kpi-value"><span id="kpiActiveRate">-</span><small style="font-size:1rem;">%</small> <small style="font-size:1rem;">(<span id="kpiActiveUsers">-</span>人)</small></div>
-        <div class="kpi-subtitle">3ヶ月以内に2回以上参加 / 参加経験者全員 <span id="kpiActiveTotal"></span></div>
+        <div class="kpi-subtitle">3ヶ月以内に3回以上参加 / 参加経験者全員 <span id="kpiActiveTotal"></span></div>
       </div>
     </div>
 
@@ -419,8 +419,19 @@
     </div>
   </div>
 
-  <!-- チャート セクション -->
+  <!-- アクティブ率推移グラフ -->
   <div class="row g-3 mb-4">
+    <div class="col-lg-12">
+      <div class="card chart-card">
+        <div class="chart-title">
+          <i class="fas fa-users"></i>
+          <span>月次アクティブ率推移（直近3ヶ月に3回以上参加 ÷ 累計参加者）</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="chartRollingActive"></canvas>
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -726,6 +737,54 @@
               afterLabel: ctx => {
                 const names = nmNames[ctx.dataIndex] || [];
                 return names.length ? names.join(', ') : '';
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // 月次アクティブ率推移グラフ
+    const arData = monthlyFiltered.slice(-12);
+    const arLabels = arData.map(x => x.month);
+    const arRates  = arData.map(x => x.rolling_active_rate ?? 0);
+    new Chart(document.getElementById('chartRollingActive').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: arLabels,
+        datasets: [{
+          label: 'アクティブ率',
+          data: arRates,
+          borderColor: '#667eea',
+          backgroundColor: 'rgba(102,126,234,0.12)',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: '#667eea',
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true, max: 100,
+            ticks: { callback: v => v + '%', font: {size:11}, color: '#6c757d' },
+            grid: { color: 'rgba(0,0,0,0.05)' },
+          },
+          x: { grid: {display:false}, ticks: { font:{size:11}, color:'#6c757d' } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            padding: 12,
+            cornerRadius: 8,
+            callbacks: {
+              label: ctx => ` アクティブ率: ${ctx.parsed.y}%`,
+              afterLabel: ctx => {
+                const d = arData[ctx.dataIndex];
+                return d ? ` ${d.rolling_active ?? '-'}人 / ${d.rolling_active_total ?? '-'}人` : '';
               }
             }
           }

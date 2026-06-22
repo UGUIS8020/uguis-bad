@@ -333,11 +333,11 @@ def analytics_member_health():
     retention_rate = round(retained_new / total_users * 100, 1) if total_users else 0
 
     # --- アクティブ率 ---
-    # 直近3ヶ月以内に2回以上参加したユーザー / 直近6ヶ月メンバー
+    # 直近3ヶ月以内に3回以上参加したユーザー / 直近6ヶ月メンバー
     active_users = sum(
         1 for dates in user_dates.values()
-        if _recent_count(dates) >= 2
-        and sum(1 for d in dates if d >= three_months_ago) >= 2
+        if _recent_count(dates) >= 3
+        and sum(1 for d in dates if d >= three_months_ago) >= 3
     )
     active_rate = round(active_users / total_users * 100, 1) if total_users else 0
 
@@ -380,6 +380,15 @@ def analytics_member_health():
             for item in resp.get("Responses", {}).get(users_table_name, []):
                 uid_to_name[item["user#user_id"]] = item.get("display_name", "名前なし")
 
+    def _month_minus(m, n):
+        """YYYY-MM から n ヶ月前の YYYY-MM を返す"""
+        year, month = int(m[:4]), int(m[5:7])
+        month -= n
+        while month <= 0:
+            month += 12
+            year -= 1
+        return f"{year:04d}-{month:02d}"
+
     monthly_data = []
     cumulative_users = set()
     for m in months_sorted:
@@ -392,12 +401,31 @@ def analytics_member_health():
         # アクティブ率（参加経験者全員のうち当月参加者）
         act_rate = round(len(users_this_month) / total_participants * 100, 1) if total_participants else 0
 
+        # 月次アクティブ率（KPIと同ロジック、月ごとにスライド）
+        # 分母: その月を含む過去6ヶ月に2回以上参加した人
+        # 分子: その月を含む過去3ヶ月に3回以上参加 かつ 当月にも参加した人
+        win3_start = _month_minus(m, 2)
+        win6_start = _month_minus(m, 5)
+        window_total = sum(
+            1 for dates in user_dates.values()
+            if sum(1 for d in dates if win6_start <= d.strftime("%Y-%m") <= m) >= 2
+        )
+        rolling_active = sum(
+            1 for dates in user_dates.values()
+            if sum(1 for d in dates if win3_start <= d.strftime("%Y-%m") <= m) >= 3
+            and any(d.strftime("%Y-%m") == m for d in dates)
+        )
+        rolling_active_rate = round(rolling_active / window_total * 100, 1) if window_total else 0
+
         monthly_data.append({
             "month": m,
             "active_users": len(users_this_month),
             "cumulative_users": len(cumulative_users),
             "total_participants": total_participants,
             "active_rate": act_rate,
+            "rolling_active_rate": rolling_active_rate,
+            "rolling_active": rolling_active,
+            "rolling_active_total": window_total,
             "new_members": len(new_uids),
             "new_member_names": new_names,
         })
@@ -722,9 +750,19 @@ def match_history():
                 "played_at": item.get("played_at") or item.get("created_at") or "",
             })
 
-        # match_id 降順にソート
+        def _is_test_match(courts):
+            for c in courts:
+                for p in c.get("team_a", []) + c.get("team_b", []):
+                    name = p.get("display_name", "") if isinstance(p, dict) else str(p)
+                    if "テスト" in name:
+                        return True
+            return False
+
+        # match_id 降順にソート（テストデータ除外）
         result_list = []
         for mid, courts in sorted(grouped.items(), reverse=True):
+            if _is_test_match(courts):
+                continue
             courts.sort(key=lambda x: x["court_number"])
             result_list.append({"match_id": mid, "courts": courts})
 

@@ -320,7 +320,7 @@
                             {% if plist %}
                                 <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
                                 {% for p in plist[:7] %}
-                                    {% if p.join_count == 1 %}
+                                    {% if (p.join_count or 0) == 0 %}
                                         {% set ring_color = '#2ecc71' %}
                                     {% elif p.gender == 'female' %}
                                         {% set ring_color = '#e74c3c' %}
