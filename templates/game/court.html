@@ -173,14 +173,25 @@
         {% if current_user.administrator %}
         <div class="admin-buttons-row d-flex justify-content-end gap-2 flex-wrap">
             <!-- 練習おわりボタン -->
-            <form method="POST" action="{{ url_for('game.reset_participants') }}" 
+            <form method="POST" action="{{ url_for('game.reset_participants') }}"
                   onsubmit="return confirm('本当に全員をリセットしますか？');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-danger fw-bold px-4 py-2">
                     練習おわり
                 </button>
             </form>
-            
+
+            <!-- ペアリング破棄ボタン（試合進行中のみ） -->
+            {% if has_ongoing_matches %}
+            <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
+                  onsubmit="return confirm('ペアリングを破棄して全員を待機状態に戻しますか？\n\nスコアは記録されません。')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-warning fw-bold px-4 py-2">
+                    <i class="fa-solid fa-rotate-left"></i> ペアリング破棄
+                </button>
+            </form>
+            {% endif %}
+
             <!-- 困ったときのボタン -->
             <form method="POST" action="{{ url_for('game.start_next_match') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -201,9 +212,14 @@
         {% endif %}
 
                 <div class="mb-3">
-            <h1 class="mb-2 text-center" style="font-size: 2.5rem; font-weight: 900; letter-spacing: 2px;">
-                <i class="fas fa-shuttlecock-cock" style="color: #667eea;"></i> 
-                 L'ARENA UGUIS
+            <h1 class="mb-2 text-center d-flex justify-content-center align-items-center gap-3" style="font-size: 2.5rem; font-weight: 900; letter-spacing: 2px;">
+                <i class="fas fa-shuttlecock-cock" style="color: #667eea;"></i>
+                L'ARENA UGUIS
+                {% if has_ongoing_matches and session_round %}
+                <span class="badge bg-dark" style="font-size: 1rem; font-weight: 700; letter-spacing: 0;">
+                    第{{ session_round }}ゲーム
+                </span>
+                {% endif %}
             </h1>
         
             <!-- 自分のステータス表示（中央） -->
@@ -416,17 +432,6 @@
                         </span>
                         {% endif %}
                     </div>
-
-                {% if has_ongoing_matches and current_user.administrator %}
-                <form method="POST" action="{{ url_for('game.reset_ongoing_matches') }}"
-                
-                        onsubmit="return confirm('進行中の試合をリセットして、全プレイヤーをエントリー待ちに戻しますか？\n\nこの操作は取り消せません。')">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-warning">
-                    <i class="fa-solid fa-refresh"></i> 強制リセット
-                    </button>
-                </form>
-                {% endif %}
 
                 </div>
             </div>
