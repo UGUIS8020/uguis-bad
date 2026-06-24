@@ -894,6 +894,30 @@ def index():
         # =========================================================
         process_start = time.time()
 
+        # 初参加判定: 全ユーザーの最初参加日を履歴テーブルから取得
+        user_min_date = {}
+        try:
+            history_table = current_app.dynamodb.Table("bad-users-history")
+            h_kwargs = {
+                'FilterExpression': Attr('status').eq('registered'),
+                'ProjectionExpression': 'user_id, #d',
+                'ExpressionAttributeNames': {'#d': 'date'},
+            }
+            while True:
+                h_resp = history_table.scan(**h_kwargs)
+                for item in h_resp.get('Items', []):
+                    uid = item.get('user_id')
+                    d = item.get('date', '')
+                    if uid and d:
+                        if uid not in user_min_date or d < user_min_date[uid]:
+                            user_min_date[uid] = d
+                lek = h_resp.get('LastEvaluatedKey')
+                if not lek:
+                    break
+                h_kwargs['ExclusiveStartKey'] = lek
+        except Exception as e:
+            current_app.logger.warning('[index] 初参加判定スキャン失敗: %s', e)
+
         def _pick_profile_url(user: dict):
             url = (
                 user.get("profile_image_url")
@@ -927,16 +951,19 @@ def index():
                 if not user:
                     continue
 
+                uid_val = user.get("user#user_id")
+                schedule_date = schedule.get("date", "")
                 participants_info.append({
-                    "user_id": user.get("user#user_id"),
+                    "user_id": uid_val,
                     "display_name": user.get("display_name", "不明"),
                     "profile_image_url": _pick_profile_url(user),
                     "is_admin": bool(user.get("administrator")),
-                    "role": user.get("role"),        # ★ 追加：ロール情報を取得
-                    "team_id": user.get("team_id"),  # ★ 追加：所属チームIDを取得
-                    "organization": user.get("organization"), # ★ 追加：組織名（鶯など）を取得
+                    "role": user.get("role"),
+                    "team_id": user.get("team_id"),
+                    "organization": user.get("organization"),
                     "join_count": _to_int(user.get("practice_count"), 0),
                     "gender": user.get("gender", ""),
+                    "is_first_timer": user_min_date.get(uid_val) == schedule_date,
                 })
 
             participants_info.sort(
@@ -1156,6 +1183,32 @@ def schedule_detail(schedule_id, date):
             {**schedule, 'participants': schedule.get('tara_participants') or []}
         )
 
+        # 初参加判定: このスケジュール日より前の参加記録がないユーザーを特定
+        first_timer_ids = set()
+        try:
+            participant_ids = {p['user_id'] for p in participants_info if p.get('user_id')}
+            if participant_ids:
+                history_table = app.dynamodb.Table("bad-users-history")
+                past_participants = set()
+                scan_kwargs = {
+                    'FilterExpression': (Attr('date').lt(date) | Attr('event_date').lt(date))
+                                        & Attr('status').eq('registered'),
+                    'ProjectionExpression': 'user_id',
+                }
+                while True:
+                    resp = history_table.scan(**scan_kwargs)
+                    for item in resp.get('Items', []):
+                        uid = item.get('user_id')
+                        if uid in participant_ids:
+                            past_participants.add(uid)
+                    lek = resp.get('LastEvaluatedKey')
+                    if not lek:
+                        break
+                    scan_kwargs['ExclusiveStartKey'] = lek
+                first_timer_ids = participant_ids - past_participants
+        except Exception as e:
+            app.logger.warning(f'[first_timer] 判定失敗: {e}')
+
         # 参加状態
         is_joined = current_user.is_authenticated and current_user.id in schedule.get('participants', [])
         is_tara   = current_user.is_authenticated and current_user.id in schedule.get('tara_participants', [])
@@ -1215,6 +1268,7 @@ def schedule_detail(schedule_id, date):
             schedule=schedule,
             participants_info=participants_info,
             tara_participants_info=tara_participants_info,
+            first_timer_ids=first_timer_ids,
             is_joined=is_joined,
             is_tara=is_tara,
             is_full=is_full,

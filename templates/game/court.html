@@ -240,6 +240,7 @@
                     <div class="d-flex flex-column align-items-center gap-3">
                     {% if has_ongoing_matches and last_mode == "skilled_ai" and training_menu %}
                     {% set training_links = {"ドライブ": "https://www.youtube.com/watch?v=n0ofEDUoOWA&t=57", "クリア": "https://www.youtube.com/shorts/TOw1Uy9PYQg", "ステップ": "https://www.youtube.com/shorts/yrUB-w62m9s"} %}
+                    {% set training_extra_links = {"クリア": ["https://www.instagram.com/reel/DZPiuzZx4qY/", "https://www.instagram.com/reel/DXHwJrRkgbc/"]} %}
                     <div class="alert alert-danger text-center mb-0 w-100" style="padding-top: 2.25rem; padding-bottom: 2.25rem;">
                         今回はトレーニングモードです。<br>
                         サブコートで<strong>「{{ training_menu }}」</strong>練習をしてください。
@@ -267,6 +268,16 @@
                                                  margin-left:4px;"></span>
                                 </span>
                             </a>
+                            {% if training_extra_links.get(training_menu) %}
+                            <div class="mt-2 d-flex gap-2 justify-content-center flex-wrap">
+                                {% for extra_url in training_extra_links.get(training_menu) %}
+                                <a href="{{ extra_url }}" target="_blank" rel="noopener"
+                                   class="btn btn-outline-light btn-sm">
+                                    <i class="fab fa-instagram me-1"></i>参考動画{{ loop.index }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                         {% endif %}
                     </div>
