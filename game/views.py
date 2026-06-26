@@ -842,6 +842,72 @@ def entry():
     match_table.put_item(Item=entry_item)
     current_app.logger.info(f"[ENTRY] 新規参加登録完了: {entry_item['entry_id']}, 名前: {display_name}")
 
+    # ── 出席記録（bad-users-history）を自動作成 ──────────────────────────
+    try:
+        today_jst = datetime.now(JST).strftime("%Y-%m-%d")
+        history_table = current_app.dynamodb.Table("bad-users-history")
+
+        # 今日の参加登録済みレコードを確認
+        h_resp = history_table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        already_registered = any(
+            item.get("date") == today_jst and item.get("status") == "registered"
+            for item in h_resp.get("Items", [])
+        )
+
+        # 今日のスケジュールIDを取得（あれば）
+        schedule_id_today = None
+        try:
+            sched_table = current_app.dynamodb.Table(
+                current_app.config.get("TABLE_NAME_SCHEDULE", "bad_schedules")
+            )
+            s_resp = sched_table.scan(
+                FilterExpression=Attr("date").eq(today_jst),
+                ProjectionExpression="schedule_id, #loc",
+                ExpressionAttributeNames={"#loc": "location"},
+            )
+            s_items = s_resp.get("Items", [])
+            if s_items:
+                schedule_id_today = s_items[0].get("schedule_id")
+                location_today = s_items[0].get("location", "")
+            else:
+                location_today = ""
+        except Exception:
+            location_today = ""
+
+        # 参加履歴を追加（コートエントリー時刻で登録）
+        history_table.put_item(Item={
+            "user_id": user_id,
+            "joined_at": datetime.now(timezone.utc).isoformat(),
+            "date": today_jst,
+            "status": "registered",
+            "action": "join",
+            "source": "court_entry",
+            **({"schedule_id": schedule_id_today} if schedule_id_today else {}),
+            **({"location": location_today} if location_today else {}),
+        })
+
+        # 初回参加のみ practice_count を加算
+        if not already_registered:
+            try:
+                user_table.update_item(
+                    Key={"user#user_id": user_id},
+                    UpdateExpression="SET practice_count = if_not_exists(practice_count, :zero) + :inc",
+                    ExpressionAttributeValues={":zero": Decimal("0"), ":inc": Decimal("1")},
+                    ConditionExpression="attribute_exists(#pk)",
+                    ExpressionAttributeNames={"#pk": "user#user_id"},
+                )
+                current_app.logger.info(f"[ENTRY] practice_count +1: {user_id}")
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    current_app.logger.error(f"[ENTRY] practice_count更新エラー: {e}")
+
+        current_app.logger.info(f"[ENTRY] 出席記録作成: {user_id} date={today_jst} already={already_registered}")
+    except Exception as e:
+        current_app.logger.error(f"[ENTRY] 出席記録エラー（無視して続行）: {e}")
+    # ────────────────────────────────────────────────────────────────────
+
     return redirect(url_for("game.court"))
 
 
