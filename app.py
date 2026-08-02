@@ -2553,10 +2553,6 @@ def uguis2025_tournament():
 def uguis2026_tournament():
     return render_template("tournament/uguis2026_tournament.html")
 
-@app.route("/bad_manager")
-def bad_manager():
-    return render_template("bad_manager.html")
-
 @app.route("/videos")
 def video_link():
     return render_template("video_link.html")
