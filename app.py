@@ -1166,6 +1166,23 @@ def day_of_participants():
         return render_template("day_of_participants.html", participants=[], date="未定", location="未定")
 
 
+def get_schedule_og_image(schedule_id: str) -> str:
+    """スケジュールごとにsns_imagesフォルダから画像を1枚固定で選ぶ（OGP/Xカード用）。
+    毎回フォルダを再スキャンするので、新しい画像を追加すれば自動的に対象に入る。"""
+    images_dir = os.path.join(os.path.dirname(__file__), 'static', 'sns_images')
+    try:
+        images = sorted(
+            f for f in os.listdir(images_dir)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+        )
+    except FileNotFoundError:
+        images = []
+    if not images:
+        return 'https://uguis-bad.shibuya8020.com/static/images/top001.jpg'
+    idx = int(hashlib.md5(schedule_id.encode()).hexdigest(), 16) % len(images)
+    return f'https://uguis-bad.shibuya8020.com/static/sns_images/{images[idx]}'
+
+
 @app.route('/schedule/<string:schedule_id>/<string:date>')
 def schedule_detail(schedule_id, date):
     """練習予定の個別ページ（URLシェア用）"""
@@ -1276,6 +1293,7 @@ def schedule_detail(schedule_id, date):
             count=count,
             noshow_info=noshow_info,
             pairing_skipped=pairing_skipped,
+            og_image_url=get_schedule_og_image(schedule_id),
         )
     except Exception as e:
         app.logger.error(f'[schedule_detail] error: {e}')
@@ -1936,7 +1954,12 @@ def user_maintenance():
     try:
         sort_by = request.args.get("sort_by", "last_participation")
         order = request.args.get("order", "desc")
-        
+        q = request.args.get("q", "").strip()
+        page = request.args.get("page", 1, type=int)
+        if page < 1:
+            page = 1
+        page_size = 50
+
         from utils.timezone import JST
         today = datetime.now(JST).date().isoformat()
         
@@ -1998,49 +2021,41 @@ def user_maintenance():
                         user_last_dates[user_id] = event_date
         
         current_app.logger.info(f"[user_maintenance] 参加ユーザー数: {len(user_last_dates)}人")
-        
-        # ユーザー情報を取得
-        user_ids = list(user_last_dates.keys())
-        
+
+        # last_participation の突き合わせ用（"user#"プレフィックスの有無を吸収）
+        def _bare_id(uid):
+            uid = uid or ""
+            return uid[5:] if uid.startswith("user#") else uid
+
+        user_last_dates_bare = {_bare_id(uid): d for uid, d in user_last_dates.items()}
+
+        # 登録ユーザーを全件取得（参加履歴の有無に関わらず全員表示する）
+        users_table = app.dynamodb.Table(app.table_name_users)
         users_data = {}
-        if user_ids:
-            users_table = app.dynamodb.Table(app.table_name_users)
-            
-            # バッチ取得（100件ずつ）+ 未処理キーの再取得
-            for i in range(0, len(user_ids), 100):
-                batch_ids = user_ids[i:i + 100]
-                keys = [{"user#user_id": uid} for uid in batch_ids]
-                
-                request_items = {app.table_name_users: {"Keys": keys}}
-                
-                try:
-                    # ★未処理キーがなくなるまで繰り返し
-                    while request_items:
-                        batch_response = app.dynamodb.batch_get_item(RequestItems=request_items)
-                        
-                        for user in batch_response.get("Responses", {}).get(app.table_name_users, []):
-                            uid = user.get("user#user_id", "")  
-                            users_data[uid] = user
-                        
-                        # 未処理キーを確認
-                        unprocessed = batch_response.get("UnprocessedKeys", {})
-                        if unprocessed:
-                            current_app.logger.warning(f"[user_maintenance] 未処理キー: {len(unprocessed.get(app.table_name_users, {}).get('Keys', []))}件")
-                            request_items = unprocessed
-                        else:
-                            request_items = None
-                        
-                except Exception as e:
-                    current_app.logger.error(f"[user_maintenance] バッチ取得エラー: {e}")
-        
-        current_app.logger.info(f"[user_maintenance] ユーザー情報取得: {len(users_data)}人")
-        
-        # 結果を整形
+        last_evaluated_key = None
+
+        while True:
+            if last_evaluated_key:
+                users_response = users_table.scan(ExclusiveStartKey=last_evaluated_key)
+            else:
+                users_response = users_table.scan()
+
+            for user in users_response.get("Items", []):
+                uid = user.get("user#user_id", "")
+                users_data[uid] = user
+
+            last_evaluated_key = users_response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+
+        current_app.logger.info(f"[user_maintenance] 登録ユーザー数: {len(users_data)}人")
+
+        # 結果を整形（全登録ユーザーが対象。最終参加日はスケジュール実績を優先し、無ければ登録情報の値を使う）
         unique_users = []
-        for user_id, last_date in user_last_dates.items():
-            user = users_data.get(user_id, {})
+        for user_id, user in users_data.items():
+            computed_date = user_last_dates_bare.get(_bare_id(user_id))
             user["user_id"] = user_id
-            user["last_participation_date"] = last_date
+            user["last_participation_date"] = computed_date or user.get("last_participation_date") or ""
             user["points"] = None
             user["total_participation"] = None
             user["phone"] = user.get("phone") or ""
@@ -2061,16 +2076,38 @@ def user_maintenance():
                 key=lambda u: (u.get("user_name") or "").lower(),
                 reverse=(order == "desc")
             )
-        
-        current_app.logger.info(f"[user_maintenance] 最終件数: {len(unique_users)}件（過去の実参加）")
-        
+
+        # 検索（全件対象。ページ分割の前に絞り込む）
+        if q:
+            q_lower = q.lower()
+            unique_users = [
+                u for u in unique_users
+                if q_lower in (u.get("display_name") or "").lower()
+                or q_lower in (u.get("user_name") or "").lower()
+                or q_lower in (u.get("email") or "").lower()
+                or q_lower in (u.get("phone") or "").lower()
+            ]
+
+        total_users = len(unique_users)
+        total_pages = max(1, (total_users + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * page_size
+        page_users = unique_users[start:start + page_size]
+
+        current_app.logger.info(f"[user_maintenance] 最終件数: {total_users}件（全登録ユーザー） / {page}ページ目 {len(page_users)}件表示")
+
         return render_template(
             "user_maintenance.html",
-            users=unique_users,
+            users=page_users,
             sort_by=sort_by,
             order=order,
-            limit=len(unique_users),
-            next_token=None,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            total_users=total_users,
+            start_index=start,
+            q=q,
             stats_disabled=True,
         )
 

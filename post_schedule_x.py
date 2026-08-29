@@ -17,6 +17,7 @@ import boto3
 import os
 import re
 import sys
+import time
 import argparse
 import logging
 from datetime import datetime, timedelta, timezone
@@ -492,6 +493,32 @@ def post_to_uguu(content: str, dry_run: bool = False):
         return None
 
 
+def wait_for_instagram_container(container_id: str, timeout: int = 60, interval: int = 3) -> bool:
+    """コンテナの画像処理が完了するまで待機。FINISHEDならTrue、ERRORまたはタイムアウトならFalse"""
+    elapsed = 0
+    while elapsed < timeout:
+        try:
+            r = requests.get(
+                f'https://graph.instagram.com/v21.0/{container_id}',
+                params={'fields': 'status_code', 'access_token': INSTAGRAM_ACCESS_TOKEN}
+            )
+            if r.ok:
+                status = r.json().get('status_code')
+                if status == 'FINISHED':
+                    return True
+                if status == 'ERROR':
+                    logger.error(f'Instagramコンテナ処理エラー: container_id={container_id}')
+                    return False
+            else:
+                logger.warning(f'Instagramコンテナ状態確認失敗: {r.status_code} {r.text}')
+        except Exception as e:
+            logger.warning(f'Instagramコンテナ状態確認エラー: {e}')
+        time.sleep(interval)
+        elapsed += interval
+    logger.error(f'Instagramコンテナ処理がタイムアウトしました: container_id={container_id}')
+    return False
+
+
 def post_to_instagram(caption: str, dry_run: bool = False):
     """Instagramに画像付きで投稿。成功時はpost_idを返す、失敗時はNone"""
     import random, glob as globmod
@@ -526,6 +553,9 @@ def post_to_instagram(caption: str, dry_run: bool = False):
             logger.error(f'Instagramコンテナ作成失敗: {r1.status_code} {r1.text}')
             return None
         container_id = r1.json()['id']
+
+        if not wait_for_instagram_container(container_id):
+            return None
 
         r2 = requests.post(
             f'https://graph.instagram.com/v21.0/{INSTAGRAM_USER_ID}/media_publish',

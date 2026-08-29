@@ -22,10 +22,23 @@
                 <div class="col-md-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <h4 class="mb-0">最新のユーザー <span class="text-muted fs-6" id="userCount"></span></h4>
-                            <input type="text" id="userSearch" class="form-control form-control-sm"
-                                   placeholder="名前・メール・電話で検索..." style="max-width:260px;"
-                                   oninput="filterUsers(this.value)">
+                            <h4 class="mb-0">全ユーザー
+                                <span class="text-muted fs-6">
+                                    {% if q %}（「{{ q }}」の検索結果 全{{ total_users }}件中 {{ start_index + 1 }}〜{{ start_index + users|length }}件）
+                                    {% else %}（全{{ total_users }}件中 {{ start_index + 1 }}〜{{ start_index + users|length }}件）{% endif %}
+                                </span>
+                            </h4>
+                            <form method="get" action="{{ url_for('user_maintenance') }}" class="d-flex gap-2">
+                                <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                                <input type="hidden" name="order" value="{{ order }}">
+                                <input type="text" name="q" id="userSearch" class="form-control form-control-sm"
+                                       placeholder="名前・メール・電話で検索..." style="max-width:260px;"
+                                       value="{{ q }}" autocomplete="off">
+                                <button type="submit" class="btn btn-outline-secondary btn-sm">検索</button>
+                                {% if q %}
+                                <a href="{{ url_for('user_maintenance', sort_by=sort_by, order=order) }}" class="btn btn-outline-secondary btn-sm">クリア</a>
+                                {% endif %}
+                            </form>
                         </div>
                         <table class="table table-sm table-striped text-nowrap">
                             <thead class="table-dark">
@@ -69,8 +82,8 @@
                             </thead>
                             <tbody>
                                 {% for user in users %}
-                                <tr class="user-row" data-search="{{ [user.display_name, user.user_name, user.email, user.phone] | join(' ') | lower }}">
-                                    <td>{{ '%06d' % loop.index }}</td>
+                                <tr class="user-row">
+                                    <td>{{ '%06d' % (start_index + loop.index) }}</td>
                                     <td>
                                         <img src="{{ user.profile_image_url or url_for('static', filename='images/default.jpg') }}" 
                                              alt="プロフィール画像" 
@@ -82,7 +95,7 @@
                                     <td>{{ user.email | truncate(20) }}</td>
                                     <td>{{ user.phone | truncate(15) }}</td> 
                                     <td>{{ user.emergency_phone | truncate(15) }}</td>
-                                    <td>{{ user.last_participation_date | default('—') }}</td>
+                                    <td>{{ user.last_participation_date | default('—', true) }}</td>
                                     <td>{{ user.points | default(0) }}</td>
                                     <td>{{ user.total_participation | default(0) }}</td>
                                     <td>
@@ -108,48 +121,69 @@
         </div>
     </section>
 
-    <nav class="mt-3">
-  <ul class="pagination">
+    <nav class="mt-3" aria-label="ユーザー一覧ページ">
+  <ul class="pagination flex-wrap">
 
-    <!-- 最初へ（tokenを外す） -->
-    <li class="page-item">
+    <!-- 最初へ -->
+    <li class="page-item {% if page <= 1 %}disabled{% endif %}">
       <a class="page-link"
-         href="{{ url_for('user_maintenance', limit=limit, sort_by=sort_by, order=order) }}">
+         href="{{ url_for('user_maintenance', page=1, sort_by=sort_by, order=order) }}">
         最初へ
       </a>
     </li>
 
-    <!-- 次へ（next_token がある時だけ） -->
-    {% if next_token %}
-    <li class="page-item">
+    <!-- 前へ -->
+    <li class="page-item {% if page <= 1 %}disabled{% endif %}">
       <a class="page-link"
-         href="{{ url_for('user_maintenance', next=next_token, limit=limit, sort_by=sort_by, order=order) }}">
+         href="{{ url_for('user_maintenance', page=[page - 1, 1] | max, sort_by=sort_by, order=order) }}">
+        前へ
+      </a>
+    </li>
+
+    <!-- ページ番号 -->
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}
+        <li class="page-item active" aria-current="page">
+          <span class="page-link">{{ p }}</span>
+        </li>
+      {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('user_maintenance', page=p, sort_by=sort_by, order=order) }}">{{ p }}</a>
+        </li>
+      {% elif p == page - 3 or p == page + 3 %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% endif %}
+    {% endfor %}
+
+    <!-- 次へ -->
+    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+      <a class="page-link"
+         href="{{ url_for('user_maintenance', page=[page + 1, total_pages] | min, sort_by=sort_by, order=order) }}">
         次へ
       </a>
     </li>
-    {% endif %}
+
+    <!-- 最後へ -->
+    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+      <a class="page-link"
+         href="{{ url_for('user_maintenance', page=total_pages, sort_by=sort_by, order=order) }}">
+        最後へ
+      </a>
+    </li>
 
   </ul>
 </nav>
 
 <script>
-function filterUsers(query) {
-    const q = query.trim().toLowerCase();
-    const rows = document.querySelectorAll('.user-row');
-    let visible = 0;
-    rows.forEach(row => {
-        const match = !q || row.dataset.search.includes(q);
-        row.style.display = match ? '' : 'none';
-        if (match) visible++;
+// 入力が止まったら自動でフォーム送信し、全件（サーバー側）を対象に検索する
+(() => {
+    const input = document.getElementById('userSearch');
+    let timer = null;
+    input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => input.form.submit(), 600);
     });
-    document.getElementById('userCount').textContent = q ? `(${visible}件)` : '';
-}
-
-// 初期件数表示
-document.addEventListener('DOMContentLoaded', () => {
-    const total = document.querySelectorAll('.user-row').length;
-    document.getElementById('userCount').textContent = `(${total}件)`;
-});
+})();
 </script>
 
 {% endblock %}
