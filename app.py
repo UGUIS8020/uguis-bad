@@ -1166,6 +1166,23 @@ def day_of_participants():
         return render_template("day_of_participants.html", participants=[], date="未定", location="未定")
 
 
+def get_schedule_og_image(schedule_id: str) -> str:
+    """スケジュールごとにsns_imagesフォルダから画像を1枚固定で選ぶ（OGP/Xカード用）。
+    毎回フォルダを再スキャンするので、新しい画像を追加すれば自動的に対象に入る。"""
+    images_dir = os.path.join(os.path.dirname(__file__), 'static', 'sns_images')
+    try:
+        images = sorted(
+            f for f in os.listdir(images_dir)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+        )
+    except FileNotFoundError:
+        images = []
+    if not images:
+        return 'https://uguis-bad.shibuya8020.com/static/images/top001.jpg'
+    idx = int(hashlib.md5(schedule_id.encode()).hexdigest(), 16) % len(images)
+    return f'https://uguis-bad.shibuya8020.com/static/sns_images/{images[idx]}'
+
+
 @app.route('/schedule/<string:schedule_id>/<string:date>')
 def schedule_detail(schedule_id, date):
     """練習予定の個別ページ（URLシェア用）"""
@@ -1276,6 +1293,7 @@ def schedule_detail(schedule_id, date):
             count=count,
             noshow_info=noshow_info,
             pairing_skipped=pairing_skipped,
+            og_image_url=get_schedule_og_image(schedule_id),
         )
     except Exception as e:
         app.logger.error(f'[schedule_detail] error: {e}')
