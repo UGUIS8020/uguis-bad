@@ -38,7 +38,7 @@ from werkzeug.utils import secure_filename
 # --- WTForms ---
 from wtforms import (
     StringField, PasswordField, SubmitField, SelectField,
-    DateField, BooleanField, IntegerField
+    DateField, BooleanField, IntegerField, TextAreaField
 )
 from wtforms.validators import (
     DataRequired, Email, EqualTo, Length,
@@ -50,8 +50,9 @@ from utils import db
 from utils.db import (
     get_schedule_table,
     get_schedules_with_formatting,
-    get_schedules_with_formatting_all 
+    get_schedules_with_formatting_all
 )
+from mailer import send_text_email
 
 from uguu.post import post
 from badminton_logs_functions import get_badminton_chat_logs
@@ -550,6 +551,27 @@ class LoginForm(FlaskForm):
         if not check_password_hash(stored_hash, field.data):
             app.logger.debug("Password validation failed")
             raise ValidationError('パスワードが正しくありません')
+
+
+class ContactForm(FlaskForm):
+    name = StringField(
+        'お名前',
+        validators=[DataRequired(message='お名前を入力してください'), Length(max=50)]
+    )
+    email = StringField(
+        'メールアドレス',
+        validators=[
+            DataRequired(message='メールアドレスを入力してください'),
+            Email(message='正しいメールアドレスの形式で入力してください')
+        ],
+        render_kw={"type": "email", "inputmode": "email", "autocomplete": "email"}
+    )
+    message = TextAreaField(
+        'お問い合わせ内容',
+        validators=[DataRequired(message='お問い合わせ内容を入力してください'), Length(max=2000)]
+    )
+    submit = SubmitField('送信')
+
 
 class User(UserMixin):
     def __init__(self, user_id, display_name, user_name, furigana, email, password_hash,
@@ -2593,6 +2615,28 @@ def uguis2026_tournament():
 @app.route("/videos")
 def video_link():
     return render_template("video_link.html")
+
+
+CONTACT_RECIPIENT = "shibuyamasahiko@gmail.com"
+
+
+@app.route("/contact", methods=["GET", "POST"])
+def contact():
+    form = ContactForm()
+    if form.validate_on_submit():
+        subject = f"【鶯バドミントン】お問い合わせ（{form.name.data}様）"
+        body = (
+            f"お名前: {form.name.data}\n"
+            f"メールアドレス: {form.email.data}\n"
+            f"\n{form.message.data}"
+        )
+        message_id = send_text_email(CONTACT_RECIPIENT, subject, body)
+        if message_id:
+            flash('お問い合わせを送信しました。ありがとうございます。', 'success')
+            return redirect(url_for('contact'))
+        else:
+            flash('送信に失敗しました。時間をおいて再度お試しください。', 'danger')
+    return render_template("contact.html", form=form)
 
 
 @app.route('/badminton-chat-logs')
