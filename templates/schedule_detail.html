@@ -127,7 +127,7 @@
                    alt="{{ p.display_name }}"
                    width="40" height="40"
                    class="rounded-circle"
-                   style="object-fit:cover; border: 3px solid {{ '#2ecc71' if p.user_id in first_timer_ids else ('#e74c3c' if p.gender == 'female' else ('#3498db' if p.gender == 'male' else '#dee2e6')) }};"
+                   style="object-fit:cover; border: {{ '4px' if p.user_id in first_timer_ids else '3px' }} solid {{ '#2ecc71' if p.user_id in first_timer_ids else ('#e74c3c' if p.gender == 'female' else ('#3498db' if p.gender == 'male' else '#dee2e6')) }};"
                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
             </a>
             <div class="text-muted" style="font-size:0.65rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">
