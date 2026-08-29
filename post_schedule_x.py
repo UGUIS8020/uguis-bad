@@ -521,15 +521,19 @@ def wait_for_instagram_container(container_id: str, timeout: int = 60, interval:
 
 def post_to_instagram(caption: str, dry_run: bool = False):
     """Instagramに画像付きで投稿。成功時はpost_idを返す、失敗時はNone"""
-    import random, glob as globmod
-    images = globmod.glob(os.path.join(INSTAGRAM_IMAGES_DIR, '*.jpg')) + \
-             globmod.glob(os.path.join(INSTAGRAM_IMAGES_DIR, '*.png'))
+    import random
+    try:
+        images = [
+            f for f in os.listdir(INSTAGRAM_IMAGES_DIR)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+        ]
+    except FileNotFoundError:
+        images = []
     if not images:
         logger.error('sns_imagesフォルダに画像がありません。')
         return None
 
-    image_file = random.choice(images)
-    image_name = os.path.basename(image_file)
+    image_name = random.choice(images)
     image_url  = f'{SITE_URL}/static/sns_images/{image_name}'
 
     if dry_run:
