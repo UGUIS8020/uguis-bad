@@ -179,9 +179,24 @@
 (() => {
     const input = document.getElementById('userSearch');
     let timer = null;
-    input.addEventListener('input', () => {
+    let composing = false;
+
+    const scheduleSubmit = () => {
         clearTimeout(timer);
         timer = setTimeout(() => input.form.submit(), 600);
+    };
+
+    // 日本語IMEの変換中（漢字確定前）はinputイベントが逐次発火するため、
+    // 変換中は自動送信を抑止し、変換確定(compositionend)後にあらためて送信予約する。
+    input.addEventListener('compositionstart', () => { composing = true; });
+    input.addEventListener('compositionend', () => {
+        composing = false;
+        scheduleSubmit();
+    });
+
+    input.addEventListener('input', () => {
+        if (composing) return;
+        scheduleSubmit();
     });
 })();
 </script>
