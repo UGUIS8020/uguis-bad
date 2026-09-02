@@ -8,46 +8,75 @@
                 <div class="card-header bg-primary text-white">
                     <h4 class="card-title mb-0">新規投稿</h4>
                 </div>
-                
+
                 <div class="card-body">
-                    <form method="POST" action="{{ url_for('post.create_post') }}" enctype="multipart/form-data">
+                    <form id="createPostForm" method="POST" action="{{ url_for('post.create_post') }}" enctype="multipart/form-data">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                         <div class="mb-3">
                             <label for="content" class="form-label">投稿内容</label>
-                            <textarea 
-                                id="content" 
-                                name="content" 
-                                class="form-control" 
-                                rows="5" 
+                            <textarea
+                                id="content"
+                                name="content"
+                                class="form-control"
+                                rows="5"
                                 placeholder="ここに投稿内容を入力してください..."
                                 required></textarea>
                         </div>
-                        
+
                         <div class="form-group mt-2 mb-2">
                             <label for="image" class="form-label">画像を選択</label>
-                            <input type="file" name="image" class="form-control" accept="image/*">
+                            <input type="file" id="image" name="image" class="form-control" accept="image/*">
                         </div>
-                        
+
+                        <!-- 動画（トリムして投稿） -->
+                        <div class="form-group mt-2 mb-3">
+                            <label for="videoInput" class="form-label">動画を選択（任意・最大60秒にトリムできます）</label>
+                            <input type="file" id="videoInput" class="form-control" accept="video/*">
+                            <small class="form-text text-muted">スマホやPCの動画ファイルをそのまま選べます。次の画面で使う範囲を指定してください。</small>
+
+                            <div id="videoTrimBox" class="mt-3 p-3 border rounded" hidden>
+                                <video id="videoPreview" class="w-100 rounded mb-2" style="max-height:320px; background:#000;" playsinline muted></video>
+
+                                <div class="d-flex justify-content-between small text-muted mb-1">
+                                    <span>開始: <span id="trimStartLabel">0.0</span>秒</span>
+                                    <span>長さ: <span id="trimDurationLabel">0.0</span>秒</span>
+                                    <span>終了: <span id="trimEndLabel">0.0</span>秒</span>
+                                </div>
+                                <input type="range" id="trimStart" class="form-range" step="0.1" value="0">
+                                <input type="range" id="trimEnd" class="form-range" step="0.1" value="0">
+
+                                <div class="d-flex gap-2 mt-2">
+                                    <button type="button" id="previewTrimBtn" class="btn btn-outline-secondary btn-sm">
+                                        選択範囲をプレビュー再生
+                                    </button>
+                                    <button type="button" id="removeVideoBtn" class="btn btn-outline-danger btn-sm">
+                                        動画を取り消す
+                                    </button>
+                                </div>
+                                <div id="trimStatus" class="small text-muted mt-2"></div>
+                            </div>
+                        </div>
+
                         <!-- YouTube URL フィールド追加 -->
                         <div class="form-group mt-2 mb-3">
                             <label for="youtube_url" class="form-label">YouTube動画URL（任意）</label>
-                            <input 
-                                type="url" 
-                                id="youtube_url" 
-                                name="youtube_url" 
-                                class="form-control" 
+                            <input
+                                type="url"
+                                id="youtube_url"
+                                name="youtube_url"
+                                class="form-control"
                                 placeholder="https://www.youtube.com/watch?v=xxxxx または https://youtu.be/xxxxx">
                             <small class="form-text text-muted">
                                 YouTube動画を埋め込む場合は、動画のURLを貼り付けてください
                             </small>
                         </div>
-                        
-                        <div class="d-flex justify-content-between">
-                            <button type="submit" class="btn btn-primary px-4">
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            <button type="submit" id="submitPostBtn" class="btn btn-primary px-4">
                                 投稿する
                             </button>
-                            <a href="{{ url_for('uguu.show_timeline') }}" 
+                            <a href="{{ url_for('uguu.show_timeline') }}"
                                class="btn btn-outline-secondary">
                                 キャンセル
                             </a>
@@ -58,4 +87,200 @@
         </div>
     </div>
 </div>
+
+<script type="module">
+const MAX_CLIP_SECONDS = 60;
+const MAX_INPUT_BYTES = 300 * 1024 * 1024; // 300MB（これ以上はブラウザ内処理が不安定なため拒否）
+
+const videoInput = document.getElementById('videoInput');
+const trimBox = document.getElementById('videoTrimBox');
+const preview = document.getElementById('videoPreview');
+const trimStart = document.getElementById('trimStart');
+const trimEnd = document.getElementById('trimEnd');
+const trimStartLabel = document.getElementById('trimStartLabel');
+const trimEndLabel = document.getElementById('trimEndLabel');
+const trimDurationLabel = document.getElementById('trimDurationLabel');
+const previewTrimBtn = document.getElementById('previewTrimBtn');
+const removeVideoBtn = document.getElementById('removeVideoBtn');
+const trimStatus = document.getElementById('trimStatus');
+const form = document.getElementById('createPostForm');
+const submitBtn = document.getElementById('submitPostBtn');
+
+let selectedFile = null;
+let objectUrl = null;
+let previewStopAt = null;
+
+function fmt(sec) {
+  return (Math.round(sec * 10) / 10).toFixed(1);
+}
+
+function updateLabels() {
+  const s = parseFloat(trimStart.value);
+  const e = parseFloat(trimEnd.value);
+  trimStartLabel.textContent = fmt(s);
+  trimEndLabel.textContent = fmt(e);
+  trimDurationLabel.textContent = fmt(Math.max(0, e - s));
+}
+
+videoInput.addEventListener('change', () => {
+  const file = videoInput.files[0];
+  if (!file) return;
+
+  if (file.size > MAX_INPUT_BYTES) {
+    alert('動画ファイルが大きすぎます（300MBまで）。別の動画をお試しください。');
+    videoInput.value = '';
+    return;
+  }
+
+  selectedFile = file;
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl = URL.createObjectURL(file);
+  preview.src = objectUrl;
+  trimBox.hidden = false;
+  trimStatus.textContent = '';
+
+  preview.addEventListener('loadedmetadata', () => {
+    const duration = preview.duration || 0;
+    const initialEnd = Math.min(duration, MAX_CLIP_SECONDS);
+
+    trimStart.min = 0;
+    trimStart.max = duration;
+    trimStart.value = 0;
+
+    trimEnd.min = 0;
+    trimEnd.max = duration;
+    trimEnd.value = initialEnd;
+
+    updateLabels();
+  }, { once: true });
+});
+
+trimStart.addEventListener('input', () => {
+  let s = parseFloat(trimStart.value);
+  let e = parseFloat(trimEnd.value);
+  if (e - s > MAX_CLIP_SECONDS) {
+    trimEnd.value = Math.min(parseFloat(trimEnd.max), s + MAX_CLIP_SECONDS);
+  }
+  if (s >= e) {
+    trimStart.value = Math.max(0, e - 0.1);
+  }
+  updateLabels();
+});
+
+trimEnd.addEventListener('input', () => {
+  let s = parseFloat(trimStart.value);
+  let e = parseFloat(trimEnd.value);
+  if (e - s > MAX_CLIP_SECONDS) {
+    trimEnd.value = s + MAX_CLIP_SECONDS;
+    e = parseFloat(trimEnd.value);
+  }
+  if (e <= s) {
+    trimEnd.value = s + 0.1;
+  }
+  updateLabels();
+});
+
+previewTrimBtn.addEventListener('click', () => {
+  const s = parseFloat(trimStart.value);
+  const e = parseFloat(trimEnd.value);
+  previewStopAt = e;
+  preview.currentTime = s;
+  preview.muted = false;
+  preview.play();
+});
+
+preview.addEventListener('timeupdate', () => {
+  if (previewStopAt !== null && preview.currentTime >= previewStopAt) {
+    preview.pause();
+    previewStopAt = null;
+  }
+});
+
+removeVideoBtn.addEventListener('click', () => {
+  selectedFile = null;
+  videoInput.value = '';
+  trimBox.hidden = true;
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+  }
+});
+
+async function trimVideoWithFfmpeg(file, startSec, endSec) {
+  const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+  const { fetchFile, toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+
+  const ffmpeg = new FFmpeg();
+  ffmpeg.on('log', ({ message }) => {
+    trimStatus.textContent = '処理中...';
+  });
+
+  trimStatus.textContent = '動画エンジンを読み込み中...（初回のみ時間がかかります）';
+  const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
+  });
+
+  trimStatus.textContent = '動画をトリム中...';
+  const inputName = 'input' + (file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.mp4');
+  await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+  await ffmpeg.exec([
+    '-i', inputName,
+    '-ss', String(startSec),
+    '-to', String(endSec),
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-crf', '28',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    'output.mp4',
+  ]);
+
+  const data = await ffmpeg.readFile('output.mp4');
+  return new Blob([data.buffer], { type: 'video/mp4' });
+}
+
+form.addEventListener('submit', async (ev) => {
+  if (!selectedFile) {
+    // 動画なし：通常のフォーム送信のまま
+    return;
+  }
+
+  ev.preventDefault();
+  submitBtn.disabled = true;
+  submitBtn.textContent = '処理中...';
+
+  try {
+    const s = parseFloat(trimStart.value);
+    const e = parseFloat(trimEnd.value);
+    const trimmedBlob = await trimVideoWithFfmpeg(selectedFile, s, e);
+
+    trimStatus.textContent = 'アップロード中...';
+
+    const formData = new FormData(form);
+    formData.delete('video');
+    formData.append('video', trimmedBlob, 'trimmed.mp4');
+
+    const res = await fetch(form.action, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (res.redirected) {
+      window.location.href = res.url;
+    } else {
+      // サーバー側でエラー（flashメッセージ）→ 再読み込みして表示
+      window.location.reload();
+    }
+  } catch (err) {
+    console.error('[video trim] error', err);
+    trimStatus.textContent = '';
+    alert('動画の処理に失敗しました。お使いの端末では動画投稿に対応していない可能性があります。動画なしで投稿するか、別の端末でお試しください。');
+    submitBtn.disabled = false;
+    submitBtn.textContent = '投稿する';
+  }
+});
+</script>
 {% endblock %}

@@ -75,6 +75,47 @@ def upload_image_to_s3(file):
         print(f"Error uploading to S3: {e}")
         return None
 
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'webm', 'mov'}
+MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50MB（ブラウザ側でトリム済みの短い動画を想定）
+
+
+def upload_video_to_s3(file):
+    """トリム済み動画（ブラウザ側で処理済み）をそのままS3にアップロードする"""
+    if not file or not file.filename:
+        return None
+
+    ext = file.filename.lower().rsplit('.', 1)[-1] if '.' in file.filename else ''
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        return None
+
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+    if size > MAX_VIDEO_BYTES:
+        return None
+
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_REGION")
+    )
+    bucket_name = os.getenv("S3_BUCKET")
+    file_name = f"posts/videos/{uuid.uuid4()}-{secure_filename(file.filename)}"
+
+    try:
+        s3.upload_fileobj(
+            file,
+            bucket_name,
+            file_name,
+            ExtraArgs={'ContentType': file.content_type or 'video/mp4'}
+        )
+        return f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
+    except Exception as e:
+        print(f"Error uploading video to S3: {e}")
+        return None
+
+
 def delete_image_from_s3(image_url):
     """S3から画像を削除"""
     if not image_url:
