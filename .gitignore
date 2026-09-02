@@ -7,3 +7,6 @@ venv
 cache.log-*
 nohup.out
 venv_backup_*/
+
+# ベンダーライブラリ（gitでは追跡せず、サーバーに直接配置する）
+static/vendor/
