@@ -54,8 +54,16 @@
       <p class="text-muted small mb-3">{{ schedule.note }}</p>
       {% endif %}
 
-      {# ── 参加ボタン ── #}
-      {% if current_user.is_authenticated %}
+      {# ── 参加ボタン（開催済みの練習は表示しない） ── #}
+      {% if is_past %}
+        <p class="text-muted small text-center mb-2">この練習は開催済みです</p>
+        {% if current_user.is_authenticated %}
+        <a href="{{ url_for('report_user', schedule_id=schedule.schedule_id, date=schedule.date) }}"
+           class="btn btn-outline-secondary btn-sm w-100 mb-3">
+          <i class="fas fa-flag me-1"></i>この練習について運営に報告する
+        </a>
+        {% endif %}
+      {% elif current_user.is_authenticated %}
         {% if is_joined %}
           <button class="btn btn-danger w-100 mb-2 join-button"
                   data-schedule-id="{{ schedule.schedule_id }}"
@@ -92,7 +100,8 @@
         </a>
       {% endif %}
 
-      {# ── URLコピー ── #}
+      {# ── URLコピー（開催済みの練習は非表示） ── #}
+      {% if not is_past %}
       <div class="input-group mb-3">
         <input type="text" class="form-control form-control-sm text-muted"
                id="shareUrl" readonly
@@ -102,6 +111,7 @@
         </button>
       </div>
       <p class="text-muted small text-center">このURLをLINEなどで共有できます</p>
+      {% endif %}
 
       {# ── 参加者一覧 ── #}
       {% if participants_info %}
@@ -214,7 +224,13 @@
   {% endif %}
 
   <div class="text-center mt-3 d-flex justify-content-center align-items-center gap-3">
+    {% if is_past %}
+      {% if current_user.is_authenticated %}
+      <a href="{{ url_for('users.my_participation') }}" class="btn btn-link text-muted">← 参加日一覧へ</a>
+      {% endif %}
+    {% else %}
     <a href="{{ url_for('index') }}" class="btn btn-link text-muted">← 練習予定一覧へ</a>
+    {% endif %}
     {% if current_user.is_authenticated and (current_user.administrator or current_user.role == 'admin') %}
     <a href="{{ url_for('schedule.edit_schedule', schedule_id=schedule.schedule_id) }}"
        class="btn btn-sm btn-outline-primary">

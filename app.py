@@ -573,6 +573,18 @@ class ContactForm(FlaskForm):
     submit = SubmitField('送信')
 
 
+class ReportForm(FlaskForm):
+    target_name = StringField(
+        '対象者のお名前',
+        validators=[DataRequired(message='対象者のお名前を入力してください'), Length(max=50)]
+    )
+    content = TextAreaField(
+        '内容',
+        validators=[DataRequired(message='内容を入力してください'), Length(max=2000)]
+    )
+    submit = SubmitField('報告する')
+
+
 class User(UserMixin):
     def __init__(self, user_id, display_name, user_name, furigana, email, password_hash,
                  gender, date_of_birth, post_code, address, phone, guardian_name, emergency_phone, badminton_experience,
@@ -651,6 +663,26 @@ class User(UserMixin):
             item['date_of_birth'] = {"S": str(self.date_of_birth)}
         
         return item
+
+def get_schedule_participant_ids(schedule):
+    """スケジュールの参加者・たら参加者のuser_idをsetで返す（形式が文字列/dict混在でも対応）"""
+    ids = set()
+    for key in ('participants', 'tara_participants'):
+        for p in (schedule.get(key) or []):
+            uid = (p.get('user_id') or p.get('user#user_id')) if isinstance(p, dict) else p
+            if uid:
+                ids.add(str(uid))
+    return ids
+
+
+def is_schedule_viewer_allowed(schedule):
+    """開催済みの練習ページ・報告ページを見られるか（参加者本人 or 管理者）"""
+    if not current_user.is_authenticated:
+        return False
+    if getattr(current_user, 'administrator', False) or getattr(current_user, 'role', None) == 'admin':
+        return True
+    return str(current_user.id) in get_schedule_participant_ids(schedule)
+
 
 def get_participants_info(schedule):
     participants_info = []
@@ -1216,6 +1248,11 @@ def schedule_detail(schedule_id, date):
             flash('指定された練習予定が見つかりません。', 'warning')
             return redirect(url_for('index'))
 
+        is_past = date < datetime.now(JST).date().isoformat()
+        if is_past and not is_schedule_viewer_allowed(schedule):
+            flash('この練習の参加者のみ閲覧できます。', 'warning')
+            return redirect(url_for('index'))
+
         # 参加者情報（全員取得・表示制御はテンプレート側で行う）
         participants_info = get_participants_info(schedule)
         tara_participants_info = get_participants_info(
@@ -1311,6 +1348,7 @@ def schedule_detail(schedule_id, date):
             is_joined=is_joined,
             is_tara=is_tara,
             is_full=is_full,
+            is_past=is_past,
             max_p=max_p,
             count=count,
             noshow_info=noshow_info,
@@ -2637,6 +2675,61 @@ def contact():
         else:
             flash('送信に失敗しました。時間をおいて再度お試しください。', 'danger')
     return render_template("contact.html", form=form)
+
+
+@app.route("/report", methods=["GET", "POST"])
+@login_required
+def report_user():
+    """参加者に関する報告フォーム（過去の練習ページから、日付・会場を紐づけて送れる）"""
+    schedule_id = request.values.get("schedule_id", "")
+    date = request.values.get("date", "")
+
+    schedule = None
+    participants_info = []
+    if schedule_id and date:
+        schedule_table = app.dynamodb.Table(app.table_name_schedule)
+        resp = schedule_table.get_item(Key={'schedule_id': schedule_id, 'date': date})
+        schedule = resp.get('Item')
+        if schedule:
+            if not is_schedule_viewer_allowed(schedule):
+                flash('この練習の参加者のみ報告できます。', 'warning')
+                return redirect(url_for('index'))
+            participants_info = get_participants_info(schedule)
+
+    form = ReportForm()
+    if form.validate_on_submit():
+        reporter = f"{current_user.display_name}（{current_user.email}）"
+        context_lines = []
+        if schedule:
+            context_lines.append(f"練習日: {schedule.get('date')} {schedule.get('start_time', '')}〜{schedule.get('end_time', '')}")
+            context_lines.append(f"会場: {schedule.get('venue', '')} {schedule.get('court', '')}")
+        else:
+            context_lines.append("練習日: (指定なし)")
+
+        subject = f"【鶯バドミントン】参加者に関する報告（{form.target_name.data}さんについて）"
+        body = (
+            f"報告者: {reporter}\n"
+            f"対象者: {form.target_name.data}\n"
+            + "\n".join(context_lines) +
+            f"\n\n{form.content.data}"
+        )
+        message_id = send_text_email(CONTACT_RECIPIENT, subject, body)
+        if message_id:
+            flash('報告を送信しました。ご協力ありがとうございます。', 'success')
+            if schedule_id and date:
+                return redirect(url_for('schedule_detail', schedule_id=schedule_id, date=date))
+            return redirect(url_for('index'))
+        else:
+            flash('送信に失敗しました。時間をおいて再度お試しください。', 'danger')
+
+    return render_template(
+        "report.html",
+        form=form,
+        schedule=schedule,
+        participants_info=participants_info,
+        schedule_id=schedule_id,
+        date=date,
+    )
 
 
 @app.route('/badminton-chat-logs')

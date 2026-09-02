@@ -481,6 +481,36 @@ def my_stats():
         user=current_user,
         my_score=skill_score  # 念のため my_score という名前も残しておく（互換性のため）
     )
-    
 
-    
+
+_WEEKDAY_JA = ['月', '火', '水', '木', '金', '土', '日']
+
+
+@users.route('/my_participation')
+@login_required
+def my_participation():
+    """本人の参加日一覧（他人からは見えない）"""
+    records = db.get_user_participation_history_with_timestamp(current_user.user_id) or []
+
+    # 年ごとにグループ化して表示用に整形（新しい順）
+    grouped = {}
+    for r in records:
+        d = _parse_ymd10(r.get("event_date"))
+        if not d:
+            continue
+        grouped.setdefault(d.year, []).append({
+            "date": d,
+            "label": f"{d.month}/{d.day}",
+            "weekday": _WEEKDAY_JA[d.weekday()],
+            "schedule_id": r.get("schedule_id") or "",
+        })
+
+    for year_items in grouped.values():
+        year_items.sort(key=lambda it: it["date"], reverse=True)
+
+    return render_template(
+        "uguu/my_participation.html",
+        grouped=sorted(grouped.items(), reverse=True),
+        total=len(records),
+    )
+

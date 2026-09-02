@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}参加日一覧{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 720px;">
+
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h5 class="mb-0">参加日一覧</h5>
+    <span class="badge bg-primary fs-6">合計 {{ total }} 回</span>
+  </div>
+
+  {% if grouped %}
+    {% for year, items in grouped %}
+    <div class="card mb-3 shadow-sm">
+      <div class="card-header bg-white fw-bold">
+        {{ year }}年
+        <span class="text-muted fw-normal small">（{{ items|length }}回）</span>
+      </div>
+      <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2">
+          {% for it in items %}
+            {% if it.schedule_id %}
+            <a href="{{ url_for('schedule_detail', schedule_id=it.schedule_id, date=it.date.strftime('%Y-%m-%d')) }}"
+               class="badge bg-light text-dark border text-decoration-none">
+              {{ it.label }}({{ it.weekday }})
+            </a>
+            {% else %}
+            <span class="badge bg-light text-dark border" title="この参加記録には練習ページの情報がありません">
+              {{ it.label }}({{ it.weekday }})
+            </span>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-center text-muted py-5">
+      まだ参加記録がありません。
+    </div>
+  {% endif %}
+
+  <div class="text-center mt-3">
+    <a href="{{ url_for('users.user_profile', user_id=current_user.id) }}" class="btn btn-outline-secondary btn-sm">
+      <i class="fas fa-arrow-left me-1"></i>プロフィールに戻る
+    </a>
+  </div>
+
+</div>
+{% endblock %}

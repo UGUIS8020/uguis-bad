@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}運営への報告 | 鶯バドミントン{% endblock %}
+{% block content %}
+<section id="report_form">
+    <div class="container my-5">
+        <div class="row">
+            <div class="col-lg-6 mx-auto">
+
+                {% if schedule %}
+                <div class="card mb-3 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2">この練習について報告します</h6>
+                        <p class="mb-1 fw-bold">
+                            {{ schedule.date | format_date }}（{{ schedule.day_of_week }}）
+                            {{ schedule.start_time }}〜{{ schedule.end_time }}
+                        </p>
+                        <p class="mb-2 text-muted">{{ schedule.venue }}{% if schedule.court %} {{ schedule.court }}{% endif %}</p>
+                        {% if participants_info %}
+                        <p class="text-muted small mb-1">参加者</p>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% for p in participants_info %}
+                            <span class="badge bg-light text-dark border">{{ p.display_name }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="card bg-primary text-center">
+
+                    {% macro render_field_with_errors(field, placeholder, css_class="form-control form-control-lg") %}
+                    <div class="form-group">
+                        {% if field.type == 'TextAreaField' %}
+                            {{ field(class=css_class + (" is-invalid" if field.errors else ""), placeholder=placeholder, rows="6") }}
+                        {% else %}
+                            {{ field(class=css_class + (" is-invalid" if field.errors else ""), placeholder=placeholder) }}
+                        {% endif %}
+                        {% if field.errors %}
+                            {% for error in field.errors %}
+                                <div class="invalid-feedback">
+                                    {{ error }}
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                    {% endmacro %}
+
+                    <div class="card-body text-light">
+                        <h3>運営への報告</h3>
+                        <p>参加者間のトラブルなど、気になることがあればお知らせください。<br>
+                        報告者情報は運営（渋谷）のみが把握し、対象者には一切開示しません。</p>
+                        <form method="POST">
+                            {{ form.hidden_tag() }}
+                            <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+                            <input type="hidden" name="date" value="{{ date }}">
+
+                            <div class="mb-3">
+                                {{ render_field_with_errors(form.target_name, placeholder="対象者のお名前") }}
+                            </div>
+
+                            <div class="mb-3">
+                                {{ render_field_with_errors(form.content, placeholder="どのようなことがあったか、できるだけ具体的にお書きください") }}
+                            </div>
+
+                            {{ form.submit(class="btn btn-outline-light w-100") }}
+                        </form>
+                    </div>
+
+                    <!-- カスタムスタイル -->
+                    <style>
+                    #report_form .form-control-lg {
+                        background-color: #ffffff;
+                        border-color: rgba(255, 255, 255, 0.4);
+                        color: #212529;
+                    }
+
+                    #report_form .form-control-lg:focus {
+                        background-color: #ffffff;
+                        border-color: #ffffff;
+                        color: #212529;
+                        box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.35);
+                    }
+
+                    #report_form .form-control-lg::placeholder {
+                        color: #6c757d;
+                    }
+
+                    #report_form .btn-outline-light:hover {
+                        background-color: rgba(255, 255, 255, 0.1);
+                    }
+
+                    #report_form .invalid-feedback {
+                        color: #ffc107;
+                    }
+                    </style>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
