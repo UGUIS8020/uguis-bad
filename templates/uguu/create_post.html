@@ -24,32 +24,53 @@
                                 required></textarea>
                         </div>
 
-                        <div class="form-group mt-2 mb-2">
-                            <label for="image" class="form-label">画像を選択</label>
-                            <input type="file" id="image" name="image" class="form-control" accept="image/*">
-                        </div>
-
-                        <!-- 動画（トリムして投稿） -->
+                        <!-- 画像・動画（Instagramのように1つの選択ボタンでまとめて選ぶ） -->
                         <div class="form-group mt-2 mb-3">
-                            <label for="videoInput" class="form-label">動画を選択（任意・最大60秒にトリムできます）</label>
-                            <input type="file" id="videoInput" class="form-control" accept="video/*">
-                            <small class="form-text text-muted">スマホやPCの動画ファイルをそのまま選べます。次の画面で使う範囲を指定してください。</small>
+                            <label for="mediaInput" class="form-label">画像または動画を選択（任意）</label>
+                            <input type="file" id="mediaInput" class="form-control" accept="image/*,video/*">
+                            <small class="form-text text-muted">動画は最大60秒にトリムできます（次の画面で範囲を指定）。</small>
+
+                            <div id="imagePreviewBox" class="mt-3" hidden>
+                                <img id="imagePreview" class="img-fluid rounded" style="max-height:320px;">
+                                <div class="mt-2">
+                                    <button type="button" id="removeImageBtn" class="btn btn-outline-danger btn-sm">
+                                        画像を取り消す
+                                    </button>
+                                </div>
+                            </div>
 
                             <div id="videoTrimBox" class="mt-3 p-3 border rounded" hidden>
-                                <video id="videoPreview" class="w-100 rounded mb-2" style="max-height:320px; background:#000;" playsinline muted></video>
-
-                                <div class="d-flex justify-content-between small text-muted mb-1">
-                                    <span>開始: <span id="trimStartLabel">0.0</span>秒</span>
-                                    <span>長さ: <span id="trimDurationLabel">0.0</span>秒</span>
-                                    <span>終了: <span id="trimEndLabel">0.0</span>秒</span>
+                                <div id="videoTapArea" class="position-relative rounded mb-2 overflow-hidden" style="background:#000; cursor:pointer;">
+                                    <video id="videoPreview" class="w-100 d-block" style="max-height:320px;" playsinline muted></video>
+                                    <div id="playPauseIcon" class="position-absolute top-50 start-50 translate-middle"
+                                         style="pointer-events:none; font-size:2.8rem; color:#fff; text-shadow:0 1px 6px rgba(0,0,0,.7);">
+                                        <i class="fas fa-play"></i>
+                                    </div>
                                 </div>
-                                <input type="range" id="trimStart" class="form-range" step="0.1" value="0">
-                                <input type="range" id="trimEnd" class="form-range" step="0.1" value="0">
+
+                                <div class="text-center small text-muted mb-2">
+                                    長さ: <span id="trimDurationLabel">0.0</span>秒（最大60秒）／ 動画をタップで再生・一時停止
+                                </div>
+
+                                <div id="trimTrack" class="position-relative" style="height:44px; background:#e9ecef; border-radius:6px; overflow:hidden; touch-action:none; user-select:none;">
+                                    <div id="trimThumbnails" class="position-absolute top-0 start-0 w-100 h-100 d-flex"></div>
+                                    <div id="trimSelected" class="position-absolute top-0 h-100"
+                                         style="background:rgba(13,110,253,0.22); border-top:2px solid #0d6efd; border-bottom:2px solid #0d6efd;"></div>
+                                    <div id="trimHandleStart" class="position-absolute top-0 h-100 d-flex align-items-center justify-content-center"
+                                         style="width:20px; background:#0d6efd; border-radius:5px 0 0 5px; cursor:ew-resize; touch-action:none;">
+                                        <div style="width:3px; height:18px; background:#fff; border-radius:2px;"></div>
+                                    </div>
+                                    <div id="trimHandleEnd" class="position-absolute top-0 h-100 d-flex align-items-center justify-content-center"
+                                         style="width:20px; background:#0d6efd; border-radius:0 5px 5px 0; cursor:ew-resize; touch-action:none;">
+                                        <div style="width:3px; height:18px; background:#fff; border-radius:2px;"></div>
+                                    </div>
+                                    <div id="trimPlayhead" class="position-absolute top-0 h-100 d-flex align-items-center justify-content-center"
+                                         style="width:16px; cursor:grab; touch-action:none;">
+                                        <div style="width:2px; height:100%; background:#212529; border-radius:1px;"></div>
+                                    </div>
+                                </div>
 
                                 <div class="d-flex gap-2 mt-2">
-                                    <button type="button" id="previewTrimBtn" class="btn btn-outline-secondary btn-sm">
-                                        選択範囲をプレビュー再生
-                                    </button>
                                     <button type="button" id="removeVideoBtn" class="btn btn-outline-danger btn-sm">
                                         動画を取り消す
                                     </button>
@@ -92,176 +113,357 @@
 const MAX_CLIP_SECONDS = 60;
 const MAX_INPUT_BYTES = 300 * 1024 * 1024; // 300MB（これ以上はブラウザ内処理が不安定なため拒否）
 
-const videoInput = document.getElementById('videoInput');
+const mediaInput = document.getElementById('mediaInput');
+const imagePreviewBox = document.getElementById('imagePreviewBox');
+const imagePreview = document.getElementById('imagePreview');
+const removeImageBtn = document.getElementById('removeImageBtn');
+
 const trimBox = document.getElementById('videoTrimBox');
 const preview = document.getElementById('videoPreview');
-const trimStart = document.getElementById('trimStart');
-const trimEnd = document.getElementById('trimEnd');
-const trimStartLabel = document.getElementById('trimStartLabel');
-const trimEndLabel = document.getElementById('trimEndLabel');
+const videoTapArea = document.getElementById('videoTapArea');
+const playPauseIcon = document.getElementById('playPauseIcon');
+const trimTrack = document.getElementById('trimTrack');
+const trimThumbnails = document.getElementById('trimThumbnails');
+const trimSelected = document.getElementById('trimSelected');
+const trimHandleStart = document.getElementById('trimHandleStart');
+const trimHandleEnd = document.getElementById('trimHandleEnd');
+const trimPlayhead = document.getElementById('trimPlayhead');
 const trimDurationLabel = document.getElementById('trimDurationLabel');
-const previewTrimBtn = document.getElementById('previewTrimBtn');
 const removeVideoBtn = document.getElementById('removeVideoBtn');
 const trimStatus = document.getElementById('trimStatus');
 const form = document.getElementById('createPostForm');
 const submitBtn = document.getElementById('submitPostBtn');
 
-let selectedFile = null;
+let selectedImageFile = null;
+let selectedVideoFile = null;
 let objectUrl = null;
-let previewStopAt = null;
+
+let videoDuration = 0;
+let trimStartSec = 0;
+let trimEndSec = 0;
+const HANDLE_WIDTH = 20; // px（CSSのwidthと合わせる）
+const PLAYHEAD_WIDTH = 16; // px（CSSのwidthと合わせる）
 
 function fmt(sec) {
   return (Math.round(sec * 10) / 10).toFixed(1);
 }
 
-function updateLabels() {
-  const s = parseFloat(trimStart.value);
-  const e = parseFloat(trimEnd.value);
-  trimStartLabel.textContent = fmt(s);
-  trimEndLabel.textContent = fmt(e);
-  trimDurationLabel.textContent = fmt(Math.max(0, e - s));
+function trackUsableWidth() {
+  return Math.max(1, trimTrack.clientWidth - HANDLE_WIDTH);
 }
 
-videoInput.addEventListener('change', () => {
-  const file = videoInput.files[0];
-  if (!file) return;
+function timeToLeft(t) {
+  if (videoDuration <= 0) return 0;
+  return (t / videoDuration) * trackUsableWidth();
+}
 
-  if (file.size > MAX_INPUT_BYTES) {
-    alert('動画ファイルが大きすぎます（300MBまで）。別の動画をお試しください。');
-    videoInput.value = '';
-    return;
+function leftToTime(left) {
+  const clamped = Math.max(0, Math.min(trackUsableWidth(), left));
+  return (clamped / trackUsableWidth()) * videoDuration;
+}
+
+function renderTrimBar() {
+  trimHandleStart.style.left = `${timeToLeft(trimStartSec)}px`;
+  trimHandleEnd.style.left = `${timeToLeft(trimEndSec)}px`;
+  trimSelected.style.left = `${timeToLeft(trimStartSec) + HANDLE_WIDTH / 2}px`;
+  trimSelected.style.width = `${Math.max(0, timeToLeft(trimEndSec) - timeToLeft(trimStartSec))}px`;
+  trimDurationLabel.textContent = fmt(Math.max(0, trimEndSec - trimStartSec));
+  renderPlayhead();
+}
+
+function renderPlayhead(time) {
+  const t = time !== undefined ? time : preview.currentTime;
+  trimPlayhead.style.left = `${timeToLeft(t) + HANDLE_WIDTH / 2 - PLAYHEAD_WIDTH / 2}px`;
+}
+
+// トリムバー全体に、動画の大まかなサムネイル（コマ）を敷き詰める
+async function generateThumbnails(file, duration) {
+  const THUMB_COUNT = 10;
+  trimThumbnails.innerHTML = '';
+
+  const thumbVideo = document.createElement('video');
+  thumbVideo.muted = true;
+  thumbVideo.playsInline = true;
+  thumbVideo.preload = 'auto';
+  thumbVideo.style.cssText = 'position:fixed; top:-9999px; left:-9999px; width:1px; height:1px;';
+  document.body.appendChild(thumbVideo);
+  const thumbUrl = URL.createObjectURL(file);
+  thumbVideo.src = thumbUrl;
+
+  try {
+    await new Promise((resolve, reject) => {
+      thumbVideo.addEventListener('loadedmetadata', resolve, { once: true });
+      thumbVideo.addEventListener('error', reject, { once: true });
+    });
+
+    const canvas = document.createElement('canvas');
+    const targetHeight = 88;
+    const aspect = (thumbVideo.videoWidth && thumbVideo.videoHeight)
+      ? thumbVideo.videoWidth / thumbVideo.videoHeight : 16 / 9;
+    canvas.height = targetHeight;
+    canvas.width = Math.round(targetHeight * aspect);
+    const ctx = canvas.getContext('2d');
+
+    for (let i = 0; i < THUMB_COUNT; i++) {
+      const t = Math.min(duration, (duration * i) / THUMB_COUNT);
+      await new Promise((resolve) => {
+        const onSeeked = () => {
+          thumbVideo.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        thumbVideo.addEventListener('seeked', onSeeked);
+        thumbVideo.currentTime = t;
+      });
+      ctx.drawImage(thumbVideo, 0, 0, canvas.width, canvas.height);
+
+      const img = document.createElement('img');
+      img.src = canvas.toDataURL('image/jpeg', 0.6);
+      img.style.cssText = 'height:100%; flex:1 1 0; min-width:0; object-fit:cover; display:block; pointer-events:none;';
+      trimThumbnails.appendChild(img);
+    }
+  } catch (e) {
+    console.warn('[thumbnails] 生成に失敗しました', e);
+  } finally {
+    URL.revokeObjectURL(thumbUrl);
+    document.body.removeChild(thumbVideo);
   }
+}
 
-  selectedFile = file;
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrl = URL.createObjectURL(file);
-  preview.src = objectUrl;
-  trimBox.hidden = false;
-  trimStatus.textContent = '';
+function setPlayIcon(isPlaying) {
+  playPauseIcon.innerHTML = isPlaying
+    ? '<i class="fas fa-pause"></i>'
+    : '<i class="fas fa-play"></i>';
+  playPauseIcon.style.opacity = isPlaying ? '0' : '0.9';
+}
 
-  preview.addEventListener('loadedmetadata', () => {
-    const duration = preview.duration || 0;
-    const initialEnd = Math.min(duration, MAX_CLIP_SECONDS);
-
-    trimStart.min = 0;
-    trimStart.max = duration;
-    trimStart.value = 0;
-
-    trimEnd.min = 0;
-    trimEnd.max = duration;
-    trimEnd.value = initialEnd;
-
-    updateLabels();
-  }, { once: true });
+videoTapArea.addEventListener('click', () => {
+  if (preview.paused) {
+    if (preview.currentTime < trimStartSec || preview.currentTime >= trimEndSec) {
+      preview.currentTime = trimStartSec;
+    }
+    preview.muted = false;
+    preview.play();
+  } else {
+    preview.pause();
+  }
 });
 
-trimStart.addEventListener('input', () => {
-  let s = parseFloat(trimStart.value);
-  let e = parseFloat(trimEnd.value);
-  if (e - s > MAX_CLIP_SECONDS) {
-    trimEnd.value = Math.min(parseFloat(trimEnd.max), s + MAX_CLIP_SECONDS);
-  }
-  if (s >= e) {
-    trimStart.value = Math.max(0, e - 0.1);
-  }
-  updateLabels();
-});
-
-trimEnd.addEventListener('input', () => {
-  let s = parseFloat(trimStart.value);
-  let e = parseFloat(trimEnd.value);
-  if (e - s > MAX_CLIP_SECONDS) {
-    trimEnd.value = s + MAX_CLIP_SECONDS;
-    e = parseFloat(trimEnd.value);
-  }
-  if (e <= s) {
-    trimEnd.value = s + 0.1;
-  }
-  updateLabels();
-});
-
-previewTrimBtn.addEventListener('click', () => {
-  const s = parseFloat(trimStart.value);
-  const e = parseFloat(trimEnd.value);
-  previewStopAt = e;
-  preview.currentTime = s;
-  preview.muted = false;
-  preview.play();
-});
+preview.addEventListener('play', () => setPlayIcon(true));
+preview.addEventListener('pause', () => setPlayIcon(false));
 
 preview.addEventListener('timeupdate', () => {
-  if (previewStopAt !== null && preview.currentTime >= previewStopAt) {
-    preview.pause();
-    previewStopAt = null;
+  if (preview.currentTime >= trimEndSec) {
+    preview.currentTime = trimStartSec;
+    if (!preview.paused) preview.play();
   }
+  renderPlayhead();
 });
 
-removeVideoBtn.addEventListener('click', () => {
-  selectedFile = null;
-  videoInput.value = '';
+function startDrag(handleEl, isStartHandle) {
+  handleEl.addEventListener('pointerdown', (ev) => {
+    handleEl.setPointerCapture(ev.pointerId);
+    preview.pause();
+
+    const onMove = (moveEv) => {
+      const rect = trimTrack.getBoundingClientRect();
+      const left = moveEv.clientX - rect.left - HANDLE_WIDTH / 2;
+      let t = leftToTime(left);
+
+      if (isStartHandle) {
+        t = Math.max(0, Math.min(t, trimEndSec - 0.2));
+        if (trimEndSec - t > MAX_CLIP_SECONDS) {
+          t = trimEndSec - MAX_CLIP_SECONDS;
+        }
+        trimStartSec = Math.max(0, t);
+      } else {
+        t = Math.min(videoDuration, Math.max(t, trimStartSec + 0.2));
+        if (t - trimStartSec > MAX_CLIP_SECONDS) {
+          t = trimStartSec + MAX_CLIP_SECONDS;
+        }
+        trimEndSec = Math.min(videoDuration, t);
+      }
+
+      preview.currentTime = isStartHandle ? trimStartSec : trimEndSec;
+      renderTrimBar();
+    };
+
+    const onUp = (upEv) => {
+      handleEl.releasePointerCapture(upEv.pointerId);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+startDrag(trimHandleStart, true);
+startDrag(trimHandleEnd, false);
+
+// 再生位置（プレイヘッド）を自由にドラッグして、選択範囲内をスクラブ確認できるように
+trimPlayhead.addEventListener('pointerdown', (ev) => {
+  trimPlayhead.setPointerCapture(ev.pointerId);
+  preview.pause();
+
+  const onMove = (moveEv) => {
+    const rect = trimTrack.getBoundingClientRect();
+    const left = moveEv.clientX - rect.left - HANDLE_WIDTH / 2;
+    const t = Math.max(trimStartSec, Math.min(trimEndSec, leftToTime(left)));
+    preview.currentTime = t;
+    renderPlayhead(t);
+  };
+
+  const onUp = (upEv) => {
+    trimPlayhead.releasePointerCapture(upEv.pointerId);
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+});
+
+function resetMediaPreviews() {
+  selectedImageFile = null;
+  selectedVideoFile = null;
+  imagePreviewBox.hidden = true;
   trimBox.hidden = true;
+  trimStatus.textContent = '';
+  trimThumbnails.innerHTML = '';
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;
   }
+}
+
+mediaInput.addEventListener('change', () => {
+  const file = mediaInput.files[0];
+  if (!file) return;
+
+  resetMediaPreviews();
+
+  if (file.type.startsWith('image/')) {
+    selectedImageFile = file;
+    objectUrl = URL.createObjectURL(file);
+    imagePreview.src = objectUrl;
+    imagePreviewBox.hidden = false;
+    return;
+  }
+
+  if (file.type.startsWith('video/')) {
+    if (file.size > MAX_INPUT_BYTES) {
+      alert('動画ファイルが大きすぎます（300MBまで）。別の動画をお試しください。');
+      mediaInput.value = '';
+      return;
+    }
+
+    selectedVideoFile = file;
+    objectUrl = URL.createObjectURL(file);
+    preview.src = objectUrl;
+    trimBox.hidden = false;
+
+    preview.addEventListener('loadedmetadata', () => {
+      videoDuration = preview.duration || 0;
+      trimStartSec = 0;
+      trimEndSec = Math.min(videoDuration, MAX_CLIP_SECONDS);
+      renderTrimBar();
+      setPlayIcon(false);
+      generateThumbnails(file, videoDuration);
+    }, { once: true });
+    return;
+  }
+
+  alert('画像または動画ファイルを選択してください。');
+  mediaInput.value = '';
+});
+
+window.addEventListener('resize', () => {
+  if (!trimBox.hidden) renderTrimBar();
+});
+
+removeImageBtn.addEventListener('click', () => {
+  mediaInput.value = '';
+  resetMediaPreviews();
+});
+
+removeVideoBtn.addEventListener('click', () => {
+  mediaInput.value = '';
+  resetMediaPreviews();
 });
 
 async function trimVideoWithFfmpeg(file, startSec, endSec) {
-  const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
-  const { fetchFile, toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+  // 自ドメインに置いたESM版一式を使う（CDN + UMDだとWorker種別の不整合で失敗したため、
+  // ライブラリ本来のESM構成のまま自ホストする）
+  const ffBase = window.location.origin + "{{ url_for('static', filename='vendor/ffmpeg') }}";
+  const utilBase = window.location.origin + "{{ url_for('static', filename='vendor/ffmpeg-util') }}";
+
+  const { FFmpeg } = await import(`${ffBase}/index.js`);
+  const { fetchFile } = await import(`${utilBase}/index.js`);
 
   const ffmpeg = new FFmpeg();
-  ffmpeg.on('log', ({ message }) => {
-    trimStatus.textContent = '処理中...';
+  ffmpeg.on('progress', ({ progress }) => {
+    const pct = Math.max(0, Math.min(100, Math.round(progress * 100)));
+    trimStatus.textContent = `動画をトリム中... ${pct}%`;
   });
 
   trimStatus.textContent = '動画エンジンを読み込み中...（初回のみ時間がかかります）';
-  const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
   await ffmpeg.load({
-    coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
+    coreURL: `${ffBase}/ffmpeg-core.js`,
+    wasmURL: `${ffBase}/ffmpeg-core.wasm`,
+    classWorkerURL: `${ffBase}/worker.js`,
   });
 
-  trimStatus.textContent = '動画をトリム中...';
+  trimStatus.textContent = '動画をトリム中... 0%';
   const inputName = 'input' + (file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.mp4');
   await ffmpeg.writeFile(inputName, await fetchFile(file));
 
-  await ffmpeg.exec([
-    '-i', inputName,
+  // -ss を -i の前に置く「高速シーク」。元動画のキーフレーム単位で開始点に飛ぶため、
+  // 精密さより速度を優先（数百MBの動画でも待ち時間を抑えるため）。
+  // ズレは最大でも1〜2秒程度。
+  const clipDuration = Math.max(0.1, endSec - startSec);
+  const execPromise = ffmpeg.exec([
     '-ss', String(startSec),
-    '-to', String(endSec),
+    '-i', inputName,
+    '-t', String(clipDuration),
+    // yadif: インターレース由来の横線ギザギザ対策
+    // scale: 長辺を720pに制限（それより小さい動画は拡大しない）。ファイルサイズと
+    //        変換速度の両方に効くので、圧縮率(crf)を上げるより優先。
+    '-vf', "yadif,scale='if(gt(iw,ih),min(iw,1280),-2)':'if(gt(iw,ih),-2,min(ih,1280))'",
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
-    '-crf', '28',
+    '-crf', '24',
     '-c:a', 'aac',
     '-movflags', '+faststart',
     'output.mp4',
   ]);
+
+  const TIMEOUT_MS = 90000;
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('動画のトリム処理がタイムアウトしました')), TIMEOUT_MS);
+  });
+  await Promise.race([execPromise, timeoutPromise]);
 
   const data = await ffmpeg.readFile('output.mp4');
   return new Blob([data.buffer], { type: 'video/mp4' });
 }
 
 form.addEventListener('submit', async (ev) => {
-  if (!selectedFile) {
-    // 動画なし：通常のフォーム送信のまま
-    return;
-  }
-
   ev.preventDefault();
   submitBtn.disabled = true;
-  submitBtn.textContent = '処理中...';
+
+  const formData = new FormData(form);
 
   try {
-    const s = parseFloat(trimStart.value);
-    const e = parseFloat(trimEnd.value);
-    const trimmedBlob = await trimVideoWithFfmpeg(selectedFile, s, e);
-
-    trimStatus.textContent = 'アップロード中...';
-
-    const formData = new FormData(form);
-    formData.delete('video');
-    formData.append('video', trimmedBlob, 'trimmed.mp4');
+    if (selectedVideoFile) {
+      submitBtn.textContent = '処理中...';
+      preview.pause();
+      const trimmedBlob = await trimVideoWithFfmpeg(selectedVideoFile, trimStartSec, trimEndSec);
+      trimStatus.textContent = 'アップロード中...';
+      formData.append('video', trimmedBlob, 'trimmed.mp4');
+    } else if (selectedImageFile) {
+      formData.append('image', selectedImageFile, selectedImageFile.name);
+    }
 
     const res = await fetch(form.action, {
       method: 'POST',
@@ -275,7 +477,7 @@ form.addEventListener('submit', async (ev) => {
       window.location.reload();
     }
   } catch (err) {
-    console.error('[video trim] error', err);
+    console.error('[create post] error', err);
     trimStatus.textContent = '';
     alert('動画の処理に失敗しました。お使いの端末では動画投稿に対応していない可能性があります。動画なしで投稿するか、別の端末でお試しください。');
     submitBtn.disabled = false;
