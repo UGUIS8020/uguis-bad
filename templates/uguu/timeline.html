@@ -307,6 +307,15 @@ body{
             </figure>
             {% endif %}
 
+            {% if post.video_url %}
+            <div class="ig-media ig-skeleton-block">
+              <video src="{{ post.video_url }}"
+                     controls playsinline preload="metadata" muted
+                     style="width:100%; max-height:480px; background:#000;"
+                     onloadeddata="this.closest('.ig-media').classList.add('is-loaded')"></video>
+            </div>
+            {% endif %}
+
             {% if post.youtube_url %}
             {% set y = post.youtube_url %}
             {% if 'shorts' in y %}
@@ -510,7 +519,16 @@ document.addEventListener('DOMContentLoaded', () => {
       </figure>
     ` : "";
 
-    
+    const videoBlock = p.video_url ? `
+      <div class="ig-media ig-skeleton-block">
+        <video src="${escapeHtml(p.video_url)}"
+               controls playsinline preload="metadata" muted
+               style="width:100%; max-height:480px; background:#000;"
+               onloadeddata="this.closest('.ig-media').classList.add('is-loaded')"></video>
+      </div>
+    ` : "";
+
+
     const canEdit = !!p.can_edit;
 
     const editUrl = (editUrlTpl && postId)
@@ -616,6 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </header>
 
         ${imageBlock}
+        ${videoBlock}
         ${youtubeBlock}
 
         <div class="card-body">
