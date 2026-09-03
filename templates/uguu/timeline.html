@@ -311,7 +311,7 @@ body{
             <div class="ig-media">
               <video src="{{ post.video_url }}"
                      {% if post.poster_url %}poster="{{ post.poster_url }}"{% endif %}
-                     controls playsinline preload="metadata" muted
+                     controls playsinline preload="auto" muted
                      style="width:100%; max-height:480px; background:#000;"></video>
             </div>
             {% endif %}
@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="ig-media">
         <video src="${escapeHtml(p.video_url)}"
                ${p.poster_url ? `poster="${escapeHtml(p.poster_url)}"` : ''}
-               controls playsinline preload="metadata" muted
+               controls playsinline preload="auto" muted
                style="width:100%; max-height:480px; background:#000;"></video>
       </div>
     ` : "";
