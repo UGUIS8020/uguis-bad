@@ -2,10 +2,40 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user, login_required
 from .dynamo import db
-from utils.s3 import upload_image_to_s3, upload_video_to_s3, upload_video_poster_to_s3
+from utils.s3 import upload_image_to_s3, upload_video_path_to_s3, upload_video_poster_to_s3
+from utils.video import compress_video
 from uuid import uuid4
 from datetime import datetime, timezone
 from flask_wtf.csrf import generate_csrf
+import os
+import tempfile
+
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'webm', 'mov'}
+MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50MB（ブラウザ側でカット済みの短い動画を想定）
+
+
+def _save_and_compress_video(video):
+    """アップロードされた動画（ブラウザ側でカット済み）を一時保存し、サーバー側で圧縮する。
+    戻り値: (アップロード用のローカルパス, 削除すべき一時ファイルのリスト) または (None, [])"""
+    ext = video.filename.lower().rsplit('.', 1)[-1] if '.' in video.filename else ''
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        return None, []
+
+    video.seek(0, os.SEEK_END)
+    size = video.tell()
+    video.seek(0)
+    if size > MAX_VIDEO_BYTES:
+        return None, []
+
+    fd, tmp_path = tempfile.mkstemp(suffix=f'.{ext}')
+    os.close(fd)
+    video.save(tmp_path)
+
+    compressed_path = compress_video(tmp_path)
+    if compressed_path:
+        return compressed_path, [tmp_path, compressed_path]
+    # 圧縮できなかった場合（ffmpeg未導入・失敗）は元ファイルをそのままアップロード
+    return tmp_path, [tmp_path]
 
 
 
@@ -48,11 +78,24 @@ def create_post():
             video_url = None
             poster_url = None
             if video and video.filename:
-                # トリムはブラウザ側（ffmpeg.wasm）で完了済みの前提
-                video_url = upload_video_to_s3(video)
-                if not video_url:
-                    flash('動画のアップロードに失敗しました（形式またはサイズをご確認ください）', 'warning')
-                    return render_template('uguu/create_post.html')
+                # ブラウザ側では -c copy によるカットのみ。720pへの縮小や圧縮はここで行う。
+                upload_path, tmp_files = _save_and_compress_video(video)
+                try:
+                    if not upload_path:
+                        flash('動画のアップロードに失敗しました（形式またはサイズをご確認ください）', 'warning')
+                        return render_template('uguu/create_post.html')
+
+                    video_url = upload_video_path_to_s3(upload_path)
+                    if not video_url:
+                        flash('動画のアップロードに失敗しました。', 'warning')
+                        return render_template('uguu/create_post.html')
+                finally:
+                    for p in tmp_files:
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+
                 if poster and poster.filename:
                     poster_url = upload_video_poster_to_s3(poster)
 
