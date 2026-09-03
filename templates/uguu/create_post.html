@@ -392,6 +392,25 @@ removeVideoBtn.addEventListener('click', () => {
   resetMediaPreviews();
 });
 
+function captureVideoFrame(videoEl, atTime) {
+  return new Promise((resolve) => {
+    const onSeeked = () => {
+      videoEl.removeEventListener('seeked', onSeeked);
+      const canvas = document.createElement('canvas');
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      if (!canvas.width || !canvas.height) {
+        resolve(null);
+        return;
+      }
+      canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+    };
+    videoEl.addEventListener('seeked', onSeeked);
+    videoEl.currentTime = atTime;
+  });
+}
+
 async function trimVideoWithFfmpeg(file, startSec, endSec) {
   // 自ドメインに置いたESM版一式を使う（CDN + UMDだとWorker種別の不整合で失敗したため、
   // ライブラリ本来のESM構成のまま自ホストする）
@@ -458,6 +477,16 @@ form.addEventListener('submit', async (ev) => {
     if (selectedVideoFile) {
       submitBtn.textContent = '処理中...';
       preview.pause();
+
+      // 体感速度対策：開始位置のフレームをポスター画像として先にアップロードし、
+      // タイムラインでは動画本体の読み込み前にこの静止画をすぐ表示できるようにする
+      try {
+        const posterBlob = await captureVideoFrame(preview, trimStartSec);
+        if (posterBlob) formData.append('poster', posterBlob, 'poster.jpg');
+      } catch (e) {
+        console.warn('[poster] キャプチャに失敗しました（投稿は続行します）', e);
+      }
+
       const trimmedBlob = await trimVideoWithFfmpeg(selectedVideoFile, trimStartSec, trimEndSec);
       trimStatus.textContent = 'アップロード中...';
       formData.append('video', trimmedBlob, 'trimmed.mp4');
