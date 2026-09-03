@@ -393,18 +393,22 @@ removeVideoBtn.addEventListener('click', () => {
 });
 
 function captureVideoFrame(videoEl, atTime) {
+  const POSTER_MAX_SIZE = 640; // px（サムネイルなのでこれで十分。動画本体より軽くする）
   return new Promise((resolve) => {
     const onSeeked = () => {
       videoEl.removeEventListener('seeked', onSeeked);
-      const canvas = document.createElement('canvas');
-      canvas.width = videoEl.videoWidth;
-      canvas.height = videoEl.videoHeight;
-      if (!canvas.width || !canvas.height) {
+      const vw = videoEl.videoWidth;
+      const vh = videoEl.videoHeight;
+      if (!vw || !vh) {
         resolve(null);
         return;
       }
+      const scale = Math.min(1, POSTER_MAX_SIZE / Math.max(vw, vh));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(vw * scale);
+      canvas.height = Math.round(vh * scale);
       canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7);
     };
     videoEl.addEventListener('seeked', onSeeked);
     videoEl.currentTime = atTime;
