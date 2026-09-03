@@ -176,6 +176,7 @@ class DynamoDB:
                 "image_url": post.get("image_url"),
                 "youtube_url": post.get("youtube_url"),
                 "video_url": post.get("video_url"),
+                "poster_url": post.get("poster_url"),
                 "created_at": post.get("created_at"),
                 "updated_at": post.get("updated_at", post.get("created_at")),
                 "user_id": user_id,
@@ -240,7 +241,7 @@ class DynamoDB:
         return res.get("Item")
     
 
-    def create_post(self, user_id, content, image_url=None, youtube_url=None, video_url=None):
+    def create_post(self, user_id, content, image_url=None, youtube_url=None, video_url=None, poster_url=None):
         post_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
@@ -253,6 +254,7 @@ class DynamoDB:
             "image_url": image_url,
             "youtube_url": youtube_url,
             "video_url": video_url,
+            "poster_url": poster_url,
             "created_at": now,
             "updated_at": now,
             "feed_pk": "FEED",
@@ -594,6 +596,7 @@ class DynamoDB:
                 "image_url": post.get("image_url"),
                 "youtube_url": post.get("youtube_url"),
                 "video_url": post.get("video_url"),
+                "poster_url": post.get("poster_url"),
                 "created_at": post.get("created_at"),
                 "updated_at": post.get("updated_at", post.get("created_at")),
                 "user_id": post.get("user_id"),

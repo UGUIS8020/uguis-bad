@@ -66,6 +66,7 @@ THREADS_ACCESS_TOKEN = os.getenv('THREADS_ACCESS_TOKEN')
 # うぐすたぐらむ設定
 UGUU_BOT_USER_ID = os.getenv('UGUU_BOT_USER_ID')
 UGUU_POST_TABLE  = 'uguu_post'
+UGUU_POST_ENABLED = False  # うぐいすの姫の自動投稿を一旦停止中。再開する場合はTrueに戻す
 
 # Instagram API設定
 INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
@@ -632,11 +633,11 @@ def main():
                 ok_threads = post_to_threads(tweet, dry_run=dry_run) is not None
 
             ok_ig   = post_to_instagram(caption, dry_run=dry_run) is not None
-            uguu_id = post_to_uguu(tweet, dry_run=dry_run)
+            uguu_id = post_to_uguu(tweet, dry_run=dry_run) if UGUU_POST_ENABLED else None
             ok_uguu = uguu_id is not None
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
-            if not ok_uguu:
+            if not ok_uguu and UGUU_POST_ENABLED:
                 logger.error('うぐすたぐらむ投稿に失敗しました。')
         else:
             # 3daysモード: 新規投稿してIDを保存
@@ -645,13 +646,13 @@ def main():
             ok_x      = x_id is not None
             ok_threads = th_id is not None
             ok_ig     = post_to_instagram(caption, dry_run=dry_run) is not None
-            uguu_id   = post_to_uguu(tweet, dry_run=dry_run)
+            uguu_id   = post_to_uguu(tweet, dry_run=dry_run) if UGUU_POST_ENABLED else None
             ok_uguu   = uguu_id is not None
             if not dry_run:
                 save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id, uguu_post_id=uguu_id)
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
-            if not ok_uguu:
+            if not ok_uguu and UGUU_POST_ENABLED:
                 logger.error('うぐすたぐらむ投稿に失敗しました。')
 
         if not ok_x:

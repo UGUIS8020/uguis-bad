@@ -2,7 +2,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user, login_required
 from .dynamo import db
-from utils.s3 import upload_image_to_s3, upload_video_to_s3
+from utils.s3 import upload_image_to_s3, upload_video_to_s3, upload_video_poster_to_s3
 from uuid import uuid4
 from datetime import datetime, timezone
 from flask_wtf.csrf import generate_csrf
@@ -24,6 +24,7 @@ def create_post():
         youtube_url = request.form.get('youtube_url', '').strip()
         image = request.files.get('image')
         video = request.files.get('video')
+        poster = request.files.get('poster')
 
         if not content:
             flash('投稿内容を入力してください', 'warning')
@@ -45,12 +46,15 @@ def create_post():
                 image_url = upload_image_to_s3(image)
 
             video_url = None
+            poster_url = None
             if video and video.filename:
                 # トリムはブラウザ側（ffmpeg.wasm）で完了済みの前提
                 video_url = upload_video_to_s3(video)
                 if not video_url:
                     flash('動画のアップロードに失敗しました（形式またはサイズをご確認ください）', 'warning')
                     return render_template('uguu/create_post.html')
+                if poster and poster.filename:
+                    poster_url = upload_video_poster_to_s3(poster)
 
             embed_url = None
             if youtube_url:
@@ -59,7 +63,7 @@ def create_post():
                     flash('有効なYouTube URLを入力してください', 'warning')
                     return render_template('uguu/create_post.html')
 
-            db.create_post(current_user.id, content, image_url, embed_url, video_url)
+            db.create_post(current_user.id, content, image_url, embed_url, video_url, poster_url)
             flash('投稿が完了しました', 'success')
             return redirect(url_for('uguu.show_timeline'))
 
