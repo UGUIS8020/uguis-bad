@@ -1814,10 +1814,12 @@ class DynamoDB:
         records_for_points = slice_records_for_points(records_all, last_reset_index)
         print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
 
-        # ★リセットが発生している場合、手動ポイントもリセット
-        if last_reset_index > 0:
-            print(f"[DBG] Reset occurred at index {last_reset_index}, clearing manual_points")
-            manual_points = 0
+        # ★リセットが発生している場合、リセット日より前の手動ポイントだけ無効化する
+        #   （一律0にすると、リセット後に新しく付与した分まで消えてしまうため）
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            print(f"[DBG] Reset occurred at index {last_reset_index} (reset_date={reset_date}), recalculating manual_points after reset_date")
+            manual_points = self.get_manual_points(user_id, reset_date=reset_date)
 
         all_time_early, all_time_direct = calc_registration_counts(records_all, self._is_early_registration)
 
