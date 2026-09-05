@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, time
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
@@ -1671,6 +1671,81 @@ class DynamoDB:
                 dates.append(str(ed))
         return dates
 
+    def get_court_entry_history(self, user_id: str) -> list[dict]:
+        """
+        「コートに入る」による確定入場記録（source=court_entry）のみを参加実績として返す。
+        事前の参加ボタン登録だけ（ドタキャン）は参加実績に含めない。
+        戻り値は get_user_participation_history_with_timestamp と同じ形式:
+        [{"event_date": "YYYY-MM-DD", "registered_at": "YYYY-MM-DD HH:MM:SS", "status": "registered", "schedule_id": ...}, ...]
+        """
+        table = self.part_history
+        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id),
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
+
+        today = datetime.now(JST).date()
+        by_date: dict[str, dict] = {}
+
+        for it in items:
+            if it.get("source") != "court_entry":
+                continue
+            if it.get("status") == "cancelled":
+                continue
+
+            event_date_str = (it.get("date") or it.get("event_date") or "").strip()
+            if not event_date_str:
+                continue
+            try:
+                event_date = datetime.strptime(event_date_str[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if event_date > today:
+                continue
+
+            joined_at_raw = it.get("joined_at") or it.get("created_at")
+            registered_at_dt = parse_dt_safe(joined_at_raw, default_tz=JST) if joined_at_raw else None
+            if registered_at_dt is None:
+                registered_at_dt = datetime.combine(event_date, time(0, 0, 0))
+            registered_at_str = registered_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # 同日に複数回コート入場している場合は1件にまとめる（最初の入場を採用）
+            existing = by_date.get(event_date_str)
+            if existing is None or registered_at_str < existing["registered_at"]:
+                by_date[event_date_str] = {
+                    "event_date": event_date_str,
+                    "registered_at": registered_at_str,
+                    "status": "registered",
+                    "schedule_id": it.get("schedule_id", ""),
+                }
+
+        return sorted(by_date.values(), key=lambda r: r["event_date"])
+
+    # 「コートに入る」機能の運用開始日。この日以降はコート入場記録がある場合のみ
+    # 参加実績として扱う（それ以前は機能自体が無かったため、従来通り参加登録で判定する）
+    COURT_ENTRY_FEATURE_START = "2026-06-28"
+
+    def get_effective_participation_history(self, user_id: str) -> list[dict]:
+        """
+        ポイント計算用の参加実績。
+        - COURT_ENTRY_FEATURE_START 以降: コート入場記録(court_entry)がある日のみ
+        - それより前: 従来通り、参加登録(status=registered)があった日
+        """
+        cutoff = self.COURT_ENTRY_FEATURE_START
+        old_history = self.get_user_participation_history_with_timestamp(user_id)
+        court_history = self.get_court_entry_history(user_id)
+
+        combined = [r for r in old_history if r["event_date"] < cutoff]
+        combined += [r for r in court_history if r["event_date"] >= cutoff]
+
+        # 万一同日で両方に記録がある場合の重複排除（新しい方=court_entry側を優先）
+        by_date = {r["event_date"]: r for r in combined}
+        return sorted(by_date.values(), key=lambda r: r["event_date"])
+
 
     def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -1811,11 +1886,11 @@ class DynamoDB:
 
         print(f"[DBG] point_multiplier={point_multiplier}")
 
-        # ★ raw_history が渡ってきたらそれを使う
-        if raw_history is None:
-            raw_history = self.get_user_participation_history_with_timestamp(user_id)
-
-        records_all = normalize_participation_history(raw_history)
+        # ★ポイント計算は、コート入場機能の運用開始日(6/28)以降は「コート入場記録がある
+        #   ものだけ」を参加実績として扱う（事前の参加ボタン登録だけ＝ドタキャンは含めない）。
+        #   それより前は機能自体が無かったため、従来通り参加登録で判定する。
+        #   raw_history引数は後方互換のため残しているが、ポイント計算にはもう使わない。
+        records_all = normalize_participation_history(self.get_effective_participation_history(user_id))
 
         if not records_all:
             return {
