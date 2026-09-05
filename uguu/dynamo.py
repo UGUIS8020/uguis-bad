@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, date
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
@@ -1928,17 +1928,16 @@ class DynamoDB:
         print(f"[DEBUG] Before reset check: uguu_points={uguu_points}, is_reset={is_reset}")
 
         if is_reset:
+            # 現在進行形で60日以上参加が無い場合は、付与のタイミングに関わらず
+            # 手動ポイントも含めて一律失効する（本人がまだ再参加していないため）
             print(f"[DEBUG] Resetting points! Before: uguu={uguu_points}, participation={participation_points}")
-            # ★失効日（最終参加日+reset_days）より後に付与された手動ポイントは、
-            #   本人がまだ再参加していなくても有効のまま残す（失効後は同じルールで貯まる）
-            expiry_date = (last_dt + timedelta(days=rules.reset_days)).strftime('%Y-%m-%d')
-            manual_points = self.get_manual_points(user_id, reset_date=expiry_date)
+            uguu_points = 0
             participation_points = 0
             streak_points = 0
             monthly_bonus_points = 0
             cumulative_bonus_points = 0
-            uguu_points = manual_points
-            print(f"[DEBUG] After reset: uguu={uguu_points} (expiry_date={expiry_date}, manual_points={manual_points})")
+            manual_points = 0
+            print(f"[DEBUG] After reset: uguu={uguu_points}")
 
         print(f"[DEBUG] Final uguu_points={uguu_points}")
 
