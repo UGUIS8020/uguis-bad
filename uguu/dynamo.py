@@ -15,9 +15,9 @@ from flask import current_app
 
 from uguu.point import (
     PointRules,
+    ParticipationRecord,
     normalize_participation_history,
     calc_reset_index,
-    slice_records_for_points,
     build_participated_date_set,
     calc_registration_counts,
     calc_participation_and_cumulative,
@@ -1637,9 +1637,41 @@ class DynamoDB:
                 pass
 
         print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
-        return total    
-  
-        
+        return total
+
+    def get_manual_point_dates(self, user_id: str) -> list[str]:
+        """
+        管理者によるポイント付与の event_date 一覧（'YYYY-MM-DD'）を返す。
+        付与した日も「活動があった日」として60日失効カウントに含めるために使う。
+        """
+        table = self.part_history
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) &
+                                Key("joined_at").begins_with("points#earn#"),
+            ScanIndexForward=True
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) &
+                                    Key("joined_at").begins_with("points#earn#"),
+                ScanIndexForward=True,
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
+
+        dates = []
+        for it in items:
+            if it.get("kind") != "earn":
+                continue
+            if not (it.get("earn_type") == "manual" or it.get("source") == "admin_manual"):
+                continue
+            ed = it.get("event_date")
+            if ed:
+                dates.append(str(ed))
+        return dates
+
+
     def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         bad-users-history から支払(消費)の直近履歴を返す。
@@ -1810,8 +1842,30 @@ class DynamoDB:
             }
 
         # リセット判定
-        last_reset_index, is_reset = calc_reset_index(records_all, rules.reset_days)
-        records_for_points = slice_records_for_points(records_all, last_reset_index)
+        # ★ポイント付与日も「活動があった日」として扱い、60日失効カウントをリセットする。
+        #   ただし付与日そのものは参加回数・累積・連続参加などの集計には含めないため、
+        #   リセット判定専用のマージ済みタイムラインを別途作り、records_all自体は変更しない。
+        manual_dates = self.get_manual_point_dates(user_id)
+        existing_dates = {r.event_date.strftime("%Y-%m-%d") for r in records_all}
+        merged_timeline = list(records_all)
+        for d in manual_dates:
+            if d in existing_dates:
+                continue
+            try:
+                dt = datetime.strptime(d[:10], "%Y-%m-%d")
+            except ValueError:
+                continue
+            merged_timeline.append(ParticipationRecord(event_date=dt, registered_at=dt, status="registered"))
+            existing_dates.add(d)
+        merged_timeline.sort(key=lambda r: r.event_date)
+
+        merged_reset_index, is_reset = calc_reset_index(merged_timeline, rules.reset_days)
+        if merged_reset_index > 0:
+            reset_boundary_date = merged_timeline[merged_reset_index].event_date
+            records_for_points = [r for r in records_all if r.event_date >= reset_boundary_date]
+        else:
+            records_for_points = records_all
+        last_reset_index = len(records_all) - len(records_for_points)
         print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
 
         # ★リセットが発生している場合、リセット日より前の手動ポイントだけ無効化する
