@@ -73,6 +73,10 @@ INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
 INSTAGRAM_USER_ID      = os.getenv('INSTAGRAM_USER_ID')
 INSTAGRAM_IMAGES_DIR   = os.path.join(BASE_DIR, 'static', 'sns_images')
 
+# Facebook API設定
+FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv('FACEBOOK_PAGE_ACCESS_TOKEN')
+FACEBOOK_PAGE_ID           = os.getenv('FACEBOOK_PAGE_ID')
+
 
 def get_dynamodb_table():
     dynamodb = boto3.resource(
@@ -325,7 +329,7 @@ def post_to_x(text: str, dry_run: bool = False):
         return None
 
 
-def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None, uguu_post_id=None):
+def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None, uguu_post_id=None, facebook_post_id=None):
     """投稿IDをDynamoDBのスケジュールに保存"""
     updates = []
     values = {}
@@ -338,6 +342,9 @@ def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None, uguu_post
     if uguu_post_id:
         updates.append('uguu_post_id = :uid')
         values[':uid'] = uguu_post_id
+    if facebook_post_id:
+        updates.append('facebook_post_id = :fid')
+        values[':fid'] = facebook_post_id
     if not updates:
         return
     table = get_dynamodb_table()
@@ -346,7 +353,7 @@ def save_post_ids(schedule: dict, tweet_id=None, threads_post_id=None, uguu_post
         UpdateExpression='SET ' + ', '.join(updates),
         ExpressionAttributeValues=values
     )
-    logger.info(f'投稿ID保存: x={tweet_id}, threads={threads_post_id}, uguu={uguu_post_id}')
+    logger.info(f'投稿ID保存: x={tweet_id}, threads={threads_post_id}, uguu={uguu_post_id}, facebook={facebook_post_id}')
 
 
 def quote_post_to_x(text: str, quote_tweet_id: str, dry_run: bool = False) -> bool:
@@ -580,6 +587,35 @@ def post_to_instagram(caption: str, dry_run: bool = False):
         return None
 
 
+def post_to_facebook(text: str, dry_run: bool = False):
+    """Facebookページに投稿。成功時はpost_idを返す、失敗時はNone"""
+    if dry_run:
+        logger.info(f'[DRY RUN Facebook] 投稿内容:\n{text}')
+        return 'DRY_RUN_ID'
+
+    if not FACEBOOK_PAGE_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
+        logger.error('Facebook APIキーが設定されていません。.envを確認してください。')
+        return None
+
+    try:
+        r = requests.post(
+            f'https://graph.facebook.com/v21.0/{FACEBOOK_PAGE_ID}/feed',
+            params={
+                'message': text,
+                'access_token': FACEBOOK_PAGE_ACCESS_TOKEN,
+            }
+        )
+        if not r.ok:
+            logger.error(f'Facebook投稿失敗: {r.status_code} {r.text}')
+            return None
+        post_id = r.json()['id']
+        logger.info(f'Facebook投稿成功！ post_id={post_id}')
+        return post_id
+    except Exception as e:
+        logger.error(f'Facebook投稿エラー: {e}')
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description='鶯バドミントン X自動投稿')
     parser.add_argument('--mode', choices=['3days', 'today', 'test'], default='test',
@@ -633,25 +669,32 @@ def main():
                 ok_threads = post_to_threads(tweet, dry_run=dry_run) is not None
 
             ok_ig   = post_to_instagram(caption, dry_run=dry_run) is not None
+            ok_fb   = post_to_facebook(tweet, dry_run=dry_run) is not None
             uguu_id = post_to_uguu(tweet, dry_run=dry_run) if UGUU_POST_ENABLED else None
             ok_uguu = uguu_id is not None
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
+            if not ok_fb:
+                logger.error('Facebook投稿に失敗しました。')
             if not ok_uguu and UGUU_POST_ENABLED:
                 logger.error('うぐすたぐらむ投稿に失敗しました。')
         else:
             # 3daysモード: 新規投稿してIDを保存
             x_id      = post_to_x(tweet, dry_run=dry_run)
             th_id     = post_to_threads(tweet, dry_run=dry_run)
+            fb_id     = post_to_facebook(tweet, dry_run=dry_run)
             ok_x      = x_id is not None
             ok_threads = th_id is not None
             ok_ig     = post_to_instagram(caption, dry_run=dry_run) is not None
+            ok_fb     = fb_id is not None
             uguu_id   = post_to_uguu(tweet, dry_run=dry_run) if UGUU_POST_ENABLED else None
             ok_uguu   = uguu_id is not None
             if not dry_run:
-                save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id, uguu_post_id=uguu_id)
+                save_post_ids(schedule, tweet_id=x_id, threads_post_id=th_id, uguu_post_id=uguu_id, facebook_post_id=fb_id)
             if not ok_ig:
                 logger.error('Instagram投稿に失敗しました。')
+            if not ok_fb:
+                logger.error('Facebook投稿に失敗しました。')
             if not ok_uguu and UGUU_POST_ENABLED:
                 logger.error('うぐすたぐらむ投稿に失敗しました。')
 
@@ -659,7 +702,7 @@ def main():
             logger.error('X投稿/リポストに失敗しました。')
         if not ok_threads:
             logger.error('Threads投稿/リポストに失敗しました。')
-        if not ok_x and not ok_threads and not ok_ig and not ok_uguu:
+        if not ok_x and not ok_threads and not ok_ig and not ok_uguu and not ok_fb:
             sys.exit(1)
 
 

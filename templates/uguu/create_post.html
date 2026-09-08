@@ -441,22 +441,16 @@ async function trimVideoWithFfmpeg(file, startSec, endSec) {
   const inputName = 'input' + (file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.mp4');
   await ffmpeg.writeFile(inputName, await fetchFile(file));
 
-  // -ss を -i の前に置く「高速シーク」。元動画のキーフレーム単位で開始点に飛ぶため、
-  // 精密さより速度を優先（数百MBの動画でも待ち時間を抑えるため）。
-  // ズレは最大でも1〜2秒程度。
+  // ブラウザ側は「カットのみ」。再エンコードはせずストリームコピー（-c copy）にする。
+  // 圧縮・スケール・デインターレースはアップロード後にサーバー側で行う。
+  // -ss を -i の前に置く「高速シーク」なので、キーフレーム単位で開始点に飛ぶ
+  // （精密さより速度を優先。ズレは最大でも1〜2秒程度）。
   const clipDuration = Math.max(0.1, endSec - startSec);
   const execPromise = ffmpeg.exec([
     '-ss', String(startSec),
     '-i', inputName,
     '-t', String(clipDuration),
-    // yadif: インターレース由来の横線ギザギザ対策
-    // scale: 長辺を720pに制限（それより小さい動画は拡大しない）。ファイルサイズと
-    //        変換速度の両方に効くので、圧縮率(crf)を上げるより優先。
-    '-vf', "yadif,scale='if(gt(iw,ih),min(iw,1280),-2)':'if(gt(iw,ih),-2,min(ih,1280))'",
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
-    '-crf', '24',
-    '-c:a', 'aac',
+    '-c', 'copy',
     '-movflags', '+faststart',
     'output.mp4',
   ]);

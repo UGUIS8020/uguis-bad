@@ -116,6 +116,34 @@ def upload_video_to_s3(file):
         return None
 
 
+def upload_video_path_to_s3(local_path, content_type='video/mp4'):
+    """ローカルファイルパスから動画をS3にアップロードする（サーバー側で圧縮した後のファイル用）"""
+    if not local_path or not os.path.exists(local_path):
+        return None
+
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_REGION")
+    )
+    bucket_name = os.getenv("S3_BUCKET")
+    file_name = f"posts/videos/{uuid.uuid4()}.mp4"
+
+    try:
+        with open(local_path, 'rb') as f:
+            s3.upload_fileobj(
+                f,
+                bucket_name,
+                file_name,
+                ExtraArgs={'ContentType': content_type}
+            )
+        return f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
+    except Exception as e:
+        print(f"Error uploading video to S3: {e}")
+        return None
+
+
 def upload_video_poster_to_s3(file):
     """動画投稿のポスター画像（先頭フレーム）をS3にアップロードする。
     体感速度対策：動画本体の読み込み前に静止画をすぐ表示するために使う。"""

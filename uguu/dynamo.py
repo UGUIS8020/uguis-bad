@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, time
 from uuid import uuid4
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Key
@@ -15,9 +15,9 @@ from flask import current_app
 
 from uguu.point import (
     PointRules,
+    ParticipationRecord,
     normalize_participation_history,
     calc_reset_index,
-    slice_records_for_points,
     build_participated_date_set,
     calc_registration_counts,
     calc_participation_and_cumulative,
@@ -1637,9 +1637,116 @@ class DynamoDB:
                 pass
 
         print(f"[DEBUG] 管理人付与(ledger) 合計: {total}P / user_id={user_id}, since={reset_date}")
-        return total    
-  
-        
+        return total
+
+    def get_manual_point_dates(self, user_id: str) -> list[str]:
+        """
+        管理者によるポイント付与の event_date 一覧（'YYYY-MM-DD'）を返す。
+        付与した日も「活動があった日」として60日失効カウントに含めるために使う。
+        """
+        table = self.part_history
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) &
+                                Key("joined_at").begins_with("points#earn#"),
+            ScanIndexForward=True
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) &
+                                    Key("joined_at").begins_with("points#earn#"),
+                ScanIndexForward=True,
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
+
+        dates = []
+        for it in items:
+            if it.get("kind") != "earn":
+                continue
+            if not (it.get("earn_type") == "manual" or it.get("source") == "admin_manual"):
+                continue
+            ed = it.get("event_date")
+            if ed:
+                dates.append(str(ed))
+        return dates
+
+    def get_court_entry_history(self, user_id: str) -> list[dict]:
+        """
+        「コートに入る」による確定入場記録（source=court_entry）のみを参加実績として返す。
+        事前の参加ボタン登録だけ（ドタキャン）は参加実績に含めない。
+        戻り値は get_user_participation_history_with_timestamp と同じ形式:
+        [{"event_date": "YYYY-MM-DD", "registered_at": "YYYY-MM-DD HH:MM:SS", "status": "registered", "schedule_id": ...}, ...]
+        """
+        table = self.part_history
+        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id),
+                ExclusiveStartKey=resp["LastEvaluatedKey"]
+            )
+            items.extend(resp.get("Items", []))
+
+        today = datetime.now(JST).date()
+        by_date: dict[str, dict] = {}
+
+        for it in items:
+            if it.get("source") != "court_entry":
+                continue
+            if it.get("status") == "cancelled":
+                continue
+
+            event_date_str = (it.get("date") or it.get("event_date") or "").strip()
+            if not event_date_str:
+                continue
+            try:
+                event_date = datetime.strptime(event_date_str[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if event_date > today:
+                continue
+
+            joined_at_raw = it.get("joined_at") or it.get("created_at")
+            registered_at_dt = parse_dt_safe(joined_at_raw, default_tz=JST) if joined_at_raw else None
+            if registered_at_dt is None:
+                registered_at_dt = datetime.combine(event_date, time(0, 0, 0))
+            registered_at_str = registered_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # 同日に複数回コート入場している場合は1件にまとめる（最初の入場を採用）
+            existing = by_date.get(event_date_str)
+            if existing is None or registered_at_str < existing["registered_at"]:
+                by_date[event_date_str] = {
+                    "event_date": event_date_str,
+                    "registered_at": registered_at_str,
+                    "status": "registered",
+                    "schedule_id": it.get("schedule_id", ""),
+                }
+
+        return sorted(by_date.values(), key=lambda r: r["event_date"])
+
+    # 「コートに入る」機能の運用開始日。この日以降はコート入場記録がある場合のみ
+    # 参加実績として扱う（それ以前は機能自体が無かったため、従来通り参加登録で判定する）
+    COURT_ENTRY_FEATURE_START = "2026-06-28"
+
+    def get_effective_participation_history(self, user_id: str) -> list[dict]:
+        """
+        ポイント計算用の参加実績。
+        - COURT_ENTRY_FEATURE_START 以降: コート入場記録(court_entry)がある日のみ
+        - それより前: 従来通り、参加登録(status=registered)があった日
+        """
+        cutoff = self.COURT_ENTRY_FEATURE_START
+        old_history = self.get_user_participation_history_with_timestamp(user_id)
+        court_history = self.get_court_entry_history(user_id)
+
+        combined = [r for r in old_history if r["event_date"] < cutoff]
+        combined += [r for r in court_history if r["event_date"] >= cutoff]
+
+        # 万一同日で両方に記録がある場合の重複排除（新しい方=court_entry側を優先）
+        by_date = {r["event_date"]: r for r in combined}
+        return sorted(by_date.values(), key=lambda r: r["event_date"])
+
+
     def list_point_spends(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         bad-users-history から支払(消費)の直近履歴を返す。
@@ -1779,11 +1886,11 @@ class DynamoDB:
 
         print(f"[DBG] point_multiplier={point_multiplier}")
 
-        # ★ raw_history が渡ってきたらそれを使う
-        if raw_history is None:
-            raw_history = self.get_user_participation_history_with_timestamp(user_id)
-
-        records_all = normalize_participation_history(raw_history)
+        # ★ポイント計算は、コート入場機能の運用開始日(6/28)以降は「コート入場記録がある
+        #   ものだけ」を参加実績として扱う（事前の参加ボタン登録だけ＝ドタキャンは含めない）。
+        #   それより前は機能自体が無かったため、従来通り参加登録で判定する。
+        #   raw_history引数は後方互換のため残しているが、ポイント計算にはもう使わない。
+        records_all = normalize_participation_history(self.get_effective_participation_history(user_id))
 
         if not records_all:
             return {
@@ -1810,14 +1917,38 @@ class DynamoDB:
             }
 
         # リセット判定
-        last_reset_index, is_reset = calc_reset_index(records_all, rules.reset_days)
-        records_for_points = slice_records_for_points(records_all, last_reset_index)
+        # ★ポイント付与日も「活動があった日」として扱い、60日失効カウントをリセットする。
+        #   ただし付与日そのものは参加回数・累積・連続参加などの集計には含めないため、
+        #   リセット判定専用のマージ済みタイムラインを別途作り、records_all自体は変更しない。
+        manual_dates = self.get_manual_point_dates(user_id)
+        existing_dates = {r.event_date.strftime("%Y-%m-%d") for r in records_all}
+        merged_timeline = list(records_all)
+        for d in manual_dates:
+            if d in existing_dates:
+                continue
+            try:
+                dt = datetime.strptime(d[:10], "%Y-%m-%d")
+            except ValueError:
+                continue
+            merged_timeline.append(ParticipationRecord(event_date=dt, registered_at=dt, status="registered"))
+            existing_dates.add(d)
+        merged_timeline.sort(key=lambda r: r.event_date)
+
+        merged_reset_index, is_reset = calc_reset_index(merged_timeline, rules.reset_days)
+        if merged_reset_index > 0:
+            reset_boundary_date = merged_timeline[merged_reset_index].event_date
+            records_for_points = [r for r in records_all if r.event_date >= reset_boundary_date]
+        else:
+            records_for_points = records_all
+        last_reset_index = len(records_all) - len(records_for_points)
         print("[DBG] user_id=", user_id, "records_all=", len(records_all), "records_for_points=", len(records_for_points))
 
-        # ★リセットが発生している場合、手動ポイントもリセット
-        if last_reset_index > 0:
-            print(f"[DBG] Reset occurred at index {last_reset_index}, clearing manual_points")
-            manual_points = 0
+        # ★リセットが発生している場合、リセット日より前の手動ポイントだけ無効化する
+        #   （一律0にすると、リセット後に新しく付与した分まで消えてしまうため）
+        if last_reset_index > 0 and records_for_points:
+            reset_date = records_for_points[0].event_date.strftime('%Y-%m-%d')
+            print(f"[DBG] Reset occurred at index {last_reset_index} (reset_date={reset_date}), recalculating manual_points after reset_date")
+            manual_points = self.get_manual_points(user_id, reset_date=reset_date)
 
         all_time_early, all_time_direct = calc_registration_counts(records_all, self._is_early_registration)
 
@@ -1926,6 +2057,8 @@ class DynamoDB:
         print(f"[DEBUG] Before reset check: uguu_points={uguu_points}, is_reset={is_reset}")
 
         if is_reset:
+            # 現在進行形で60日以上参加が無い場合は、付与のタイミングに関わらず
+            # 手動ポイントも含めて一律失効する（本人がまだ再参加していないため）
             print(f"[DEBUG] Resetting points! Before: uguu={uguu_points}, participation={participation_points}")
             uguu_points = 0
             participation_points = 0
