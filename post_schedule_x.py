@@ -182,6 +182,11 @@ def build_tweet(schedule: dict, mode: str) -> str:
     schedule_id = schedule.get('schedule_id', '')
     detail_url = f'{SITE_URL}/schedule/{schedule_id}/{date_str}' if schedule_id else SITE_URL
 
+    # 満員時はシンプルな告知に切り替え（募集文言を出さない）
+    if max_p > 0 and remaining <= 0:
+        headline = '明日のバドミントンは満員御礼！' if mode == 'today' else f'{date_disp}のバドミントンは満員御礼！'
+        return '\n'.join([headline, '', '次回の参加お待ちしています！', '', detail_url])
+
     # 参加者詳細
     details = get_participant_details(schedule)
     total = details['total']
@@ -256,6 +261,11 @@ def build_instagram_caption(schedule: dict, mode: str) -> str:
         slots = f'残り{remaining}枠'
     else:
         slots = f'残{remaining}枠 参加募集中！'
+
+    # 満員時はシンプルな告知に切り替え（募集文言を出さない）
+    if max_p > 0 and remaining <= 0:
+        headline = '明日のバドミントンは満員御礼！' if mode == 'today' else f'{date_disp}のバドミントンは満員御礼！'
+        return '\n'.join([headline, '', '次回の参加お待ちしています！', '', INSTAGRAM_HASHTAGS])
 
     details = get_participant_details(schedule)
     total = details['total']
