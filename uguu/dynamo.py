@@ -2041,7 +2041,11 @@ class DynamoDB:
             print(f"[DBG] total_points_used={total_points_used} from {len(spends)} records")
 
         last_dt = records_all[-1].event_date
-        days_until_reset = calc_days_until_reset(last_dt, rules.reset_days)
+        # ★失効クロックは is_reset と同じ基準（手動付与日も含むmerged_timeline）で計算する。
+        #   records_all基準のままだと、手動付与でクロックがリセットされた(is_reset=False)のに
+        #   days_until_resetだけマイナスになる、という矛盾が起きるため。
+        last_clock_dt = merged_timeline[-1].event_date if merged_timeline else last_dt
+        days_until_reset = calc_days_until_reset(last_clock_dt, rules.reset_days)
 
         total_participation_all_time = len(records_all)
 
