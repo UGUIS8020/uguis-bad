@@ -23,6 +23,45 @@ class PointRules:
     streak_per_participation_after_2: int = 50
     # ※ ここにルールを集約しておくと仕様変更が楽
 
+
+# ==========================================================
+# ポイント条件 2026-09-01 改定
+#   - 過去分（9/1より前の参加日）は旧ルールのまま計算し続ける。
+#   - 9/1以降の参加日だけ新ルールを適用する。
+#   COURT_ENTRY_FEATURE_START (dynamo.py) と同じ「基準日方式」。
+# ==========================================================
+POINT_RULE_V2_CUTOFF = date(2026, 9, 1)
+
+
+def _as_date(d) -> date:
+    return d.date() if isinstance(d, datetime) else d
+
+
+def make_point_multiplier_fn(birth_date, gender: str):
+    """
+    参加日ごとに異なりうる属性倍率を返す関数を作る。
+    - 未成年(18歳未満、本日時点の年齢で判定・従来通り): 常に1.3倍
+    - 女性: 2026-09-01以降は1.25倍、それより前は1.20倍
+    - それ以外: 1.0倍
+    """
+    today = date.today()
+    is_minor = False
+    if birth_date is not None:
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        is_minor = age < 18
+    is_female = bool(gender and str(gender).lower() == "female")
+
+    def _fn(event_date) -> float:
+        if is_minor:
+            return 1.3
+        if is_female:
+            return 1.25 if _as_date(event_date) >= POINT_RULE_V2_CUTOFF else 1.2
+        return 1.0
+
+    return _fn
+
 def normalize_participation_history(raw_history: List[Dict[str, Any]]) -> List[ParticipationRecord]:
     records: List[ParticipationRecord] = []
 
@@ -121,6 +160,7 @@ def calc_participation_and_cumulative(
     rules: PointRules,
     point_multiplier: float,
     is_early_registration_fn,
+    multiplier_fn=None,
 ) -> Dict[str, Any]:
     participation_points = 0
     cumulative_count = 0
@@ -140,27 +180,35 @@ def calc_participation_and_cumulative(
     first_ever_date = records_all[0].event_date
 
     for i, rec in enumerate(records_for_points):
+        m = multiplier_fn(rec.event_date) if multiplier_fn else point_multiplier
+        is_v2 = _as_date(rec.event_date) >= POINT_RULE_V2_CUTOFF
+
         base = is_early_registration_fn({"event_date": rec.event_date, "registered_at": rec.registered_at})
-        
+
         if base not in (100, 50):
             base = 10
-        
+
         if base == 100:
             early_count += 1
         elif base == 50:
             direct_count += 1
 
+        # ★2026-09-01改定: 早期登録(100P)以外は参加ポイント0Pに変更
+        if is_v2 and base != 100:
+            base = 0
+
         # ★全履歴の初回 OR カムバック参加（records_for_pointsの最初）
         if rec.event_date == first_ever_date or i == 0:
-            pts = int(rules.first_participation_points * point_multiplier)
+            pts = int(rules.first_participation_points * m)
         else:
-            pts = int(base * point_multiplier)
+            pts = int(base * m)
         participation_points += pts
 
         cumulative_count += 1
         if cumulative_count % 5 == 0:
-            # ここは「500にしたい」なら 500 に変更し rules 化推奨
-            bonus = int(500 * point_multiplier)
+            # ★2026-09-01改定: 累計ボーナス 500P→400P
+            cum_base = 400 if is_v2 else 500
+            bonus = int(cum_base * m)
             cumulative_bonus_points += bonus
 
     return {
@@ -172,19 +220,26 @@ def calc_participation_and_cumulative(
     }
 
 
-def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_multiplier: float) -> Tuple[int, Dict[str, Any]]:
+def calc_monthly_bonus(records_for_points: List[ParticipationRecord], point_multiplier: float, multiplier_fn=None) -> Tuple[int, Dict[str, Any]]:
     monthly_participation = defaultdict(int)
     for r in records_for_points:
         monthly_participation[r.event_date.strftime("%Y-%m")] += 1
-    
+
     print("[DBG monthly counts]", dict(sorted(monthly_participation.items())))
 
     monthly_bonus_points = 0
     monthly_bonuses: Dict[str, Any] = {}
 
     for month, count in sorted(monthly_participation.items()):
-        base_bonus = 0 if count < 3 else 450 + (count - 3) * 150
-        bonus = int(base_bonus * point_multiplier)
+        month_first_day = datetime.strptime(month + "-01", "%Y-%m-%d").date()
+        m = multiplier_fn(month_first_day) if multiplier_fn else point_multiplier
+
+        # ★2026-09-01改定: 月間ボーナス 450+(n-3)*150 → 400+(n-3)*100
+        if month_first_day >= POINT_RULE_V2_CUTOFF:
+            base_bonus = 0 if count < 3 else 400 + (count - 3) * 100
+        else:
+            base_bonus = 0 if count < 3 else 450 + (count - 3) * 150
+        bonus = int(base_bonus * m)
 
         monthly_bonuses[month] = {"participation_count": count, "bonus_points": bonus}
         monthly_bonus_points += bonus
@@ -235,6 +290,7 @@ def calc_streak_points(
     all_schedules: List[Dict[str, Any]],
     rules: PointRules,
     point_multiplier: float,
+    multiplier_fn=None,
 ) -> Tuple[int, int, int, str]:
     """
     連続参加ボーナス計算
@@ -276,6 +332,7 @@ def calc_streak_points(
     for schedule in all_schedules:
         schedule_date = schedule["date"]
         is_participated = schedule_date in user_participated_dates
+        m = multiplier_fn(datetime.strptime(schedule_date, "%Y-%m-%d").date()) if multiplier_fn else point_multiplier
 
         if is_participated:
             current_streak += 1
@@ -284,14 +341,14 @@ def calc_streak_points(
 
             # 連続2回目以降は毎回50P
             if current_streak >= 2:
-                sp = int(rules.streak_per_participation_after_2 * point_multiplier)
+                sp = int(rules.streak_per_participation_after_2 * m)
                 streak_points += sp
                 # ← これが大量ログの原因：DETAIL の時だけ
                 dbg_detail(f"[STREAK][step] {schedule_date} +{sp} (streak={current_streak})")
 
             # マイルストーンボーナス（ここは残してOK）
             if current_streak in milestone_values and not milestones[current_streak]:
-                bonus = int(milestone_values[current_streak] * point_multiplier)
+                bonus = int(milestone_values[current_streak] * m)
                 streak_points += bonus
                 milestones[current_streak] = True
 
