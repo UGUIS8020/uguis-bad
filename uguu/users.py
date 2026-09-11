@@ -122,44 +122,24 @@ def user_profile(user_id):
         official_count = sum(1 for r in raw_history if isinstance(r, dict) and _is_registered(r))
 
         # ==========================================================
-        # ★ 厳格な60日ルール適用（バイパスモード + 自動没収）
+        # ★ 60日失効ルールの判定は get_user_stats() の結果をそのまま使う。
+        #
+        #   以前はここで raw_history（コート入場記録を考慮しない、かつ手動付与の
+        #   記録を含まない参加履歴）から独自に60日判定をやり直しており、
+        #   get_user_stats() 側で「手動付与も活動日とみなしてクロックをリセット」
+        #   していても、ここでは手動付与を見ないため無視して0P扱いにしてしまう
+        #   バグがあった（画面は0P表示なのに、ポイント支払いAPIは
+        #   get_user_stats()を直接使うため実際には使えてしまう、という矛盾も発生）。
+        #   計算はget_user_stats()に一本化する。
         # ==========================================================
-        from datetime import datetime, date
+        participation_points = int(user_stats.get('uguu_points', 0))
+        is_expired = bool(user_stats.get('is_reset', False))
+        last_participation_date = user_stats.get('last_participation_date')
+        days_until_reset_val = user_stats.get('days_until_reset')
+        days_since_last = (60 - days_until_reset_val) if days_until_reset_val is not None else 999
 
-        # 全履歴から計算された合計ポイント（暫定値）
-        calculated_total = int(user_stats.get('uguu_points', 0))
-
-        # 最後に「参加(registered)」した日を特定
-        last_participation_date = None
-        sorted_history = sorted(raw_history, key=lambda x: str(x.get('date') or x.get('event_date') or ''), reverse=True)
-        
-        for rec in sorted_history:
-            if _is_registered(rec):
-                last_participation_date = rec.get('date') or rec.get('event_date') or rec.get('eventDay')
-                break
-
-        # 没収判定
-        is_expired = False
-        days_since_last = 0
-        if last_participation_date:
-            try:
-                last_dt = datetime.strptime(str(last_participation_date)[:10], '%Y-%m-%d').date()
-                days_since_last = (date.today() - last_dt).days
-                if days_since_last > 60:
-                    is_expired = True
-            except Exception as e:
-                print(f"[WARN] Failed to parse last_participation_date: {e}")
-        else:
-            # 一度も参加したことがない場合は日数計算不能
-            days_since_last = 999 
-
-        # ポイントの最終確定
-        if is_expired:
-            participation_points = 0
-            print(f"[EXPIRED] user={user_id} Last={last_participation_date} Days={days_since_last} -> 0P")
-        else:
-            participation_points = calculated_total
-            print(f"[ACTIVE] user={user_id} Last={last_participation_date} Days={days_since_last} -> {participation_points}P")
+        print(f"[{'EXPIRED' if is_expired else 'ACTIVE'}] user={user_id} "
+              f"Last={last_participation_date} days_until_reset={days_until_reset_val} -> {participation_points}P")
 
         # テンプレートに渡すポイント情報
         points_info = {
@@ -211,7 +191,7 @@ def user_profile(user_id):
             following_count=0,
             is_admin=is_admin,
             admin_participation_dates=admin_participation_dates,
-            days_until_reset=60 - days_since_last if not is_expired else 0, # 残り日数表示用
+            days_until_reset=(days_until_reset_val if not is_expired else 0), # 残り日数表示用
             upcoming_schedules=db.get_upcoming_schedules(),
             point_spends=point_spends_preview,
             point_spends_total=len(point_spends),
