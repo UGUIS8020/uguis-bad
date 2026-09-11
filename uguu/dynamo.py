@@ -27,6 +27,7 @@ from uguu.point import (
     better,
     calc_streak_points,
     get_point_multiplier,
+    make_point_multiplier_fn,
 )
 
 load_dotenv()
@@ -1879,10 +1880,14 @@ class DynamoDB:
 
         birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date() if birth_date_str else None
         try:
-            point_multiplier = get_point_multiplier(birth_date=birth_date, gender=gender)
+            # ★参加日ごとに倍率が変わりうる（女性倍率が2026-09-01に1.2→1.25へ改定されたため）。
+            #   point_multiplierは表示用（is_junior_high等）に本日基準の値を保持しておく。
+            multiplier_fn = make_point_multiplier_fn(birth_date=birth_date, gender=gender)
+            point_multiplier = multiplier_fn(datetime.now(JST).date())
         except Exception as e:
             print(f"[DBG] get_point_multiplier ERROR: {e}")
-            point_multiplier = 1.0       
+            point_multiplier = 1.0
+            multiplier_fn = None
 
         print(f"[DBG] point_multiplier={point_multiplier}")
 
@@ -1958,6 +1963,7 @@ class DynamoDB:
             rules=rules,
             point_multiplier=point_multiplier,
             is_early_registration_fn=self._is_early_registration,
+            multiplier_fn=multiplier_fn,
         )
         participation_points = pc.get("participation_points", 0)
         cumulative_count = pc.get("cumulative_count", 0)
@@ -1965,7 +1971,7 @@ class DynamoDB:
         early_registration_count = pc.get("early_registration_count", 0)
         direct_registration_count = pc.get("direct_registration_count", 0)
 
-        monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier)
+        monthly_bonus_points, monthly_bonuses = calc_monthly_bonus(records_for_points, point_multiplier, multiplier_fn=multiplier_fn)
 
         print(f"[DBG] participation_points={participation_points}, cumulative_bonus={cumulative_bonus_points}")
         print(f"[DBG] monthly_bonus_points={monthly_bonus_points}")
@@ -1997,6 +2003,7 @@ class DynamoDB:
             all_schedules=all_schedules_for_streak,
             rules=rules,
             point_multiplier=point_multiplier,
+            multiplier_fn=multiplier_fn,
         )
 
         print(f"[DBG] streak_points={streak_points}, current_streak={current_streak_count}")
