@@ -26,7 +26,7 @@ class ScheduleForm(FlaskForm):
             DataRequired(),
             NumberRange(min=1, max=50, message='1人から50人までの間で設定してください')
         ],
-        default=15,
+        default=16,
         render_kw={"min": "1", "max": "50", "type": "number"}
     )
     
