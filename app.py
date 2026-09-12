@@ -1092,11 +1092,20 @@ def index():
 @app.route("/schedule_koyomi", methods=['GET'])
 @app.route("/schedule_koyomi/<int:year>/<int:month>", methods=['GET'])
 def schedule_koyomi(year=None, month=None):
+    if year is None or month is None:
+        today = date.today()
+        year, month = today.year, today.month
+
+    # ★不正なyear/monthを弾く（クローラーが/schedule_koyomi/<でたらめな数値>を
+    #   大量に叩き、DBスキャンを無駄に発生させてDynamoDBの読み込み容量を
+    #   超過させる問題があったため。DBに問い合わせる前に即404で弾く）
+    #   ※try/exceptの外で行う。中でabort(404)すると下のexcept Exceptionに
+    #   飲み込まれてしまい、意味のある404にならないため。
+    current_year = date.today().year
+    if not (1 <= month <= 12) or not (current_year - 2 <= year <= current_year + 5):
+        abort(404)
+
     try:
-        if year is None or month is None:
-            today = date.today()
-            year, month = today.year, today.month
-        
         # 前月・翌月の計算
         prev_date = date(year, month, 1) - timedelta(days=1)
         prev_year, prev_month = prev_date.year, prev_date.month
