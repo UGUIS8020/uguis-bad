@@ -41,6 +41,16 @@
         margin-top: 5px;
         text-align: center;
     }
+
+    .holiday-name {
+        font-size: 0.6rem;
+        line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: -3px;
+        margin-bottom: 3px;
+    }
     
     /* レスポンシブ対応 */
     .cal-sched-item {
@@ -68,6 +78,7 @@
         }
         .cal-count { font-size: 0.5rem; }
         .cal-join-btn { font-size: 0.5rem; padding: 0px 2px; }
+        .holiday-name { font-size: 0.45rem; }
     }
     
     .accordion-button::after {
@@ -180,10 +191,13 @@
                                     {% for day in week %}
                                     <td class="calendar-day {% if day.is_other_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}">
                                         {% if day.day != 0 %}
-                                        <div class="day-number {% if loop.index0 == 0 %}text-danger{% elif loop.index0 == 6 %}text-primary{% endif %}">
+                                        <div class="day-number {% if loop.index0 == 0 or day.is_holiday %}text-danger{% elif loop.index0 == 6 %}text-primary{% endif %}">
                                             {{ day.day }}
                                         </div>
-                                        
+                                        {% if day.holiday_name %}
+                                        <div class="holiday-name text-danger" title="{{ day.holiday_name }}">{{ day.holiday_name }}</div>
+                                        {% endif %}
+
                                         <!-- この日のスケジュール -->
                                         {% for s in day.schedules %}
                                         {% set eff_max = s.adjusted_max if s.adjusted_max else s.max_participants %}

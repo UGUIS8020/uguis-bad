@@ -3,6 +3,7 @@ import os, time, hashlib, json, base64
 import uuid
 import random
 import calendar
+import jpholiday
 import logging
 import io
 from io import BytesIO
@@ -1161,6 +1162,7 @@ def schedule_koyomi(year=None, month=None):
                     d_obj = date(year, month, day_num)
                     d_str = d_obj.strftime('%Y-%m-%d')
                     day_schedules = [s for s in schedules if s.get("date") == d_str]
+                    holiday_name = jpholiday.is_holiday_name(d_obj)
                     week_data.append({
                         'day': day_num,
                         'is_today': d_obj == today_obj,
@@ -1170,7 +1172,9 @@ def schedule_koyomi(year=None, month=None):
                         'has_full_schedule': all(
                             s.get('participants_count', 0) >= (s.get('adjusted_max') or s.get('max_participants', 10))
                             for s in day_schedules
-                        ) if day_schedules else False
+                        ) if day_schedules else False,
+                        'is_holiday': bool(holiday_name),
+                        'holiday_name': holiday_name,
                     })
             calendar_data.append(week_data)
 
