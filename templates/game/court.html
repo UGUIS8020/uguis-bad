@@ -885,35 +885,48 @@
             const response = await fetch('/game/api/waiting_status');
             if (response.ok) {
                 const data = await response.json();
- 
-                const totalCount = data.pending_count + data.resting_count;
-                if (totalCount === 0) {
-                    if (emptyStartTime === null) {
-                        emptyStartTime = Date.now();
-                    } else {
-                        if (Date.now() - emptyStartTime >= 5 * 60 * 1000) {
-                            window.location.href = '/';
-                            return;
+
+                // ★ このページが今表示している試合(MATCH_ID)が、サーバー側の最新の
+                //   試合(latest_match_id)と同じなら「すでに最新の状態を見ている」。
+                //   この場合は以下の自動リロード／強制送還を一切行わない。
+                //   （以前はここを見ずに「試合進行中かどうか」だけで判定していたため、
+                //   スコア入力中の管理者の画面が試合開始のたびに勝手にリロードされ、
+                //   入力中だったスコアが新しい試合のコートに誤送信される不具合があった）
+                const viewingCurrentMatch = !!MATCH_ID && data.latest_match_id === MATCH_ID;
+
+                if (!viewingCurrentMatch) {
+                    const totalCount = data.pending_count + data.resting_count;
+                    // ★ 誰か試合中(in_progress)なら「誰もいない」扱いにしない
+                    if (totalCount === 0 && !data.in_progress) {
+                        if (emptyStartTime === null) {
+                            emptyStartTime = Date.now();
+                        } else {
+                            if (Date.now() - emptyStartTime >= 5 * 60 * 1000) {
+                                window.location.href = '/';
+                                return;
+                            }
                         }
+                    } else {
+                        emptyStartTime = null;
+                    }
+
+                    if (data.new_pairing_available) {
+                        window.location.href = '/game/court';
+                        return;
+                    }
+
+                    if (data.pending_count !== currentPendingCount ||
+                        data.resting_count !== currentRestingCount) {
+                        currentPendingCount = data.pending_count;
+                        currentRestingCount = data.resting_count;
+                        location.reload();
+                        return;
                     }
                 } else {
                     emptyStartTime = null;
                 }
- 
-                if (data.new_pairing_available) {
-                    window.location.href = '/game/court';
-                    return;
-                }
- 
-                if (data.pending_count !== currentPendingCount ||
-                    data.resting_count !== currentRestingCount) {
-                    currentPendingCount = data.pending_count;
-                    currentRestingCount = data.resting_count;
-                    location.reload();
-                    return;
-                }
             }
- 
+
             lastUpdateTime = new Date();
             updateTimestamp();
         } catch (error) {
