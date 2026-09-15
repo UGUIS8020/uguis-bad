@@ -1675,7 +1675,15 @@ class DynamoDB:
     def get_court_entry_history(self, user_id: str) -> list[dict]:
         """
         「コートに入る」による確定入場記録（source=court_entry）のみを参加実績として返す。
-        事前の参加ボタン登録だけ（ドタキャン）は参加実績に含めない。
+        事前の参加ボタン登録だけ（ドタキャン）は参加実績に含めない（＝実際の参加確認はコート入場で行う）。
+
+        ただし registered_at（早期登録ボーナスの判定に使う時刻）は、コート入場時刻ではなく
+        「その日について最初に参加意思表示した時刻」（通常の参加登録・たら等）があればそちらを
+        優先する。コート入場時刻は「その日の練習開始前後」に必ずなるため、これをそのまま
+        registered_at に使うと、何日も前から事前登録していた人まで一律「当日登録」（早期登録
+        ボーナス対象外）に判定されてしまうバグがあったため（2026-06-28のコート入場導入以降、
+        事前登録の有無に関わらず全員この扱いになっていた）。
+
         戻り値は get_user_participation_history_with_timestamp と同じ形式:
         [{"event_date": "YYYY-MM-DD", "registered_at": "YYYY-MM-DD HH:MM:SS", "status": "registered", "schedule_id": ...}, ...]
         """
@@ -1691,10 +1699,10 @@ class DynamoDB:
 
         today = datetime.now(JST).date()
         by_date: dict[str, dict] = {}
+        # その日について最初に参加意思表示した時刻（コート入場を除く）。早期登録判定専用。
+        earliest_signup_at: dict[str, str] = {}
 
         for it in items:
-            if it.get("source") != "court_entry":
-                continue
             if it.get("status") == "cancelled":
                 continue
 
@@ -1708,21 +1716,49 @@ class DynamoDB:
             if event_date > today:
                 continue
 
-            joined_at_raw = it.get("joined_at") or it.get("created_at")
-            registered_at_dt = parse_dt_safe(joined_at_raw, default_tz=JST) if joined_at_raw else None
-            if registered_at_dt is None:
-                registered_at_dt = datetime.combine(event_date, time(0, 0, 0))
-            registered_at_str = registered_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+            source = it.get("source")
 
-            # 同日に複数回コート入場している場合は1件にまとめる（最初の入場を採用）
-            existing = by_date.get(event_date_str)
-            if existing is None or registered_at_str < existing["registered_at"]:
-                by_date[event_date_str] = {
-                    "event_date": event_date_str,
-                    "registered_at": registered_at_str,
-                    "status": "registered",
-                    "schedule_id": it.get("schedule_id", ""),
-                }
+            if source == "court_entry":
+                joined_at_raw = it.get("joined_at") or it.get("created_at")
+                registered_at_dt = parse_dt_safe(joined_at_raw, default_tz=JST) if joined_at_raw else None
+                if registered_at_dt is None:
+                    registered_at_dt = datetime.combine(event_date, time(0, 0, 0))
+                registered_at_str = registered_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+                # 同日に複数回コート入場している場合は1件にまとめる（最初の入場を採用）
+                existing = by_date.get(event_date_str)
+                if existing is None or registered_at_str < existing["registered_at"]:
+                    by_date[event_date_str] = {
+                        "event_date": event_date_str,
+                        "registered_at": registered_at_str,
+                        "status": "registered",
+                        "schedule_id": it.get("schedule_id", ""),
+                    }
+                continue
+
+            if source == "admin_manual":
+                continue
+
+            # ポイント台帳の取引（獲得/消費/調整）は参加登録ではないので除外する。
+            # このテーブルには points#spend#... のような支払い記録にも event_date が
+            # 入っているため、kind を見ずに除外すると誤って早期登録時刻として拾ってしまう。
+            if it.get("kind") in ("earn", "spend", "adjust"):
+                continue
+
+            # コート入場以外（通常の参加登録・たら等）: 早期登録判定用に最も早い時刻を記録
+            signup_at_raw = it.get("joined_at") or it.get("created_at") or it.get("registered_at")
+            signup_dt = parse_dt_safe(signup_at_raw, default_tz=JST) if signup_at_raw else None
+            if signup_dt is None:
+                continue
+            signup_str = signup_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if event_date_str not in earliest_signup_at or signup_str < earliest_signup_at[event_date_str]:
+                earliest_signup_at[event_date_str] = signup_str
+
+        # コート入場が確認できた日だけを採用しつつ、事前登録時刻があればそちらを優先する
+        for event_date_str, rec in by_date.items():
+            true_signup = earliest_signup_at.get(event_date_str)
+            if true_signup and true_signup < rec["registered_at"]:
+                rec["registered_at"] = true_signup
 
         return sorted(by_date.values(), key=lambda r: r["event_date"])
 
