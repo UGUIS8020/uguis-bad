@@ -2420,29 +2420,17 @@ def submit_score(match_id, court_number):
             current_app.logger.error("❌ チーム不完全: match=%s, court=%d", match_id, court_number_int)
             return "コートのチームデータが不完全です", 404
 
-        # ★ 重複チェック
-
+        # ★ 重複防止（アトミック版）
+        # 以前は「①スキャンで確認 → ②無ければ保存」の2段階で、①と②の間にごく僅かな
+        # 隙間があり、両チームがほぼ同時にスコア送信すると両方とも「重複なし」と判定されて
+        # 2件保存されてしまう競合状態があった（実例: 同一コートに数十ミリ秒差で2件保存）。
+        # result_id を match_id+court_number から決まる値にし、DynamoDBの条件付き書き込み
+        # （まだ存在しない場合のみ書き込む）1回の操作にまとめることで、この隙間を無くす。
         result_table = current_app.dynamodb.Table("bad-game-results")
 
-        existing = _scan_all(  # またはresult_table.scan(...)
-            result_table,
-            FilterExpression=(
-                Attr("match_id").eq(str(match_id)) &
-                Attr("court_number").eq(court_number_int)
-            ),
-            ProjectionExpression="result_id",
-            ConsistentRead=True,
-        )
-        if existing:
-            current_app.logger.warning(
-                "[submit_score] 重複送信ブロック: match=%s, court=%d",
-                match_id, court_number_int
-            )
-            return "", 200  # 冪等に200を返す（クライアントは正常扱い）
-
-        # ---- 4. 結果保存 ----        
+        result_id = f"{match_id}#{court_number_int}"
         result_item = {
-            "result_id": str(uuid.uuid4()),
+            "result_id": result_id,
             "match_id": str(match_id),
             "court_number": court_number_int,
             "team1_score": team1_score,
@@ -2453,11 +2441,24 @@ def submit_score(match_id, court_number):
             "created_at": datetime.now(JST).isoformat(),
         }
 
-        res = result_table.put_item(Item=result_item)
+        try:
+            res = result_table.put_item(
+                Item=result_item,
+                ConditionExpression="attribute_not_exists(result_id)",
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                current_app.logger.warning(
+                    "[submit_score] 重複送信ブロック: match=%s, court=%d",
+                    match_id, court_number_int
+                )
+                return "", 200  # 冪等に200を返す（クライアントは正常扱い）
+            raise
+
         current_app.logger.info(f"[DEBUG] 保存完了レスポンス: {res.get('ResponseMetadata', {}).get('HTTPStatusCode')}")
-        
+
         # 成功時はこの1行のみ
-        current_app.logger.info("Score: Match=%s, Court=%d, %d-%d (Win:%s)", 
+        current_app.logger.info("Score: Match=%s, Court=%d, %d-%d (Win:%s)",
                                  match_id, court_number_int, team1_score, team2_score, winner)
 
         return "", 200
