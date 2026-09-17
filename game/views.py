@@ -2566,6 +2566,24 @@ def reset_participants():
         flash('管理者のみ実行できます', 'danger')
         return redirect(url_for('index'))
 
+    # ★試合が進行中のときは「練習おわり」を実行させない。
+    #   以前はこのチェックが無く、コートで試合中の参加者がいても無条件に
+    #   全エントリーを削除していたため、「練習おわり」を押すと試合中の
+    #   参加者ごと強制的にリセットされてしまう不具合があった（実際に発生）。
+    #   進行中の試合がある場合は、先に「ペアリング破棄」で試合を終了して
+    #   もらう。
+    if has_ongoing_matches():
+        current_app.logger.warning(
+            "[reset_participants] 進行中の試合があるためブロック: user=%s",
+            getattr(current_user, 'user_id', None)
+        )
+        flash(
+            'まだ試合中のコートがあるため、練習を終了できません。'
+            '先に「ペアリング破棄」ボタンで試合を終了してから、もう一度お試しください。',
+            'danger'
+        )
+        return redirect(url_for('game.court'))
+
     try:
         # 1. match_entries テーブルの全削除
         match_table = current_app.dynamodb.Table("bad-game-match_entries")
