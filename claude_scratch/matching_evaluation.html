@@ -1,0 +1,463 @@
+<title>マッチング稼働記録</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #eff1e8;
+    --paper-raised: #ffffff;
+    --ink: #1b2420;
+    --ink-soft: #4a5750;
+    --court: #2e5d3f;
+    --court-deep: #1d3d29;
+    --line: #d9ddd0;
+    --gold: #a97a1f;
+    --gold-fill: #c4952e;
+    --concern: #a6432e;
+    --concern-fill: #c85f45;
+    --shadow: 0 1px 2px rgba(27,36,32,0.06), 0 4px 16px rgba(27,36,32,0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #141f19;
+      --paper-raised: #1c2b22;
+      --ink: #edefe6;
+      --ink-soft: #a9b5ac;
+      --court: #74ab8b;
+      --court-deep: #274c36;
+      --line: #2c3b31;
+      --gold: #e0b558;
+      --gold-fill: #c99a3d;
+      --concern: #e08b71;
+      --concern-fill: #c96a51;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #141f19;
+    --paper-raised: #1c2b22;
+    --ink: #edefe6;
+    --ink-soft: #a9b5ac;
+    --court: #74ab8b;
+    --court-deep: #274c36;
+    --line: #2c3b31;
+    --gold: #e0b558;
+    --gold-fill: #c99a3d;
+    --concern: #e08b71;
+    --concern-fill: #c96a51;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Hiragino Mincho ProN", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    padding-inline: 20px;
+    padding-block: 56px 88px;
+  }
+  .wrap { max-width: 740px; margin-inline: auto; }
+
+  .disp { font-family: "Oswald", "Hiragino Sans", sans-serif; }
+
+  .eyebrow {
+    font-family: "Oswald", sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--court);
+    margin: 0 0 10px;
+  }
+
+  header.hero { margin-bottom: 40px; }
+  header.hero h1 {
+    font-family: "Oswald", sans-serif;
+    font-weight: 600;
+    font-size: clamp(32px, 6vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  header.hero .lede {
+    font-size: 19px;
+    color: var(--ink-soft);
+    max-width: 58ch;
+    margin: 0;
+  }
+  header.hero .meta {
+    margin-top: 22px;
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-family: "Oswald", sans-serif;
+    font-size: 13px;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  header.hero .meta b { color: var(--ink); font-weight: 600; }
+
+  /* Stat tiles */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 48px;
+    box-shadow: var(--shadow);
+  }
+  .stat {
+    background: var(--paper-raised);
+    padding: 18px 14px;
+    text-align: left;
+  }
+  .stat .num {
+    font-family: "Oswald", sans-serif;
+    font-weight: 600;
+    font-size: 30px;
+    color: var(--court);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    display: block;
+  }
+  .stat .unit { font-size: 14px; font-weight: 500; color: var(--ink-soft); margin-left: 2px; }
+  .stat .cap {
+    display: block;
+    margin-top: 6px;
+    font-family: "Oswald", sans-serif;
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+  }
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  section { margin-bottom: 54px; }
+  section h2 {
+    font-family: "Oswald", sans-serif;
+    font-weight: 600;
+    font-size: 24px;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  section .dek {
+    color: var(--ink-soft);
+    font-size: 16px;
+    margin: 0 0 22px;
+    max-width: 60ch;
+  }
+  p { max-width: 66ch; }
+  p.note { font-size: 14.5px; color: var(--ink-soft); }
+
+  .card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 24px 20px;
+    box-shadow: var(--shadow);
+  }
+
+  /* timeline chart */
+  .chart-scroll { overflow-x: auto; }
+  .chart-scroll svg { display: block; }
+  .flag-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-family: "Oswald", sans-serif;
+    font-size: 12.5px;
+    color: var(--concern);
+  }
+  .flag-note .swatch {
+    width: 11px; height: 11px; border-radius: 2px;
+    background: repeating-linear-gradient(45deg, var(--concern-fill), var(--concern-fill) 3px, transparent 3px, transparent 6px);
+    border: 1px solid var(--concern);
+    flex: none;
+  }
+
+  /* mode comparison */
+  .modebars { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+  .moderow { display: grid; grid-template-columns: 108px 1fr 64px; align-items: center; gap: 12px; }
+  .moderow .label { font-family: "Oswald", sans-serif; font-size: 14px; color: var(--ink); }
+  .moderow .label small { display: block; font-size: 11px; color: var(--ink-soft); font-weight: 400; letter-spacing: 0.01em; }
+  .moderow .track { background: var(--line); border-radius: 5px; height: 14px; overflow: hidden; }
+  .moderow .fill { height: 100%; border-radius: 5px 0 0 5px; }
+  .moderow .val { font-family: "Oswald", sans-serif; font-variant-numeric: tabular-nums; font-size: 14px; color: var(--ink); text-align: right; }
+
+  /* margin distribution */
+  .margin-bar {
+    display: flex;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .margin-bar .seg { display: flex; align-items: center; justify-content: center; font-family:"Oswald",sans-serif; font-size: 13px; color: #fff; font-weight: 500; }
+  .margin-legend { display: flex; gap: 22px; margin-top: 14px; flex-wrap: wrap; font-family:"Oswald",sans-serif; font-size: 12.5px; color: var(--ink-soft); }
+  .margin-legend .item { display: flex; align-items: center; gap: 7px; }
+  .margin-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+
+  /* issues list */
+  .issues { display: flex; flex-direction: column; gap: 0; }
+  .issue {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-top: 1px solid var(--line);
+  }
+  .issue:first-child { border-top: none; padding-top: 0; }
+  .issue .when {
+    font-family: "Oswald", sans-serif;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    letter-spacing: 0.03em;
+    padding-top: 2px;
+  }
+  .issue .body b { color: var(--ink); }
+  .issue .body { font-size: 15.5px; }
+  .tag {
+    display: inline-block;
+    font-family: "Oswald", sans-serif;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-right: 8px;
+    vertical-align: 1px;
+  }
+  .tag.fixed { background: color-mix(in srgb, var(--court) 16%, transparent); color: var(--court); }
+
+  /* verdict */
+  .verdict {
+    border-left: 3px solid var(--gold);
+    padding: 4px 0 4px 20px;
+    margin: 0;
+  }
+  .verdict p { margin: 0 0 14px; }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-family: "Oswald", sans-serif;
+    font-size: 12px;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">鶯バドミントン &middot; コート内部レポート</p>
+    <h1>マッチング機能、1年の記録</h1>
+    <p class="lede">2025年7月の実装から今日まで、コート割り当てエンジンが積み上げた試合データを棚卸しした。稼働日数63日、記録された試合1,664本。数字が語る話は「順調な1年」より少し複雑だった。</p>
+    <div class="meta">
+      <span>集計日 <b>2026年9月17日</b></span>
+      <span>対象期間 <b>2025-07-02 〜 2026-09-16</b></span>
+      <span>データ元 <b>bad-game-results / bad-pairing-logs</b></span>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><span class="num">1,664<span class="unit">本</span></span><span class="cap">試合結果（重複整理後）</span></div>
+    <div class="stat"><span class="num">682<span class="unit">回</span></span><span class="cap">ペアリング実行回数</span></div>
+    <div class="stat"><span class="num">177<span class="unit">人</span></span><span class="cap">のべ参加プレイヤー</span></div>
+    <div class="stat"><span class="num">63<span class="unit">日</span></span><span class="cap">実際に使われた練習日</span></div>
+  </div>
+
+  <section id="timeline">
+    <p class="eyebrow">01 &middot; 稼働の推移</p>
+    <h2>本当に動いていたのは、7ヶ月半</h2>
+    <p class="dek">月ごとのコート数（=試合本数）。導入直後の2025年7月はテスト的な連投が混ざり、8月から翌年1月まで丸々5ヶ月、実質使われていなかった空白がある。</p>
+
+    <div class="card">
+      <div class="chart-scroll">
+        <svg viewBox="0 0 700 260" width="100%" style="min-width:640px" role="img" aria-label="月別コート数の推移">
+          <!-- gridlines -->
+          <g font-family="Oswald, sans-serif" font-size="10.5" fill="var(--ink-soft)">
+            <line x1="40" y1="20" x2="690" y2="20" stroke="var(--line)" stroke-width="1"/>
+            <text x="34" y="24" text-anchor="end">400</text>
+            <line x1="40" y1="72" x2="690" y2="72" stroke="var(--line)" stroke-width="1"/>
+            <text x="34" y="76" text-anchor="end">300</text>
+            <line x1="40" y1="124" x2="690" y2="124" stroke="var(--line)" stroke-width="1"/>
+            <text x="34" y="128" text-anchor="end">200</text>
+            <line x1="40" y1="176" x2="690" y2="176" stroke="var(--line)" stroke-width="1"/>
+            <text x="34" y="180" text-anchor="end">100</text>
+            <line x1="40" y1="228" x2="690" y2="228" stroke="var(--ink-soft)" stroke-width="1"/>
+            <text x="34" y="232" text-anchor="end">0</text>
+          </g>
+          <!--
+            scale: y=228 baseline, y=20 -> 400. 208px per 400 => 0.52px/unit
+            months (15): 2025-07..2026-09
+            values: 424,0,4,0,0,0,0,135,196,195,197,180,201,85,47
+          -->
+          <g>
+            <!-- bars -->
+            <!-- 2025-07: 424 -->
+            <rect x="46" y="8.7" width="34" height="219.3" fill="var(--gold-fill)"/>
+            <!-- 2025-08: 0 (gap, hatched marker) -->
+            <rect x="88" y="222" width="34" height="6" fill="none" stroke="var(--concern)" stroke-width="1.4" stroke-dasharray="3,2"/>
+            <!-- 2025-09: 4 -->
+            <rect x="130" y="225.9" width="34" height="2.1" fill="var(--court)"/>
+            <!-- 2025-10: 0 -->
+            <rect x="172" y="222" width="34" height="6" fill="none" stroke="var(--concern)" stroke-width="1.4" stroke-dasharray="3,2"/>
+            <!-- 2025-11: 0 -->
+            <rect x="214" y="222" width="34" height="6" fill="none" stroke="var(--concern)" stroke-width="1.4" stroke-dasharray="3,2"/>
+            <!-- 2025-12: 0 -->
+            <rect x="256" y="222" width="34" height="6" fill="none" stroke="var(--concern)" stroke-width="1.4" stroke-dasharray="3,2"/>
+            <!-- 2026-01: 0 -->
+            <rect x="298" y="222" width="34" height="6" fill="none" stroke="var(--concern)" stroke-width="1.4" stroke-dasharray="3,2"/>
+            <!-- 2026-02: 135 -->
+            <rect x="340" y="157.8" width="34" height="70.2" fill="var(--court)"/>
+            <!-- 2026-03: 196 -->
+            <rect x="382" y="126.8" width="34" height="101.2" fill="var(--court)"/>
+            <!-- 2026-04: 195 -->
+            <rect x="424" y="127.3" width="34" height="100.7" fill="var(--court)"/>
+            <!-- 2026-05: 197 -->
+            <rect x="466" y="126.3" width="34" height="101.7" fill="var(--court)"/>
+            <!-- 2026-06: 180 -->
+            <rect x="508" y="134.4" width="34" height="93.6" fill="var(--court)"/>
+            <!-- 2026-07: 201 -->
+            <rect x="550" y="124.5" width="34" height="103.5" fill="var(--court)"/>
+            <!-- 2026-08: 85 -->
+            <rect x="592" y="183.8" width="34" height="44.2" fill="var(--court)"/>
+            <!-- 2026-09: 47 (partial month) -->
+            <rect x="634" y="203.6" width="34" height="24.4" fill="var(--court)" opacity="0.55"/>
+          </g>
+          <!-- x labels -->
+          <g font-family="Oswald, sans-serif" font-size="10" fill="var(--ink-soft)" text-anchor="middle">
+            <text x="63" y="244">25/07</text>
+            <text x="105" y="244">08</text>
+            <text x="147" y="244">09</text>
+            <text x="189" y="244">10</text>
+            <text x="231" y="244">11</text>
+            <text x="273" y="244">12</text>
+            <text x="315" y="244">26/01</text>
+            <text x="357" y="244">02</text>
+            <text x="399" y="244">03</text>
+            <text x="441" y="244">04</text>
+            <text x="483" y="244">05</text>
+            <text x="525" y="244">06</text>
+            <text x="567" y="244">07</text>
+            <text x="609" y="244">08</text>
+            <text x="651" y="244">09*</text>
+          </g>
+          <!-- value callouts -->
+          <g font-family="Oswald, sans-serif" font-size="10.5" fill="var(--ink)" text-anchor="middle" font-weight="500">
+            <text x="63" y="4">424</text>
+            <text x="357" y="150">135</text>
+            <text x="567" y="117">201</text>
+            <text x="651" y="196">47</text>
+          </g>
+        </svg>
+      </div>
+      <div class="flag-note"><span class="swatch"></span>点線＝記録0件の月（2025年8月〜2026年1月、実質休止）</div>
+      <p class="note" style="margin-top:10px">*2026年7月は導入直後のテスト連投を含む（7/4・7/6の2日だけで342本）。9月は9/16時点の途中経過。</p>
+    </div>
+  </section>
+
+  <section id="quality">
+    <p class="eyebrow">02 &middot; マッチングの精度</p>
+    <h2>AIモードは効いている</h2>
+    <p class="dek">直近2週間・20回分のペアリングログより、モード別の平均戦力差（TrueSkillベース、数値が小さいほど拮抗）。</p>
+
+    <div class="card">
+      <div class="modebars">
+        <div class="moderow">
+          <div class="label">完全シャッフル<small>full_random &middot; 7回</small></div>
+          <div class="track"><div class="fill" style="width:100%; background:var(--concern-fill)"></div></div>
+          <div class="val">14.6</div>
+        </div>
+        <div class="moderow">
+          <div class="label">ランダム<small>random &middot; 7回</small></div>
+          <div class="track"><div class="fill" style="width:54%; background:var(--gold-fill)"></div></div>
+          <div class="val">7.95</div>
+        </div>
+        <div class="moderow">
+          <div class="label">スキル抑制<small>skilled_ai &middot; 2回</small></div>
+          <div class="track"><div class="fill" style="width:25%; background:var(--court)"></div></div>
+          <div class="val">3.60</div>
+        </div>
+        <div class="moderow">
+          <div class="label">AIペアリング<small>ai &middot; 4回</small></div>
+          <div class="track"><div class="fill" style="width:11%; background:var(--court)"></div></div>
+          <div class="val">1.55</div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:18px">AIモードはランダム系の1/5〜1/9程度まで戦力差を抑えられている。「2回シャッフル→1回AI」の周期運用なら、シャッフルの比重をもう少しAI寄りに調整する余地がある。</p>
+    </div>
+  </section>
+
+  <section id="margins">
+    <p class="eyebrow">03 &middot; 試合の拮抗度</p>
+    <h2>3本に1本は大差がつく</h2>
+    <p class="dek">全1,664試合のスコア差の内訳。平均点差は7.8点（21点マッチ）。</p>
+
+    <div class="card">
+      <div class="margin-bar">
+        <div class="seg" style="width:30.8%; background:var(--court)">30.8%</div>
+        <div class="seg" style="width:36.0%; background:var(--gold-fill)">36.0%</div>
+        <div class="seg" style="width:33.2%; background:var(--concern-fill)">33.2%</div>
+      </div>
+      <div class="margin-legend">
+        <div class="item"><span class="sw" style="background:var(--court)"></span>僅差（3点差以内）513本</div>
+        <div class="item"><span class="sw" style="background:var(--gold-fill)"></span>標準（4〜9点差）599本</div>
+        <div class="item"><span class="sw" style="background:var(--concern-fill)"></span>大差（10点差以上）552本</div>
+      </div>
+      <p class="note" style="margin-top:16px">02のモード別データと合わせて読むと、大差の多さはランダム系ペアリングの比率が高いことと符合する。</p>
+    </div>
+  </section>
+
+  <section id="integrity">
+    <p class="eyebrow">04 &middot; データを掘って見つかったもの</p>
+    <h2>今週見つけて直した3つの不具合</h2>
+    <p class="dek">今回の棚卸し中に発見し、その場で修正・検証まで完了したもの。</p>
+
+    <div class="card">
+      <div class="issues">
+        <div class="issue">
+          <div class="when">9/14〜16</div>
+          <div class="body"><span class="tag fixed">修正済</span><b>待機ゼロ誤送還</b> — 全員コート内で待機・休憩が0人になると、5分後に無関係な全員がトップページへ送還される不具合。</div>
+        </div>
+        <div class="issue">
+          <div class="when">9/14</div>
+          <div class="body"><span class="tag fixed">修正済</span><b>スコア誤送信</b> — 試合開始のたびに全員の画面が強制リロードされ、入力中だった前の試合のスコアが新しい試合に誤送信される不具合。</div>
+        </div>
+        <div class="issue">
+          <div class="when">2025-07〜2026-07</div>
+          <div class="body"><span class="tag fixed">修正済</span><b>スコア二重保存</b> — 両チームがほぼ同時にスコア送信すると、数十ミリ秒の隙をすり抜けて2件保存される競合状態。38試合・106件の重複を確認し、整理済み。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="verdict">
+    <p class="eyebrow">総合評価</p>
+    <h2>土台は良い。運用の谷を埋めたい</h2>
+    <div class="card verdict">
+      <p><b>マッチングの質そのものは健全</b>。AIペアリングは実測でも明確に効果を出しており、参加者数も2026年2月の本格稼働以降147人まで積み上がっている。682回のペアリングを経て、エンジンは十分に鍛えられている。</p>
+      <p><b>一方で「1年間ずっと動いていた」わけではなかった。</b>2025年8月〜2026年1月の5ヶ月間、記録がほぼ空白になっている。導入直後に勢いを失い、2月に運用を立て直した形跡が数字に残っている。</p>
+      <p>大差試合が33%を占めるのは、ランダム系モードの比率の高さが主因と見られる。AIモードの採用比率を上げれば改善が見込める。データ品質面では、今回の棚卸しで見つかった3件のバグはいずれも即日修正済み。継続的にログを見ていく価値がある。</p>
+    </div>
+  </section>
+
+  <footer>鶯バドミントン &middot; bad-game-results / bad-pairing-logs の実データを集計 &middot; 2026-09-17</footer>
+
+</div>
