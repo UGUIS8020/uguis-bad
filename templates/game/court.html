@@ -1014,7 +1014,7 @@
  
         // =========================================================
         // ★ ポーリング管理（2本化）
-        //   ① statusInterval  : waiting_status + skill_score → 20秒
+        //   ① statusInterval  : waiting_status + skill_score → 15秒
         //   ② scoreInterval   : submission_status → 10秒（管理者・試合中のみ）
         // =========================================================
         let statusIntervalId = null;
@@ -1025,7 +1025,7 @@
             statusIntervalId = setInterval(() => {
                 checkForUpdates();
                 updateSkillScore();
-            }, 20000);  // 20秒
+            }, 15000);  // 15秒
         }
  
         function stopStatusPolling() {
