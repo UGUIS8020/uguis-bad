@@ -1015,7 +1015,7 @@
         // =========================================================
         // ★ ポーリング管理（2本化）
         //   ① statusInterval  : waiting_status + skill_score → 15秒
-        //   ② scoreInterval   : submission_status → 10秒（管理者・試合中のみ）
+        //   ② scoreInterval   : submission_status → 8秒（管理者・試合中のみ）
         // =========================================================
         let statusIntervalId = null;
         let scoreIntervalId  = null;
@@ -1040,8 +1040,8 @@
             if (scoreIntervalId || !MATCH_ID) return;
             scoreIntervalId = setInterval(async () => {
                 await updateScoreInputButton();
-            }, 10000);  // 10秒
-            console.log('🔄 スコアポーリング開始 (10秒)');
+            }, 8000);  // 8秒
+            console.log('🔄 スコアポーリング開始 (8秒)');
         }
  
         function stopScorePolling() {
