@@ -10,3 +10,7 @@ venv_backup_*/
 
 # ベンダーライブラリ（gitでは追跡せず、サーバーに直接配置する）
 static/vendor/
+
+# 作業用の一時ファイル（分析レポート・バックアップ等、アプリ本体ではない）
+claude_scratch/
+*_backup.json
