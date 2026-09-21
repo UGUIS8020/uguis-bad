@@ -90,6 +90,10 @@ def create_app():
         SESSION_COOKIE_SECURE=not IS_LOCAL_HTTP,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        # ★CSRFトークンの有効期限をセッションと同じ扱いに（デフォルトは1時間で、
+        #   マッチング画面のようにページをリロードせず長時間開きっぱなしにできる
+        #   画面だと、1時間を超えた時点でスコア送信等がCSRFエラーになっていた）
+        WTF_CSRF_TIME_LIMIT=None,
     )
 
     # --- Cache ---
