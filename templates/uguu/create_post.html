@@ -394,25 +394,67 @@ removeVideoBtn.addEventListener('click', () => {
 
 function captureVideoFrame(videoEl, atTime) {
   const POSTER_MAX_SIZE = 640; // px（サムネイルなのでこれで十分。動画本体より軽くする）
-  return new Promise((resolve) => {
-    const onSeeked = () => {
-      videoEl.removeEventListener('seeked', onSeeked);
-      const vw = videoEl.videoWidth;
-      const vh = videoEl.videoHeight;
-      if (!vw || !vh) {
-        resolve(null);
-        return;
-      }
-      const scale = Math.min(1, POSTER_MAX_SIZE / Math.max(vw, vh));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(vw * scale);
-      canvas.height = Math.round(vh * scale);
-      canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7);
-    };
-    videoEl.addEventListener('seeked', onSeeked);
-    videoEl.currentTime = atTime;
-  });
+
+  // 1回分のキャプチャ処理。{blob, isBlack} を返す。
+  function captureOnce(seekTime) {
+    return new Promise((resolve) => {
+      const onSeeked = () => {
+        videoEl.removeEventListener('seeked', onSeeked);
+        // ★iOS Safari等では、seekedが発火した直後はまだ実際のフレームが
+        //   画面に描画し終わっていないことがあり、その状態でcanvasに描画すると
+        //   真っ黒な画像をキャプチャしてしまうことがある（実際に発生した不具合）。
+        //   2回のrequestAnimationFrameを挟んで、確実に描画完了後にキャプチャする。
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const vw = videoEl.videoWidth;
+            const vh = videoEl.videoHeight;
+            if (!vw || !vh) {
+              resolve({ blob: null, isBlack: false });
+              return;
+            }
+            const scale = Math.min(1, POSTER_MAX_SIZE / Math.max(vw, vh));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(vw * scale);
+            canvas.height = Math.round(vh * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+            // ★簡易な「真っ黒判定」：画像全体ではなく、間引いたサンプル点だけ見る
+            //   （軽量チェックのため）。1つでも明るい点があれば「黒ではない」とみなす。
+            let isBlack = true;
+            try {
+              const sample = ctx.getImageData(0, 0, canvas.width, canvas.height, { willReadFrequently: true }).data;
+              for (let i = 0; i < sample.length; i += 4 * 37) { // 適当な間隔で間引く
+                if (sample[i] > 12 || sample[i + 1] > 12 || sample[i + 2] > 12) {
+                  isBlack = false;
+                  break;
+                }
+              }
+            } catch (e) {
+              isBlack = false; // 判定できない場合は「黒ではない」扱いにして先に進める
+            }
+
+            canvas.toBlob((blob) => resolve({ blob, isBlack }), 'image/jpeg', 0.7);
+          });
+        });
+      };
+      videoEl.addEventListener('seeked', onSeeked);
+      videoEl.currentTime = seekTime;
+    });
+  }
+
+  return (async () => {
+    const first = await captureOnce(atTime);
+    if (!first.isBlack || !first.blob) return first.blob;
+
+    // 真っ黒だった場合は、少し先の時刻で1回だけ撮り直す
+    // （動画の長さを超えないよう安全マージンを取る）
+    const retryTime = Math.min(atTime + 0.3, Math.max(0, (videoEl.duration || atTime) - 0.1));
+    if (retryTime <= atTime) return first.blob;
+    console.warn('[poster] 黒いフレームを検出、', retryTime, '秒地点で再キャプチャします');
+    const second = await captureOnce(retryTime);
+    return second.blob || first.blob;
+  })();
 }
 
 async function trimVideoWithFfmpeg(file, startSec, endSec) {
