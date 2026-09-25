@@ -481,11 +481,22 @@ def _fairness_first_four(candidates):
     return team_a, team_b, best_diff
 
 
+AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
+
+# 8ステップのサイクル: バランス無視×3 → AIペアリング×1(待機調整)
+#                    → バランス重視×3 → AIペアリング×1(待機調整) → 繰り返し
+REFILL_MODE_CYCLE = [
+    "fairness_first", "fairness_first", "fairness_first",
+    "ai_pairing",
+    "balance_only", "balance_only", "balance_only",
+    "ai_pairing",
+]
+
+
 def _next_refill_mode(meta_table):
     """
-    3回の補充ごとに「公平性優先」⇔「バランス優先」を交互に切り替える。
-    meta#continuous_pairing の refill_count をカウントし、
-    (refill_count // 3) が偶数なら公平性優先、奇数ならバランス優先。
+    補充のたびに meta#continuous_pairing の refill_count を加算し、
+    REFILL_MODE_CYCLE に従って次のモードを決める。
     """
     resp = meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
@@ -494,7 +505,7 @@ def _next_refill_mode(meta_table):
         ReturnValues="UPDATED_NEW",
     )
     refill_count = int(resp["Attributes"]["refill_count"])
-    mode = "fairness_first" if (refill_count // 3) % 2 == 0 else "balance_priority"
+    mode = REFILL_MODE_CYCLE[(refill_count - 1) % len(REFILL_MODE_CYCLE)]
     return mode, refill_count
 
 
@@ -571,7 +582,14 @@ def _try_refill_court(old_match_id, court_number):
                 ExpressionAttributeValues={":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1},
             )
 
-    candidates = _refill_candidate_pool(entry_table)
+    mode, refill_count = _next_refill_mode(meta_table)
+
+    if mode == "ai_pairing":
+        # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
+        candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
+    else:
+        candidates = _refill_candidate_pool(entry_table)
+
     if len(candidates) < 4:
         current_app.logger.info(
             "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
@@ -579,12 +597,13 @@ def _try_refill_court(old_match_id, court_number):
         )
         return
 
-    mode, refill_count = _next_refill_mode(meta_table)
     if mode == "fairness_first":
         team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
-    else:
+    elif mode == "ai_pairing":
         partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
         team_a_entries, team_b_entries, diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
+    else:  # balance_only
+        team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
     new_match_id = generate_match_id2()
 
     import boto3
