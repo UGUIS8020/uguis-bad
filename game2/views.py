@@ -606,7 +606,7 @@ def _try_refill_court(old_match_id, court_number):
     elif mode == "ai_pairing":
         partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
         team_a_entries, team_b_entries, diff = _best_balanced_four(
-            candidates, partner_counter, opponent_counter, force_top_n=2
+            candidates, partner_counter, opponent_counter
         )
     else:  # balance_only
         team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
