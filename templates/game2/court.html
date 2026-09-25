@@ -123,8 +123,30 @@
 </div>
 
 <script>
-    // シンプルに10秒ごとに再読み込み（Phase1は最小構成）
-    setTimeout(() => location.reload(), 10000);
+    // 10秒ごとに再読み込みするが、スコア入力欄を操作中(フォーカス中や
+    // 値を入力済み)は邪魔しないよう見送り、少し後に再チェックする。
+    function isUserEnteringScore() {
+        const active = document.activeElement;
+        if (active && active.matches('input[name="team1_score"], input[name="team2_score"]')) {
+            return true;
+        }
+        const scoreInputs = document.querySelectorAll('input[name="team1_score"], input[name="team2_score"]');
+        for (const el of scoreInputs) {
+            if (el.value) return true;
+        }
+        return false;
+    }
+
+    function scheduleReload() {
+        setTimeout(() => {
+            if (isUserEnteringScore()) {
+                scheduleReload();
+            } else {
+                location.reload();
+            }
+        }, 10000);
+    }
+    scheduleReload();
 </script>
 </body>
 </html>
