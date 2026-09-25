@@ -192,8 +192,9 @@ def submit_and_check_refill(admin_client, court_num, old_match_id):
     resp = admin_client.post(
         f"/game2/submit_score/{old_match_id}/court/{court_num}",
         data={"team1_score": str(t1), "team2_score": str(t2)},
+        follow_redirects=False,
     )
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 302):
         print(f"  [NG] court{court_num} submit_score status={resp.status_code} body={resp.get_data(as_text=True)[:200]}")
         return False
     print(f"  court{court_num}: {t1}-{t2} 送信 [OK]")

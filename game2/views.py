@@ -501,11 +501,13 @@ def submit_score(match_id, court_number):
         team1_raw = request.form.get("team1_score")
         team2_raw = request.form.get("team2_score")
         if team1_raw is None or team2_raw is None:
-            return "スコアが送信されていません", 400
+            flash("スコアが送信されていません", "danger")
+            return redirect(url_for("game2.court"))
         team1_score = int(team1_raw)
         team2_score = int(team2_raw)
         if team1_score == team2_score:
-            return "スコアが同点です。勝者を決めてください。", 400
+            flash("スコアが同点です。勝者を決めてください。", "danger")
+            return redirect(url_for("game2.court"))
 
         winner = "A" if team1_score > team2_score else "B"
         court_number_int = int(court_number)
@@ -516,12 +518,14 @@ def submit_score(match_id, court_number):
             ConsistentRead=True,
         ).get("Items", [])
         if not entries:
-            return "コートのエントリーが見つかりません", 404
+            flash("コートのエントリーが見つかりません（すでに次の試合に切り替わった可能性があります）", "warning")
+            return redirect(url_for("game2.court"))
 
         if not current_user.administrator:
             court_user_ids = [str(e.get("user_id", "")) for e in entries]
             if current_user.user_id not in court_user_ids:
-                return "このコートへのスコア送信権限がありません", 403
+                flash("このコートへのスコア送信権限がありません", "danger")
+                return redirect(url_for("game2.court"))
 
         team_a, team_b = [], []
         for e in entries:
@@ -535,7 +539,8 @@ def submit_score(match_id, court_number):
             (team_a if e.get("team") == "A" else team_b).append(player)
 
         if not team_a or not team_b:
-            return "コートのチームデータが不完全です", 404
+            flash("コートのチームデータが不完全です", "danger")
+            return redirect(url_for("game2.court"))
 
         results_table = _results_table()
         result_id = f"{match_id}#{court_number_int}"
@@ -550,7 +555,7 @@ def submit_score(match_id, court_number):
             )
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                return "", 200
+                return redirect(url_for("game2.court"))
             raise
 
         current_app.logger.info(
@@ -566,10 +571,12 @@ def submit_score(match_id, court_number):
                 "[game2][continuous] court=%s 自動補充でエラー: %s", court_number_int, e, exc_info=True
             )
 
-        return "", 200
+        flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
+        return redirect(url_for("game2.court"))
     except Exception as e:
         current_app.logger.error("[game2][submit_score ERROR] %s", str(e), exc_info=True)
-        return "スコアの送信中にエラーが発生しました", 500
+        flash("スコアの送信中にエラーが発生しました", "danger")
+        return redirect(url_for("game2.court"))
 
 
 @bp_game2.route("/finish_current_match", methods=["POST"])
