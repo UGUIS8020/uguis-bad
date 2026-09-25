@@ -160,7 +160,7 @@ def make_client_for_user(flask_app, user_id):
 def get_courts_state(dynamodb):
     """現在playing中の全エントリーを、コート番号ごとにグルーピングして返す"""
     entry_table = dynamodb.Table("bad-game2-match_entries")
-    playing = scan_all(entry_table, FilterExpression=Attr("entry_status").eq("playing"))
+    playing = scan_all(entry_table, FilterExpression=Attr("entry_status").eq("playing"), ConsistentRead=True)
     by_court = {}
     for e in playing:
         c = int(e["court_number"])
