@@ -14,6 +14,7 @@ from .game_utils import (
     generate_full_random_pairings,
     generate_skill_grouped_pairings,
     preprocess_low_skill_grouping,
+    get_recent_pair_history,
     parse_players,
     sync_match_entries_with_updated_skills,
     update_trueskill_for_players_and_return_updates, _rest_queue_pk
@@ -3520,7 +3521,16 @@ def create_pairings():
             )
 
         if mode == "ai":
-            matches, additional_waiting_players = generate_ai_best_pairings(players, effective_courts, iterations=1000)
+            # ★直近ラウンドの対戦履歴を取得し、実力バランスが僅差の候補が
+            #   複数あるときは、直近と同じ相手が少ない方を優先する
+            recent_match_ids = pairing_meta.get("recent_match_ids", [])
+            partner_counter, opponent_counter = get_recent_pair_history(
+                current_app.dynamodb, recent_match_ids
+            )
+            matches, additional_waiting_players = generate_ai_best_pairings(
+                players, effective_courts, iterations=1000,
+                partner_counter=partner_counter, opponent_counter=opponent_counter,
+            )
         elif mode == "full_random":
             pairs, matches, additional_waiting_players = generate_full_random_pairings(players, effective_courts)
         else:  # random
