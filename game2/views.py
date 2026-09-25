@@ -150,6 +150,9 @@ def court():
         else:
             courts = {}
 
+    # ★コート番号順(1,2,3...)で常に同じ並びになるようにする
+    courts = dict(sorted(courts.items()))
+
     return render_template(
         "game2/court.html",
         status=status,
