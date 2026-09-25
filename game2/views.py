@@ -13,8 +13,11 @@
 - 何か問題が起きた場合、管理者は「緊急: 全員を通常コートへ移動」ボタンで
   テストコートの参加者全員を既存システムの待機列（pending）に移せる。
 
-Phase 1: 既存システムと同じ「全コート一括進行」の動きをこのテーブル上で
-再現する（コート単位の連続マッチングはPhase 2で追加予定）。
+Phase 2: 最初の組み合わせだけ管理者が「組み合わせ作成」ボタンで作る。
+その後は、あるコートのスコアが送信されるたびに、そのコートの4人だけを
+TrueSkill更新してpending化し、休憩ローテーションで「次に出るべき」上位候補の
+中から実力バランスが良い4人を選んで、そのコートだけ自動的に次の試合を作る。
+他のコートは無関係に進行中のまま影響を受けない。
 """
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
 from flask_login import login_required, current_user
@@ -113,19 +116,20 @@ def court():
 
     meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     status = meta_current.get("status", "idle")
-    match_id = meta_current.get("current_match_id")
 
     all_entries = entry_table.scan().get("Items", [])
     my_entry = next((e for e in all_entries if e.get("user_id") == current_user.get_id()), None)
 
+    # ★Phase2: 全コート共通の1つのmatch_idではなく、コートごとに独立した
+    #   match_idを持つので、entry_status=="playing"を持つ人をコート番号で
+    #   グルーピングし、そのコートの現在のmatch_idも一緒に持たせる。
     courts = {}
-    if status == "playing" and match_id:
-        for e in all_entries:
-            if e.get("match_id") == match_id and e.get("entry_status") == "playing":
-                c = int(e.get("court_number", 0))
-                courts.setdefault(c, {"A": [], "B": []})
-                team = e.get("team", "A")
-                courts[c][team].append(e)
+    for e in all_entries:
+        if e.get("entry_status") == "playing" and e.get("court_number") is not None:
+            c = int(e.get("court_number"))
+            courts.setdefault(c, {"A": [], "B": [], "match_id": e.get("match_id")})
+            team = e.get("team", "A")
+            courts[c][team].append(e)
 
     pending = [e for e in all_entries if e.get("entry_status") == "pending"]
     resting = [e for e in all_entries if e.get("entry_status") == "resting"]
@@ -133,7 +137,6 @@ def court():
     return render_template(
         "game2/court.html",
         status=status,
-        match_id=match_id,
         courts=courts,
         pending=pending,
         resting=resting,
@@ -325,6 +328,155 @@ def create_pairings():
     return redirect(url_for("game2.court"))
 
 
+def _refill_candidate_pool(entry_table, pool_size=8):
+    """pending中の人を「休憩ローテーション上、次に出るべき順」に並べ、上位を返す"""
+    pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending")).get("Items", [])
+    sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
+    return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
+
+
+def _best_balanced_four(candidates):
+    """候補(4人以上)の中から、実力バランスが最良になる4人+2v2分けを1つ選ぶ"""
+    from itertools import combinations
+
+    def conservative(e):
+        return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
+
+    best = None
+    best_diff = float("inf")
+    pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
+
+    for combo in combinations(candidates, 4):
+        scores = [conservative(e) for e in combo]
+        for (i1, i2), (i3, i4) in pairing_patterns:
+            diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
+            if diff < best_diff:
+                best_diff = diff
+                best = (combo, (i1, i2), (i3, i4))
+
+    combo, team_a_idx, team_b_idx = best
+    team_a = [combo[i] for i in team_a_idx]
+    team_b = [combo[i] for i in team_b_idx]
+    return team_a, team_b, best_diff
+
+
+def _try_refill_court(old_match_id, court_number):
+    """
+    1コート分の結果が確定した直後に呼ぶ。
+    その4人をTrueSkill更新してpending化し、休憩ローテーション上位の候補の中から
+    実力バランスが良い4人を選んで、このコートだけ新しい試合を発行する。
+    """
+    entry_table = _entry_table()
+    results_table = _results_table()
+
+    finished_entries = entry_table.scan(
+        FilterExpression=Attr("match_id").eq(str(old_match_id))
+        & Attr("court_number").eq(court_number)
+        & Attr("entry_status").eq("playing")
+    ).get("Items", [])
+
+    if len(finished_entries) != 4:
+        current_app.logger.warning(
+            "[game2][continuous] court=%s の4人が揃っていません(%d人)。補充をスキップ",
+            court_number, len(finished_entries),
+        )
+        return
+
+    result = results_table.get_item(Key={"result_id": f"{old_match_id}#{court_number}"}).get("Item")
+    if not result:
+        return
+
+    player_mapping = {e["user_id"]: e["entry_id"] for e in finished_entries if "user_id" in e}
+
+    try:
+        from game.game_utils import parse_players
+        team_a = parse_players(result.get("team_a", []))
+        team_b = parse_players(result.get("team_b", []))
+        for pl in team_a + team_b:
+            uid = pl.get("user_id")
+            if uid in player_mapping:
+                pl["entry_id"] = player_mapping[uid]
+        result_item = {
+            "team_a": team_a, "team_b": team_b, "winner": result.get("winner", "A"),
+            "match_id": old_match_id, "court_number": court_number,
+            "team1_score": result.get("team1_score"), "team2_score": result.get("team2_score"),
+        }
+        updated_skills = update_trueskill_for_players_and_return_updates(result_item)
+        sync_match_entries_with_updated_skills2(player_mapping, updated_skills)
+        persist_skill_to_bad_users(updated_skills)
+    except Exception as e:
+        current_app.logger.error("[game2][continuous] スキル更新エラー (court=%s): %s", court_number, e)
+
+    now_jst = datetime.now(JST).isoformat()
+    for e in finished_entries:
+        entry_id = e["entry_id"]
+        if e.get("rest_requested"):
+            entry_table.update_item(
+                Key={"entry_id": entry_id},
+                UpdateExpression=(
+                    "SET entry_status=:resting, updated_at=:now, "
+                    "rest_count = if_not_exists(rest_count, :zero) + :one "
+                    "REMOVE court_number, team, match_id, rest_requested"
+                ),
+                ExpressionAttributeValues={":resting": "resting", ":now": now_jst, ":zero": 0, ":one": 1},
+            )
+        else:
+            entry_table.update_item(
+                Key={"entry_id": entry_id},
+                UpdateExpression=(
+                    "SET entry_status=:pending, updated_at=:now, "
+                    "match_count = if_not_exists(match_count, :zero) + :one "
+                    "REMOVE court_number, team, match_id"
+                ),
+                ExpressionAttributeValues={":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1},
+            )
+
+    candidates = _refill_candidate_pool(entry_table, pool_size=8)
+    if len(candidates) < 4:
+        current_app.logger.info(
+            "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
+            court_number, len(candidates),
+        )
+        return
+
+    team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
+    new_match_id = generate_match_id2()
+
+    import boto3
+    dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
+    tx_items = []
+    for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
+                      (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
+        tx_items.append({
+            "Update": {
+                "TableName": "bad-game2-match_entries",
+                "Key": {"entry_id": {"S": pl["entry_id"]}},
+                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now",
+                "ConditionExpression": "entry_status = :pending",
+                "ExpressionAttributeValues": {
+                    ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
+                    ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
+                    ":t": {"S": team}, ":now": {"S": now_jst},
+                },
+            }
+        })
+
+    try:
+        dynamodb_client.transact_write_items(TransactItems=tx_items)
+        current_app.logger.info(
+            "[game2][continuous] court=%s 自動補充: new_match_id=%s balance_diff=%.2f members=%s",
+            court_number, new_match_id, diff,
+            [e.get("display_name") for e in team_a_entries + team_b_entries],
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
+            current_app.logger.warning(
+                "[game2][continuous] court=%s 補充tx競合のためスキップ（次の提出時に再試行される）", court_number
+            )
+        else:
+            raise
+
+
 @bp_game2.route("/submit_score/<match_id>/court/<int:court_number>", methods=["POST"])
 @login_required
 def submit_score(match_id, court_number):
@@ -387,6 +539,15 @@ def submit_score(match_id, court_number):
             "[game2] Score: Match=%s, Court=%d, %d-%d (Win:%s)",
             match_id, court_number_int, team1_score, team2_score, winner,
         )
+
+        # ★Phase2: このコートの結果が確定した直後に、そのコートだけ自動補充する
+        try:
+            _try_refill_court(match_id, court_number_int)
+        except Exception as e:
+            current_app.logger.error(
+                "[game2][continuous] court=%s 自動補充でエラー: %s", court_number_int, e, exc_info=True
+            )
+
         return "", 200
     except Exception as e:
         current_app.logger.error("[game2][submit_score ERROR] %s", str(e), exc_info=True)
