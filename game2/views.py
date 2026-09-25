@@ -347,6 +347,12 @@ def create_pairings():
     return redirect(url_for("game2.court"))
 
 
+def _sort_and_limit_pool(pending, pool_size=20):
+    """pending中の人のリストを「休憩ローテーション上、次に出るべき順」に並べて上位を返す"""
+    sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
+    return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
+
+
 def _refill_candidate_pool(entry_table, pool_size=20):
     """
     pending中の人を「休憩ローテーション上、次に出るべき順」に並べて返す。
@@ -356,8 +362,7 @@ def _refill_candidate_pool(entry_table, pool_size=20):
     足りず、重複回避の余地が狭くなっていた）。
     """
     pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
-    sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
-    return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
+    return _sort_and_limit_pool(pending, pool_size)
 
 
 RECENT_HISTORY_RESULTS = 40  # 直近何件の試合結果を「最近」とみなすか
@@ -485,15 +490,13 @@ def _fairness_first_four(candidates):
 
 
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
+WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# 10ステップのサイクル:
-#   バランス重視×3 → AIペアリング×2(待機調整)
-#   → バランス無視×3 → AIペアリング×2(待機調整) → 繰り返し
+# ローカルシミュレーション(simulate_pairing.py, 300試合)で比較した結果、
+# 複雑なモード配分よりも「AIペアリングのみ」が待ち時間・実力バランス・
+# 重複回避のすべてで一貫して最良だったため、暫定的にAIペアリング固定にする。
 REFILL_MODE_CYCLE = [
-    "balance_only", "balance_only", "balance_only",
-    "ai_pairing", "ai_pairing",
-    "fairness_first", "fairness_first", "fairness_first",
-    "ai_pairing", "ai_pairing",
+    "ai_pairing",
 ]
 
 
@@ -543,6 +546,13 @@ def _try_refill_court(old_match_id, court_number):
 
     player_mapping = {e["user_id"]: e["entry_id"] for e in finished_entries if "user_id" in e}
 
+    # ★安全弁用: 「今から待機に入る」時点でのrefill_countを記録しておき、
+    #   後で(次にrefill_countがいくつ進んだか)=待たされた補充回数として使う
+    pairing_meta_before = meta_table.get_item(
+        Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
+    ).get("Item", {}) or {}
+    refill_count_at_pending = int(pairing_meta_before.get("refill_count", 0))
+
     try:
         from game.game_utils import parse_players
         team_a = parse_players(result.get("team_a", []))
@@ -580,36 +590,72 @@ def _try_refill_court(old_match_id, court_number):
                 Key={"entry_id": entry_id},
                 UpdateExpression=(
                     "SET entry_status=:pending, updated_at=:now, "
-                    "match_count = if_not_exists(match_count, :zero) + :one "
+                    "match_count = if_not_exists(match_count, :zero) + :one, "
+                    "pending_since_refill_count = :rc "
                     "REMOVE court_number, team, match_id"
                 ),
-                ExpressionAttributeValues={":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1},
+                ExpressionAttributeValues={
+                    ":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1,
+                    ":rc": refill_count_at_pending,
+                },
             )
 
     mode, refill_count = _next_refill_mode(meta_table)
 
-    if mode == "ai_pairing":
-        # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
-        candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
-    else:
-        candidates = _refill_candidate_pool(entry_table)
+    # ★安全弁: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けている人が
+    #   いれば、モードに関わらず強制的に含める（極端な長時間待ちを防ぐ）
+    all_pending = _refill_candidate_pool(entry_table, pool_size=999)
+    rescued = sorted(
+        [
+            p for p in all_pending
+            if refill_count - int(p.get("pending_since_refill_count", refill_count)) >= WAIT_RESCUE_THRESHOLD
+        ],
+        key=lambda p: int(p.get("pending_since_refill_count", refill_count)),
+    )[:4]
 
-    if len(candidates) < 4:
-        current_app.logger.info(
-            "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
-            court_number, len(candidates),
+    if rescued:
+        rescued_uids = {p["entry_id"] for p in rescued}
+        others = _sort_and_limit_pool(
+            [p for p in all_pending if p["entry_id"] not in rescued_uids], pool_size=20
         )
-        return
-
-    if mode == "fairness_first":
-        team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
-    elif mode == "ai_pairing":
+        candidates = rescued + others
+        if len(candidates) < 4:
+            current_app.logger.info(
+                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
+                court_number, len(candidates),
+            )
+            return
         partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
         team_a_entries, team_b_entries, diff = _best_balanced_four(
-            candidates, partner_counter, opponent_counter
+            candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
         )
-    else:  # balance_only
-        team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
+        current_app.logger.info(
+            "[game2][continuous] court=%s 安全弁発動: %d人を強制的に含める(%s)",
+            court_number, len(rescued), [p.get("display_name") for p in rescued],
+        )
+    else:
+        if mode == "ai_pairing":
+            # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
+            candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
+        else:
+            candidates = _refill_candidate_pool(entry_table)
+
+        if len(candidates) < 4:
+            current_app.logger.info(
+                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
+                court_number, len(candidates),
+            )
+            return
+
+        if mode == "fairness_first":
+            team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
+        elif mode == "ai_pairing":
+            partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
+            team_a_entries, team_b_entries, diff = _best_balanced_four(
+                candidates, partner_counter, opponent_counter
+            )
+        else:  # balance_only
+            team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
     new_match_id = generate_match_id2()
 
     import boto3
