@@ -58,7 +58,7 @@
                 <label>コート数:</label>
                 <select name="max_courts" class="form-select" style="width: 100px;">
                     {% for n in range(1, 7) %}
-                    <option value="{{ n }}" {% if n == 2 %}selected{% endif %}>{{ n }}</option>
+                    <option value="{{ n }}" {% if n == 3 %}selected{% endif %}>{{ n }}</option>
                     {% endfor %}
                 </select>
                 <button type="submit" class="btn btn-success">組み合わせ作成</button>
