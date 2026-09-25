@@ -258,7 +258,6 @@ body {
             </a>
           </li>
 
-          {% if current_user.administrator %}
           <li class="nav-item">
             <a class="btn btn-outline-warning ms-1"
               href="{{ url_for('game2.court') }}"
@@ -268,7 +267,6 @@ body {
               <i class="fas fa-flask me-1"></i>テストコート
             </a>
           </li>
-          {% endif %}
 
           <style>
             /* 汎用クラス */
