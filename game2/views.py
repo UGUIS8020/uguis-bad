@@ -355,17 +355,30 @@ def _refill_candidate_pool(entry_table, pool_size=8):
 
 
 def _best_balanced_four(candidates):
-    """候補(4人以上)の中から、実力バランスが最良になる4人+2v2分けを1つ選ぶ"""
+    """
+    候補(4人以上、休憩ローテーション上「次に出るべき順」にソート済み)の中から
+    4人+2v2分けを選ぶ。
+
+    先頭(＝最も長く待っている・試合数が少ない人)は必ず含める。これを
+    せずに純粋にバランス最良の4人だけを毎回総当たりで選んでいたところ、
+    特定の人がスキル値の組み合わせの都合で何度選んでも外れ続け、
+    ずっと待機のままになる不具合があった（休憩の公平性が実質機能しない）。
+    残り3人は、その1人と組んだときに実力バランスが最良になるよう選ぶ。
+    """
     from itertools import combinations
 
     def conservative(e):
         return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
 
+    must_include = candidates[0]
+    rest_pool = candidates[1:]
+
     best = None
     best_diff = float("inf")
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
 
-    for combo in combinations(candidates, 4):
+    for combo3 in combinations(rest_pool, 3):
+        combo = (must_include,) + combo3
         scores = [conservative(e) for e in combo]
         for (i1, i2), (i3, i4) in pairing_patterns:
             diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
