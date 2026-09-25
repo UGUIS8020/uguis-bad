@@ -1,5 +1,6 @@
 from flask import current_app
 from trueskill import TrueSkill
+from boto3.dynamodb.conditions import Key
 import random
 from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
@@ -450,9 +451,100 @@ def pair_strength(p1: Player, p2: Player) -> float:
     return float(getattr(p1, "level", 0)) + float(getattr(p2, "level", 0))
 
 
-def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
+# =========================================================
+# 直近ラウンドの対戦履歴（パートナー・対戦相手の偏り軽減用）
+# =========================================================
+RECENT_HISTORY_ROUNDS = 4  # 直近何ラウンド分を「最近」とみなすか
+
+# 実力バランスが「僅差」とみなす許容幅。この範囲内の候補同士でのみ
+# 重複回避を優先する（実力バランスを崩してまで多様性を優先はしない）。
+REPEAT_TIEBREAK_MARGIN_RATIO = 0.05  # min_penaltyの5%
+REPEAT_TIEBREAK_MARGIN_FLOOR = 1.0   # 上記が小さすぎる場合の最低許容幅
+
+PARTNER_REPEAT_WEIGHT = 1
+OPPONENT_REPEAT_WEIGHT = 2  # 対戦相手の重複の方が体感の偏りが大きいため重めに
+
+
+def get_recent_pair_history(dynamodb, recent_match_ids, max_rounds=RECENT_HISTORY_ROUNDS):
+    """
+    直近max_rounds分のmatch_idについて、bad-game-resultsをmatch_id索引(GSI)で
+    引き、「誰と誰がパートナーだったか」「誰と誰が対戦したか」を集計する。
+    全件スキャンはせず、対象のmatch_idだけを個別にクエリするので軽量。
+
+    戻り値: (partner_counter, opponent_counter)
+      どちらも Counter[frozenset({user_id, user_id})] -> 直近での回数
+    """
+    from collections import Counter
+
+    partner_counter = Counter()
+    opponent_counter = Counter()
+
+    if not recent_match_ids:
+        return partner_counter, opponent_counter
+
+    target_ids = list(recent_match_ids)[-max_rounds:]
+    results_table = dynamodb.Table("bad-game-results")
+
+    for mid in target_ids:
+        try:
+            resp = results_table.query(
+                IndexName="match_id-index",
+                KeyConditionExpression=Key("match_id").eq(str(mid)),
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "[recent_pair_history] match_id=%s のクエリに失敗（無視して続行）", mid, exc_info=True
+            )
+            continue
+
+        for item in resp.get("Items", []):
+            a_uids = [p.get("user_id") for p in (item.get("team_a") or []) if p.get("user_id")]
+            b_uids = [p.get("user_id") for p in (item.get("team_b") or []) if p.get("user_id")]
+
+            if len(a_uids) == 2:
+                partner_counter[frozenset(a_uids)] += 1
+            if len(b_uids) == 2:
+                partner_counter[frozenset(b_uids)] += 1
+
+            for x in a_uids:
+                for y in b_uids:
+                    opponent_counter[frozenset([x, y])] += 1
+
+    return partner_counter, opponent_counter
+
+
+def _match_repeat_penalty(matches, partner_counter, opponent_counter):
+    """1つの組み合わせ案について、直近との重複度合いを数値化する。大きいほど偏っている。"""
+    if not partner_counter and not opponent_counter:
+        return 0
+
+    penalty = 0
+    for team_a, team_b in matches:
+        a_uids = [getattr(p, "user_id", None) for p in team_a]
+        b_uids = [getattr(p, "user_id", None) for p in team_b]
+
+        if a_uids[0] and a_uids[1]:
+            penalty += partner_counter.get(frozenset(a_uids), 0) * PARTNER_REPEAT_WEIGHT
+        if b_uids[0] and b_uids[1]:
+            penalty += partner_counter.get(frozenset(b_uids), 0) * PARTNER_REPEAT_WEIGHT
+
+        for x in a_uids:
+            for y in b_uids:
+                if x and y:
+                    penalty += opponent_counter.get(frozenset([x, y]), 0) * OPPONENT_REPEAT_WEIGHT
+
+    return penalty
+
+
+def generate_ai_best_pairings(active_players, max_courts, iterations=1000,
+                               partner_counter=None, opponent_counter=None):
     """
     シミュレーションを行い、全コートのスキルバランスが最も均等な組み合わせを返す。
+
+    partner_counter / opponent_counter を渡すと、実力バランスがほぼ同点の
+    候補が複数見つかった場合に、直近のラウンドで同じ相手と組む/対戦する
+    頻度が少ない方を優先する（実力バランスそのものを崩してまで多様性を
+    優先することはない）。
     """
     # 試合に必要な人数（4の倍数）
     num_active = len(active_players)
@@ -462,6 +554,9 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
     if num_courts == 0:
         return [], active_players
 
+    use_tiebreak = bool(partner_counter) or bool(opponent_counter)
+    candidates = []  # [(total_penalty, matches, waiting), ...]
+
     best_matches = []
     best_waiting = []
     min_total_penalty = float('inf')
@@ -470,18 +565,18 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
         # 1) シャッフルして仮の組分けを作る
         temp_players = active_players[:]
         random.shuffle(temp_players)
-        
+
         current_active = temp_players[:num_courts * 4]
         current_waiting = temp_players[num_courts * 4:]
-        
+
         current_matches = []
         total_penalty = 0
-        
+
         # 2) 4人ずつコートに割り振り、スキル差を計算
         for c in range(num_courts):
             # 4人抽出
             p1, p2, p3, p4 = current_active[c*4 : (c+1)*4]
-            
+
             # チーム分けの全3パターンを試して、そのコート内でのベストを探す
             # (p1,p2 vs p3,p4), (p1,p3 vs p2,p4), (p1,p4 vs p2,p3)
             possible_teams = [
@@ -489,29 +584,50 @@ def generate_ai_best_pairings(active_players, max_courts, iterations=1000):
                 ((p1, p3), (p2, p4)),
                 ((p1, p4), (p2, p3))
             ]
-            
+
             best_court_diff = float('inf')
             best_court_pair = None
-            
+
             for t1, t2 in possible_teams:
                 # 平均スキルの差（conservativeスキルを使用）
                 avg1 = (t1[0].conservative + t1[1].conservative) / 2
                 avg2 = (t2[0].conservative + t2[1].conservative) / 2
                 diff = abs(avg1 - avg2)
-                
+
                 if diff < best_court_diff:
                     best_court_diff = diff
                     best_court_pair = (t1, t2)
-            
+
             current_matches.append(best_court_pair)
             # 二乗ペナルティ：大きな実力差があるコートをより厳しく評価
             total_penalty += (best_court_diff ** 2)
 
-        # 3) 全体評価が過去最高なら更新
+        if use_tiebreak:
+            candidates.append((total_penalty, current_matches, current_waiting))
+
+        # 3) 全体評価が過去最高なら更新（重複回避を使わない場合はこれまで通り）
         if total_penalty < min_total_penalty:
             min_total_penalty = total_penalty
             best_matches = current_matches
             best_waiting = current_waiting
+
+    if use_tiebreak and candidates:
+        # 実力バランスが最良のものから「僅差」とみなせる範囲だけに絞り、
+        # その中で直近との重複が最も少ない案を選び直す。
+        margin = max(REPEAT_TIEBREAK_MARGIN_FLOOR, min_total_penalty * REPEAT_TIEBREAK_MARGIN_RATIO)
+        near_best = [c for c in candidates if c[0] <= min_total_penalty + margin]
+
+        chosen = min(
+            near_best,
+            key=lambda c: _match_repeat_penalty(c[1], partner_counter, opponent_counter)
+        )
+        best_matches, best_waiting = chosen[1], chosen[2]
+
+        logging.getLogger(__name__).info(
+            "[ai] 実力バランス最良=%.2f 許容幅=%.2f 候補%d件中%d件が僅差 → 重複ペナルティ%d の案を採用",
+            min_total_penalty, margin, len(candidates), len(near_best),
+            _match_repeat_penalty(best_matches, partner_counter, opponent_counter)
+        )
 
     return best_matches, best_waiting
 
