@@ -483,12 +483,16 @@ def _fairness_first_four(candidates):
 
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 
-# 8ステップのサイクル: バランス無視×3 → AIペアリング×1(待機調整)
-#                    → バランス重視×3 → AIペアリング×1(待機調整) → 繰り返し
+# 10ステップのサイクル:
+#   バランス重視×2 → AIペアリング×1(待機調整)
+#   → バランス無視×3 → AIペアリング×1(待機調整)
+#   → バランス重視×2 → AIペアリング×1(待機調整) → 繰り返し
 REFILL_MODE_CYCLE = [
+    "balance_only", "balance_only",
+    "ai_pairing",
     "fairness_first", "fairness_first", "fairness_first",
     "ai_pairing",
-    "balance_only", "balance_only", "balance_only",
+    "balance_only", "balance_only",
     "ai_pairing",
 ]
 
