@@ -354,7 +354,56 @@ def _refill_candidate_pool(entry_table, pool_size=8):
     return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
 
 
-def _best_balanced_four(candidates):
+RECENT_HISTORY_RESULTS = 40  # 直近何件の試合結果を「最近」とみなすか
+PARTNER_REPEAT_WEIGHT = 1
+OPPONENT_REPEAT_WEIGHT = 2  # 対戦相手の重複の方が体感の偏りが大きいため重めに
+BALANCE_TIEBREAK_MARGIN_RATIO = 0.05  # 最良バランスの5%以内を「僅差」とみなす
+BALANCE_TIEBREAK_MARGIN_FLOOR = 1.0
+
+
+def _get_recent_pair_history2(results_table, max_results=RECENT_HISTORY_RESULTS):
+    """
+    直近の試合結果から「誰と誰がパートナーだったか」「誰と誰が対戦したか」を
+    集計する。件数がまだ少ないテーブルなのでシンプルに全件スキャン→
+    created_atで新しい順にmax_results件だけ使う。
+    """
+    from collections import Counter
+
+    all_results = results_table.scan().get("Items", [])
+    all_results.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    recent = all_results[:max_results]
+
+    partner_counter = Counter()
+    opponent_counter = Counter()
+    for r in recent:
+        a_uids = [p.get("user_id") for p in (r.get("team_a") or []) if p.get("user_id")]
+        b_uids = [p.get("user_id") for p in (r.get("team_b") or []) if p.get("user_id")]
+        if len(a_uids) == 2:
+            partner_counter[frozenset(a_uids)] += 1
+        if len(b_uids) == 2:
+            partner_counter[frozenset(b_uids)] += 1
+        for x in a_uids:
+            for y in b_uids:
+                opponent_counter[frozenset([x, y])] += 1
+    return partner_counter, opponent_counter
+
+
+def _repeat_penalty2(team_a, team_b, partner_counter, opponent_counter):
+    a_uids = [e.get("user_id") for e in team_a]
+    b_uids = [e.get("user_id") for e in team_b]
+    penalty = 0
+    if a_uids[0] and a_uids[1]:
+        penalty += partner_counter.get(frozenset(a_uids), 0) * PARTNER_REPEAT_WEIGHT
+    if b_uids[0] and b_uids[1]:
+        penalty += partner_counter.get(frozenset(b_uids), 0) * PARTNER_REPEAT_WEIGHT
+    for x in a_uids:
+        for y in b_uids:
+            if x and y:
+                penalty += opponent_counter.get(frozenset([x, y]), 0) * OPPONENT_REPEAT_WEIGHT
+    return penalty
+
+
+def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None):
     """
     候補(4人以上、休憩ローテーション上「次に出るべき順」にソート済み)の中から
     4人+2v2分けを選ぶ。
@@ -364,6 +413,10 @@ def _best_balanced_four(candidates):
     特定の人がスキル値の組み合わせの都合で何度選んでも外れ続け、
     ずっと待機のままになる不具合があった（休憩の公平性が実質機能しない）。
     残り3人は、その1人と組んだときに実力バランスが最良になるよう選ぶ。
+
+    さらに、実力バランスがほぼ同点の候補が複数あるときは、直近の試合で
+    同じ相手とパートナー/対戦済みの頻度が低い方を優先する（実力バランス
+    自体を崩してまで多様性を優先することはない）。
     """
     from itertools import combinations
 
@@ -372,24 +425,28 @@ def _best_balanced_four(candidates):
 
     must_include = candidates[0]
     rest_pool = candidates[1:]
-
-    best = None
-    best_diff = float("inf")
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
 
+    all_options = []  # [(diff, team_a, team_b), ...]
     for combo3 in combinations(rest_pool, 3):
         combo = (must_include,) + combo3
         scores = [conservative(e) for e in combo]
         for (i1, i2), (i3, i4) in pairing_patterns:
             diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
-            if diff < best_diff:
-                best_diff = diff
-                best = (combo, (i1, i2), (i3, i4))
+            all_options.append((diff, [combo[i1], combo[i2]], [combo[i3], combo[i4]]))
 
-    combo, team_a_idx, team_b_idx = best
-    team_a = [combo[i] for i in team_a_idx]
-    team_b = [combo[i] for i in team_b_idx]
-    return team_a, team_b, best_diff
+    min_diff = min(o[0] for o in all_options)
+
+    use_tiebreak = bool(partner_counter) or bool(opponent_counter)
+    if use_tiebreak:
+        margin = max(BALANCE_TIEBREAK_MARGIN_FLOOR, min_diff * BALANCE_TIEBREAK_MARGIN_RATIO)
+        near_best = [o for o in all_options if o[0] <= min_diff + margin]
+        chosen = min(near_best, key=lambda o: _repeat_penalty2(o[1], o[2], partner_counter, opponent_counter))
+    else:
+        chosen = min(all_options, key=lambda o: o[0])
+
+    diff, team_a, team_b = chosen
+    return team_a, team_b, diff
 
 
 def _try_refill_court(old_match_id, court_number):
@@ -472,7 +529,8 @@ def _try_refill_court(old_match_id, court_number):
         )
         return
 
-    team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
+    partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
+    team_a_entries, team_b_entries, diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
     new_match_id = generate_match_id2()
 
     import boto3
@@ -497,8 +555,9 @@ def _try_refill_court(old_match_id, court_number):
     try:
         dynamodb_client.transact_write_items(TransactItems=tx_items)
         current_app.logger.info(
-            "[game2][continuous] court=%s 自動補充: new_match_id=%s balance_diff=%.2f members=%s",
+            "[game2][continuous] court=%s 自動補充: new_match_id=%s balance_diff=%.2f repeat_penalty=%d members=%s",
             court_number, new_match_id, diff,
+            _repeat_penalty2(team_a_entries, team_b_entries, partner_counter, opponent_counter),
             [e.get("display_name") for e in team_a_entries + team_b_entries],
         )
     except ClientError as e:
