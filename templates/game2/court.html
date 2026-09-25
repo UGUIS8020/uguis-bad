@@ -90,7 +90,7 @@
                             <ul class="mb-2">
                                 {% for p in teams.A %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
-                            <input type="number" name="team1_score" class="form-control" placeholder="Aチーム得点" required>
+                            <input type="number" name="team1_score" class="form-control" placeholder="Aチーム得点" value="21" required>
                         </div>
                     </div>
                     <div class="col-6">
@@ -99,7 +99,7 @@
                             <ul class="mb-2">
                                 {% for p in teams.B %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
-                            <input type="number" name="team2_score" class="form-control" placeholder="Bチーム得点" required>
+                            <input type="number" name="team2_score" class="form-control" placeholder="Bチーム得点" value="21" required>
                         </div>
                     </div>
                 </div>
@@ -132,7 +132,7 @@
         }
         const scoreInputs = document.querySelectorAll('input[name="team1_score"], input[name="team2_score"]');
         for (const el of scoreInputs) {
-            if (el.value) return true;
+            if (el.value && el.value !== '21') return true;
         }
         return false;
     }
