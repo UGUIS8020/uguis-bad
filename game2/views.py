@@ -65,9 +65,15 @@ def _meta_table():
 
 
 def generate_match_id2():
-    """試合ID生成（既存システムのIDと絶対に衝突しないよう g2_ を付ける）"""
+    """
+    試合ID生成（既存システムのIDと絶対に衝突しないよう g2_ を付ける）。
+    連続マッチングでは短時間に複数コートが立て続けに補充されるため、
+    秒単位の時刻だけだと同一match_idが発行されうる（result_idの重複判定が
+    誤動作し、そのコートが止まる原因になる）。末尾に短いランダム値を足して
+    タイミングに関わらず一意にする。
+    """
     now = datetime.now()
-    match_id = "g2_" + now.strftime("%Y%m%d_%H%M%S")
+    match_id = "g2_" + now.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     current_app.logger.info(f"[game2] 生成された試合ID: {match_id}")
     return match_id
 
@@ -76,7 +82,7 @@ def has_ongoing_matches2():
     """テストコート側で進行中の試合があるか（既存システムとは独立に判定）"""
     try:
         entry_table = _entry_table()
-        resp = entry_table.scan(FilterExpression=Attr("entry_status").eq("playing"))
+        resp = entry_table.scan(FilterExpression=Attr("entry_status").eq("playing"), ConsistentRead=True)
         return len(resp.get("Items", [])) > 0
     except Exception as e:
         current_app.logger.error(f"[game2] 進行中試合チェックエラー: {str(e)}")
@@ -117,7 +123,7 @@ def court():
     meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     status = meta_current.get("status", "idle")
 
-    all_entries = entry_table.scan().get("Items", [])
+    all_entries = entry_table.scan(ConsistentRead=True).get("Items", [])
     my_entry = next((e for e in all_entries if e.get("user_id") == current_user.get_id()), None)
 
     # ★Phase2: 全コート共通の1つのmatch_idではなく、コートごとに独立した
@@ -215,7 +221,7 @@ def create_pairings():
         mode = "random"
         next_cycle_index = cycle_index + 1
 
-    response = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"))
+    response = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True)
     entries_by_user = {}
     for e in response.get("Items", []):
         uid, joined_at = e["user_id"], e.get("joined_at", "")
@@ -330,7 +336,7 @@ def create_pairings():
 
 def _refill_candidate_pool(entry_table, pool_size=8):
     """pending中の人を「休憩ローテーション上、次に出るべき順」に並べ、上位を返す"""
-    pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending")).get("Items", [])
+    pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
     sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
     return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
 
@@ -372,7 +378,8 @@ def _try_refill_court(old_match_id, court_number):
     finished_entries = entry_table.scan(
         FilterExpression=Attr("match_id").eq(str(old_match_id))
         & Attr("court_number").eq(court_number)
-        & Attr("entry_status").eq("playing")
+        & Attr("entry_status").eq("playing"),
+        ConsistentRead=True,
     ).get("Items", [])
 
     if len(finished_entries) != 4:
@@ -495,7 +502,8 @@ def submit_score(match_id, court_number):
 
         entry_table = _entry_table()
         entries = entry_table.scan(
-            FilterExpression=Attr("match_id").eq(str(match_id)) & Attr("court_number").eq(court_number_int)
+            FilterExpression=Attr("match_id").eq(str(match_id)) & Attr("court_number").eq(court_number_int),
+            ConsistentRead=True,
         ).get("Items", [])
         if not entries:
             return "コートのエントリーが見つかりません", 404
