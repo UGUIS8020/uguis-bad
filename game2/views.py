@@ -140,6 +140,16 @@ def court():
     pending = [e for e in all_entries if e.get("entry_status") == "pending"]
     resting = [e for e in all_entries if e.get("entry_status") == "resting"]
 
+    is_admin = getattr(current_user, "administrator", False)
+
+    # ★管理者以外は自分が今出ているコートだけを見せる（他コートの様子は非表示）
+    if not is_admin:
+        if my_entry and my_entry.get("entry_status") == "playing" and my_entry.get("court_number") is not None:
+            my_court_num = int(my_entry.get("court_number"))
+            courts = {my_court_num: courts[my_court_num]} if my_court_num in courts else {}
+        else:
+            courts = {}
+
     return render_template(
         "game2/court.html",
         status=status,
@@ -147,7 +157,7 @@ def court():
         pending=pending,
         resting=resting,
         my_entry=my_entry,
-        is_admin=getattr(current_user, "administrator", False),
+        is_admin=is_admin,
     )
 
 

@@ -31,7 +31,7 @@
     <div class="card mb-3">
         <div class="card-body">
             状態: <strong>{{ status }}</strong>
-            {% if courts %} / 進行中コート数: <strong>{{ courts|length }}</strong>{% endif %}
+            {% if is_admin and courts %} / 進行中コート数: <strong>{{ courts|length }}</strong>{% endif %}
         </div>
     </div>
 
