@@ -409,16 +409,18 @@ def _repeat_penalty2(team_a, team_b, partner_counter, opponent_counter):
     return penalty
 
 
-def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None):
+def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None, force_top_n=1):
     """
     候補(4人以上、休憩ローテーション上「次に出るべき順」にソート済み)の中から
     4人+2v2分けを選ぶ。
 
-    先頭(＝最も長く待っている・試合数が少ない人)は必ず含める。これを
-    せずに純粋にバランス最良の4人だけを毎回総当たりで選んでいたところ、
-    特定の人がスキル値の組み合わせの都合で何度選んでも外れ続け、
-    ずっと待機のままになる不具合があった（休憩の公平性が実質機能しない）。
-    残り3人は、その1人と組んだときに実力バランスが最良になるよう選ぶ。
+    先頭からforce_top_n人(デフォルト1人＝最も長く待っている・試合数が
+    少ない人)は必ず含める。これをせずに純粋にバランス最良の4人だけを
+    毎回総当たりで選んでいたところ、特定の人がスキル値の組み合わせの
+    都合で何度選んでも外れ続け、ずっと待機のままになる不具合があった
+    （休憩の公平性が実質機能しない）。残りは、その人たちと組んだときに
+    実力バランスが最良になるよう選ぶ。force_top_nを増やすほど、待機の
+    公平性が強く保証される分、バランス最適化の余地は狭まる。
 
     さらに、実力バランスがほぼ同点の候補が複数あるときは、直近の試合で
     同じ相手とパートナー/対戦済みの頻度が低い方を優先する（実力バランス
@@ -429,13 +431,14 @@ def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None)
     def conservative(e):
         return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
 
-    must_include = candidates[0]
-    rest_pool = candidates[1:]
+    must_include = tuple(candidates[:force_top_n])
+    rest_pool = candidates[force_top_n:]
+    remaining_needed = 4 - force_top_n
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
 
     all_options = []  # [(diff, team_a, team_b), ...]
-    for combo3 in combinations(rest_pool, 3):
-        combo = (must_include,) + combo3
+    for combo_rest in combinations(rest_pool, remaining_needed):
+        combo = must_include + combo_rest
         scores = [conservative(e) for e in combo]
         for (i1, i2), (i3, i4) in pairing_patterns:
             diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
@@ -602,7 +605,9 @@ def _try_refill_court(old_match_id, court_number):
         team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
     elif mode == "ai_pairing":
         partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
-        team_a_entries, team_b_entries, diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
+        team_a_entries, team_b_entries, diff = _best_balanced_four(
+            candidates, partner_counter, opponent_counter, force_top_n=2
+        )
     else:  # balance_only
         team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
     new_match_id = generate_match_id2()
