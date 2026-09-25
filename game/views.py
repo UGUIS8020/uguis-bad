@@ -2641,10 +2641,12 @@ def reset_participants():
             current_app.logger.info("[reset] rest_queue を完全に削除しました")
 
             # (C) meta#pairing の cycle_index を 0 にリセット、last_mode も削除
+            #     recent_match_ids（直近ラウンドの組み合わせ履歴、対戦相手の
+            #     偏り軽減に使う予定）も、練習が変われば意味がないので空にする
             meta_table.update_item(
                 Key={"match_id": "meta#pairing"},
-                UpdateExpression="SET cycle_index = :zero, round_count = :zero REMOVE last_mode",
-                ExpressionAttributeValues={":zero": 0},
+                UpdateExpression="SET cycle_index = :zero, round_count = :zero, recent_match_ids = :empty_list REMOVE last_mode",
+                ExpressionAttributeValues={":zero": 0, ":empty_list": []},
             )
             current_app.logger.info("[reset] cycle_index を 0、last_mode をリセットしました")
 
@@ -3691,16 +3693,26 @@ def create_pairings():
 
         # =========================================================
         # ★サイクル状態を保存（成功後だけ）
+        #   recent_match_ids: 直近ラウンドのmatch_idを追記していくリスト。
+        #   対戦相手・パートナーの偏りを見る際に、この中のmatch_idだけを
+        #   bad-game-resultsのmatch_id索引で引けば、全件スキャンせずに
+        #   直近数ラウンド分の組み合わせを取得できる（練習おわりでリセット）。
         # =========================================================
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
-            UpdateExpression="SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now ADD round_count :one",
+            UpdateExpression=(
+                "SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now, "
+                "recent_match_ids = list_append(if_not_exists(recent_match_ids, :empty_list), :new_mid) "
+                "ADD round_count :one"
+            ),
             ExpressionAttributeValues={
                 ":ci": next_cycle_index,
                 ":m": mode,
                 ":mid": str(match_id),
                 ":now": now_jst,
                 ":one": 1,
+                ":empty_list": [],
+                ":new_mid": [str(match_id)],
             }
         )
 
@@ -3971,14 +3983,21 @@ def create_pairings_skilled():
             raise
 
         # 8) last_modeを"skilled_ai"で保存（cycle_indexは進めない）
+        #    recent_match_ids はcreate_pairings()と同じ役割（直近ラウンド履歴）
         meta_table.update_item(
             Key={"match_id": "meta#pairing"},
-            UpdateExpression="SET last_mode=:m, last_match_id=:mid, updated_at=:now ADD round_count :one",
+            UpdateExpression=(
+                "SET last_mode=:m, last_match_id=:mid, updated_at=:now, "
+                "recent_match_ids = list_append(if_not_exists(recent_match_ids, :empty_list), :new_mid) "
+                "ADD round_count :one"
+            ),
             ExpressionAttributeValues={
                 ":m": "skilled_ai",
                 ":mid": str(match_id),
                 ":now": now_jst,
                 ":one": 1,
+                ":empty_list": [],
+                ":new_mid": [str(match_id)],
             }
         )
 
