@@ -347,8 +347,14 @@ def create_pairings():
     return redirect(url_for("game2.court"))
 
 
-def _refill_candidate_pool(entry_table, pool_size=8):
-    """pending中の人を「休憩ローテーション上、次に出るべき順」に並べ、上位を返す"""
+def _refill_candidate_pool(entry_table, pool_size=20):
+    """
+    pending中の人を「休憩ローテーション上、次に出るべき順」に並べて返す。
+    pool_sizeは組み合わせ探索が重くなりすぎないための保険的な上限で、
+    実運用の人数(20人程度まで)なら実質pending全員が候補になる
+    （以前は8人に絞っていたため、直前に空いた4人を含めても候補が
+    足りず、重複回避の余地が狭くなっていた）。
+    """
     pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
     sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
     return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
@@ -521,7 +527,7 @@ def _try_refill_court(old_match_id, court_number):
                 ExpressionAttributeValues={":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1},
             )
 
-    candidates = _refill_candidate_pool(entry_table, pool_size=8)
+    candidates = _refill_candidate_pool(entry_table)
     if len(candidates) < 4:
         current_app.logger.info(
             "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
