@@ -36,7 +36,8 @@
       "Bash(ssh -i \"c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@uguis-bad.shibuya8020.com \"sed -n '193,227p' /var/www/uguis_bad/post_badnews.py\")",
       "Bash(ssh -i 'c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\pem\\\\SHIBUYA8020_1124.pem' -o StrictHostKeyChecking=no ec2-user@uguis-bad.shibuya8020.com ' *)",
       "Bash(ssh -i \"c:\\\\Users\\\\Owner\\\\Desktop\\\\website\\\\pem\\\\SHIBUYA8020_1124.pem\" -o StrictHostKeyChecking=no ec2-user@uguis-bad.shibuya8020.com \"sed -n '295,315p' /var/www/uguis_bad/post_badnews.py\")",
-      "Bash(python smoke_test_matching.py:*)"
+      "Bash(python smoke_test_matching.py:*)",
+      "Bash(python smoke_test_game2.py:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\shibu\\.ssh"
