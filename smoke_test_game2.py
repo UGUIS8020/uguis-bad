@@ -157,61 +157,74 @@ def make_client_for_user(flask_app, user_id):
     return client
 
 
-def run_round(admin_client, round_label, max_courts):
-    print(f"\n--- ラウンド: {round_label} ---")
+def get_courts_state(dynamodb):
+    """現在playing中の全エントリーを、コート番号ごとにグルーピングして返す"""
+    entry_table = dynamodb.Table("bad-game2-match_entries")
+    playing = scan_all(entry_table, FilterExpression=Attr("entry_status").eq("playing"))
+    by_court = {}
+    for e in playing:
+        c = int(e["court_number"])
+        by_court.setdefault(c, {"match_id": e.get("match_id"), "entries": []})
+        by_court[c]["entries"].append(e)
+    return by_court
+
+
+def seed_first_round(admin_client, max_courts):
+    print(f"\n--- 最初の組み合わせ作成 (courts={max_courts}) ---")
     resp = admin_client.post("/game2/create_pairings", data={"max_courts": str(max_courts)}, follow_redirects=False)
     if resp.status_code not in (302, 200):
         print(f"[NG] create_pairings status={resp.status_code} body={resp.get_data(as_text=True)[:300]}")
         return False
 
     dynamodb = get_dynamodb()
-    meta_table = dynamodb.Table("bad-game-matches")
-    meta_current = meta_table.get_item(Key={"match_id": "meta#continuous_current"}, ConsistentRead=True).get("Item", {}) or {}
+    courts = get_courts_state(dynamodb)
+    print(f"  作成されたコート数: {len(courts)}")
+    for c, info in sorted(courts.items()):
+        names = [(e.get("display_name"), e.get("team")) for e in info["entries"]]
+        print(f"  court{c}: match_id={info['match_id']} {names}")
+    return len(courts) > 0
 
-    if meta_current.get("status") != "playing":
-        print(f"[NG] create_pairings後もstatus=playingになっていません: {meta_current}")
+
+def submit_and_check_refill(admin_client, court_num, old_match_id):
+    """1コート分のスコアを送信し、そのコートだけ自動で次の試合に切り替わるか確認する"""
+    dynamodb = get_dynamodb()
+    t1, t2 = (21, random.randint(10, 19))
+    resp = admin_client.post(
+        f"/game2/submit_score/{old_match_id}/court/{court_num}",
+        data={"team1_score": str(t1), "team2_score": str(t2)},
+    )
+    if resp.status_code != 200:
+        print(f"  [NG] court{court_num} submit_score status={resp.status_code} body={resp.get_data(as_text=True)[:200]}")
+        return False
+    print(f"  court{court_num}: {t1}-{t2} 送信 [OK]")
+
+    courts_after = get_courts_state(dynamodb)
+    info = courts_after.get(court_num)
+    if not info:
+        print(f"  [NG] court{court_num} が補充後に消えています（空いたまま候補不足の可能性）")
+        return False
+    if info["match_id"] == old_match_id:
+        print(f"  [NG] court{court_num} のmatch_idが変わっていません（自動補充されていない）")
         return False
 
-    match_id = meta_current.get("current_match_id")
-    court_count = int(meta_current.get("court_count", 0))
-    print(f"  match_id={match_id} court_count={court_count} mode={meta_current.get('pairing_mode')}")
+    names = [(e.get("display_name"), e.get("team")) for e in info["entries"]]
+    print(f"  court{court_num}: 自動補充後 match_id={info['match_id']} {names} [OK]")
+    return True
 
-    entry_table = dynamodb.Table("bad-game2-match_entries")
-    entries = scan_all(entry_table, FilterExpression=Attr("match_id").eq(str(match_id)))
-    by_court = {}
-    for e in entries:
-        by_court.setdefault(int(e["court_number"]), []).append(e)
 
+def run_continuous_rounds(admin_client, rounds):
+    """全コートで順番にスコアを送信し、毎回そのコートだけ自動補充されるか確認する"""
     all_ok = True
-    for court_num in range(1, court_count + 1):
-        court_entries = by_court.get(court_num, [])
-        names = [(e.get("display_name"), e.get("team")) for e in court_entries]
-        if len(court_entries) != 4:
-            print(f"  [NG] court{court_num}: エントリー数が4人ではありません: {names}")
-            all_ok = False
-            continue
-        t1, t2 = (21, random.randint(10, 19))
-        resp = admin_client.post(
-            f"/game2/submit_score/{match_id}/court/{court_num}",
-            data={"team1_score": str(t1), "team2_score": str(t2)},
-        )
-        status = "OK" if resp.status_code == 200 else f"NG({resp.status_code}) {resp.get_data(as_text=True)[:200]}"
-        print(f"  court{court_num}: {names} -> {t1}-{t2}  [{status}]")
-        if resp.status_code != 200:
-            all_ok = False
-
-    resp = admin_client.post("/game2/finish_current_match")
-    if resp.status_code not in (200, 302):
-        print(f"[NG] finish_current_match status={resp.status_code} body={resp.get_data(as_text=True)[:300]}")
-        all_ok = False
-    else:
-        print("  finish_current_match: OK")
-
-    meta_after = meta_table.get_item(Key={"match_id": "meta#continuous_current"}, ConsistentRead=True).get("Item", {}) or {}
-    if meta_after.get("status") != "idle":
-        print(f"[NG] finish後もidleに戻っていません: {meta_after}")
-        all_ok = False
-
+    dynamodb = get_dynamodb()
+    for i in range(rounds):
+        courts = get_courts_state(dynamodb)
+        if not courts:
+            print(f"\n[情報] {i+1}周目: 進行中のコートが無いため終了（人数不足の可能性）")
+            break
+        print(f"\n--- 連続マッチング {i+1}周目 (コート{len(courts)}面) ---")
+        for court_num, info in sorted(courts.items()):
+            ok = submit_and_check_refill(admin_client, court_num, info["match_id"])
+            all_ok = all_ok and ok
     return all_ok
 
 
@@ -289,16 +302,13 @@ def main():
                 overall_ok = False
         admin_client.post("/game2/entry", follow_redirects=False)
 
-        for label in ["1回目 (random)", "2回目 (full_random)", "3回目 (ai)"]:
-            ok = run_round(admin_client, label, args.courts)
-            overall_ok = overall_ok and ok
-            if not ok:
-                print(f"[警告] {label} で異常を検出しました。続行します。")
+        ok = seed_first_round(admin_client, args.courts)
+        overall_ok = overall_ok and ok
 
-        # 緊急脱出ボタンのテスト: チェックインだけした状態(playingではない)で実行
-        for u in player_users[:4]:
-            c = make_client_for_user(flask_app, u["user_id"])
-            c.post("/game2/entry", follow_redirects=False)
+        ok = run_continuous_rounds(admin_client, rounds=3)
+        overall_ok = overall_ok and ok
+        if not ok:
+            print("[警告] 連続マッチングで異常を検出しました。続行します。")
 
         ok = test_emergency_transfer(flask_app, admin_client, dynamodb)
         overall_ok = overall_ok and ok

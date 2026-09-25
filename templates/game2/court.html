@@ -31,11 +31,10 @@
     <div class="card mb-3">
         <div class="card-body">
             状態: <strong>{{ status }}</strong>
-            {% if match_id %} / match_id: <code>{{ match_id }}</code>{% endif %}
+            {% if courts %} / 進行中コート数: <strong>{{ courts|length }}</strong>{% endif %}
         </div>
     </div>
 
-    {% if status != 'playing' %}
     <div class="card mb-3">
         <div class="card-body">
             {% if my_entry %}
@@ -50,9 +49,10 @@
         </div>
     </div>
 
-    {% if is_admin %}
+    {% if is_admin and not courts %}
     <div class="card mb-3">
         <div class="card-body">
+            <p class="text-muted">最初の組み合わせを作成してください。以降は、あるコートの試合が終わるたびに、そのコートだけ自動的に次の組み合わせが作られます。</p>
             <form method="POST" action="{{ url_for('game2.create_pairings') }}" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label>コート数:</label>
@@ -61,19 +61,17 @@
                     <option value="{{ n }}" {% if n == 3 %}selected{% endif %}>{{ n }}</option>
                     {% endfor %}
                 </select>
-                <button type="submit" class="btn btn-success">組み合わせ作成</button>
+                <button type="submit" class="btn btn-success">最初の組み合わせを作成</button>
             </form>
         </div>
     </div>
     {% endif %}
-    {% endif %}
 
-    {% if status == 'playing' %}
     {% for court_num, teams in courts.items() %}
     <div class="card court-card">
-        <div class="card-header">コート {{ court_num }}</div>
+        <div class="card-header">コート {{ court_num }}（自動進行中）</div>
         <div class="card-body">
-            <form method="POST" action="{{ url_for('game2.submit_score', match_id=match_id, court_number=court_num) }}">
+            <form method="POST" action="{{ url_for('game2.submit_score', match_id=teams.match_id, court_number=court_num) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="row">
                     <div class="col-6">
@@ -95,19 +93,11 @@
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary mt-2">このコートのスコアを送信</button>
+                <button type="submit" class="btn btn-primary mt-2">このコートのスコアを送信（送信後、自動で次の試合が組まれます）</button>
             </form>
         </div>
     </div>
     {% endfor %}
-
-    {% if is_admin %}
-    <form method="POST" action="{{ url_for('game2.finish_current_match') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-dark">全コート終了・次のラウンドへ</button>
-    </form>
-    {% endif %}
-    {% endif %}
 
     {% if is_admin %}
     <div class="emergency-box">
