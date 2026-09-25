@@ -455,6 +455,49 @@ def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None)
     return team_a, team_b, diff
 
 
+def _fairness_first_four(candidates):
+    """
+    休憩ローテーション上の待機順、上位4人をそのまま採用する（スキルバランスは
+    「誰を選ぶか」には一切使わない）。ただし選ばれた4人をどう2チームに
+    分けるかだけは、3通りのパターンの中で最も実力差が小さいものを選ぶ
+    （これは公平性に影響しないので併用して問題ない）。
+    """
+    def conservative(e):
+        return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
+
+    four = candidates[:4]
+    scores = [conservative(e) for e in four]
+    pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
+
+    best = None
+    best_diff = float("inf")
+    for (i1, i2), (i3, i4) in pairing_patterns:
+        diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
+        if diff < best_diff:
+            best_diff = diff
+            best = ([four[i1], four[i2]], [four[i3], four[i4]])
+
+    team_a, team_b = best
+    return team_a, team_b, best_diff
+
+
+def _next_refill_mode(meta_table):
+    """
+    3回の補充ごとに「公平性優先」⇔「バランス優先」を交互に切り替える。
+    meta#continuous_pairing の refill_count をカウントし、
+    (refill_count // 3) が偶数なら公平性優先、奇数ならバランス優先。
+    """
+    resp = meta_table.update_item(
+        Key={"match_id": META_PAIRING_PK},
+        UpdateExpression="ADD refill_count :one",
+        ExpressionAttributeValues={":one": 1},
+        ReturnValues="UPDATED_NEW",
+    )
+    refill_count = int(resp["Attributes"]["refill_count"])
+    mode = "fairness_first" if (refill_count // 3) % 2 == 0 else "balance_priority"
+    return mode, refill_count
+
+
 def _try_refill_court(old_match_id, court_number):
     """
     1コート分の結果が確定した直後に呼ぶ。
@@ -463,6 +506,7 @@ def _try_refill_court(old_match_id, court_number):
     """
     entry_table = _entry_table()
     results_table = _results_table()
+    meta_table = _meta_table()
 
     finished_entries = entry_table.scan(
         FilterExpression=Attr("match_id").eq(str(old_match_id))
@@ -535,8 +579,12 @@ def _try_refill_court(old_match_id, court_number):
         )
         return
 
-    partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
-    team_a_entries, team_b_entries, diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
+    mode, refill_count = _next_refill_mode(meta_table)
+    if mode == "fairness_first":
+        team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
+    else:
+        partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
+        team_a_entries, team_b_entries, diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
     new_match_id = generate_match_id2()
 
     import boto3
@@ -561,9 +609,8 @@ def _try_refill_court(old_match_id, court_number):
     try:
         dynamodb_client.transact_write_items(TransactItems=tx_items)
         current_app.logger.info(
-            "[game2][continuous] court=%s 自動補充: new_match_id=%s balance_diff=%.2f repeat_penalty=%d members=%s",
-            court_number, new_match_id, diff,
-            _repeat_penalty2(team_a_entries, team_b_entries, partner_counter, opponent_counter),
+            "[game2][continuous] court=%s 自動補充(mode=%s, refill_count=%d): new_match_id=%s balance_diff=%.2f members=%s",
+            court_number, mode, refill_count, new_match_id, diff,
             [e.get("display_name") for e in team_a_entries + team_b_entries],
         )
     except ClientError as e:
