@@ -258,6 +258,18 @@ body {
             </a>
           </li>
 
+          {% if current_user.administrator %}
+          <li class="nav-item">
+            <a class="btn btn-outline-warning ms-1"
+              href="{{ url_for('game2.court') }}"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="新しいタブでテストコート（開発中の新モード）を開きます">
+              <i class="fas fa-flask me-1"></i>テストコート
+            </a>
+          </li>
+          {% endif %}
+
           <style>
             /* 汎用クラス */
             .avatar-ig {
