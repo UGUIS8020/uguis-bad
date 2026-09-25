@@ -45,7 +45,17 @@
                     <button type="submit" class="btn btn-primary">テストコートにチェックイン</button>
                 </form>
             {% endif %}
-            <p class="text-muted mt-2 mb-0">待機中: {{ pending|length }}人 / 休憩中: {{ resting|length }}人</p>
+            <p class="text-muted mt-2 mb-1">待機中: {{ pending|length }}人 / 休憩中: {{ resting|length }}人</p>
+            {% if pending %}
+            <p class="mb-0">
+                {% for p in pending %}<span class="badge bg-secondary me-1">{{ p.display_name }}</span>{% endfor %}
+            </p>
+            {% endif %}
+            {% if resting %}
+            <p class="mb-0 mt-1">
+                {% for p in resting %}<span class="badge bg-light text-dark border me-1">{{ p.display_name }}</span>{% endfor %}
+            </p>
+            {% endif %}
         </div>
     </div>
 
