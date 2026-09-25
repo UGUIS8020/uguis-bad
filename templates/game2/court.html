@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>テストコート（開発中）</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f5f5f5; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .court-card { border-radius: 12px; margin-bottom: 16px; }
+        .team-box { border-radius: 8px; padding: 10px; background: #f8f9fa; }
+        .emergency-box { border: 2px solid #dc3545; border-radius: 12px; padding: 16px; margin-top: 30px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center my-3">
+        <h3 class="mb-0">🧪 テストコート（開発中の新モード用）</h3>
+        <a href="{{ url_for('game.court') }}" class="btn btn-outline-secondary btn-sm">通常コートへ戻る</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category in ['danger','warning'] else category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            状態: <strong>{{ status }}</strong>
+            {% if match_id %} / match_id: <code>{{ match_id }}</code>{% endif %}
+        </div>
+    </div>
+
+    {% if status != 'playing' %}
+    <div class="card mb-3">
+        <div class="card-body">
+            {% if my_entry %}
+                <p class="text-success mb-2">✅ チェックイン済みです（{{ my_entry.display_name }}）</p>
+            {% else %}
+                <form method="POST" action="{{ url_for('game2.entry') }}">
+                    <button type="submit" class="btn btn-primary">テストコートにチェックイン</button>
+                </form>
+            {% endif %}
+            <p class="text-muted mt-2 mb-0">待機中: {{ pending|length }}人 / 休憩中: {{ resting|length }}人</p>
+        </div>
+    </div>
+
+    {% if is_admin %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('game2.create_pairings') }}" class="d-flex align-items-center gap-2">
+                <label>コート数:</label>
+                <select name="max_courts" class="form-select" style="width: 100px;">
+                    {% for n in range(1, 7) %}
+                    <option value="{{ n }}" {% if n == 2 %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-success">組み合わせ作成</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% if status == 'playing' %}
+    {% for court_num, teams in courts.items() %}
+    <div class="card court-card">
+        <div class="card-header">コート {{ court_num }}</div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('game2.submit_score', match_id=match_id, court_number=court_num) }}">
+                <div class="row">
+                    <div class="col-6">
+                        <div class="team-box">
+                            <strong>Aチーム</strong>
+                            <ul class="mb-2">
+                                {% for p in teams.A %}<li>{{ p.display_name }}</li>{% endfor %}
+                            </ul>
+                            <input type="number" name="team1_score" class="form-control" placeholder="Aチーム得点" required>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="team-box">
+                            <strong>Bチーム</strong>
+                            <ul class="mb-2">
+                                {% for p in teams.B %}<li>{{ p.display_name }}</li>{% endfor %}
+                            </ul>
+                            <input type="number" name="team2_score" class="form-control" placeholder="Bチーム得点" required>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary mt-2">このコートのスコアを送信</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+
+    {% if is_admin %}
+    <form method="POST" action="{{ url_for('game2.finish_current_match') }}">
+        <button type="submit" class="btn btn-dark">全コート終了・次のラウンドへ</button>
+    </form>
+    {% endif %}
+    {% endif %}
+
+    {% if is_admin %}
+    <div class="emergency-box">
+        <h5 class="text-danger">⚠ 緊急: テストコートに問題がある場合</h5>
+        <p class="text-muted">テストコートの参加者全員を、いつも通り動いている通常コートの待機列に移動します。テストコート側のデータはリセットされます。</p>
+        <form method="POST" action="{{ url_for('game2.emergency_transfer') }}"
+              onsubmit="return confirm('テストコートの参加者全員を通常コートに移動します。よろしいですか？');">
+            <button type="submit" class="btn btn-danger">参加者全員を通常コートに移動する</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    // シンプルに10秒ごとに再読み込み（Phase1は最小構成）
+    setTimeout(() => location.reload(), 10000);
+</script>
+</body>
+</html>
