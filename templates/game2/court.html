@@ -30,16 +30,26 @@
 
     <div class="card mb-3">
         <div class="card-body">
-            状態: <strong>{{ status }}</strong>
-            {% if is_admin and courts %} / 進行中コート数: <strong>{{ courts|length }}</strong>{% endif %}
+            {% if my_entry %}
+                {% if my_entry.entry_status == 'playing' %}
+                    <span class="fs-5">🏸 試合中（コート{{ my_entry.court_number }}）</span>
+                {% elif my_entry.entry_status == 'resting' %}
+                    <span class="fs-5">☕ 休み中です</span>
+                {% else %}
+                    <span class="fs-5">⏳ 待機中です。次の試合をお待ちください</span>
+                {% endif %}
+            {% else %}
+                <span class="fs-5 text-muted">未チェックイン</span>
+            {% endif %}
+            {% if is_admin %}
+                <span class="text-muted ms-2">（全体状態: {{ status }}{% if courts %} / 進行中コート数: {{ courts|length }}{% endif %}）</span>
+            {% endif %}
         </div>
     </div>
 
     <div class="card mb-3">
         <div class="card-body">
-            {% if my_entry %}
-                <p class="text-success mb-2">✅ チェックイン済みです（{{ my_entry.display_name }}）</p>
-            {% else %}
+            {% if not my_entry %}
                 <form method="POST" action="{{ url_for('game2.entry') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-primary">テストコートにチェックイン</button>
