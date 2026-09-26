@@ -598,11 +598,14 @@ def _fairness_first_four(candidates):
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# ローカルシミュレーション(simulate_pairing.py, 300試合)で比較した結果、
-# 複雑なモード配分よりも「AIペアリングのみ」が待ち時間・実力バランス・
-# 重複回避のすべてで一貫して最良だったため、暫定的にAIペアリング固定にする。
+# ローカルシミュレーション(simulate_pairing.py)で検証した結果、
+# AIペアリングのみだと「休み(試合数)のばらつき」が残るため、4試合を1セットとし、
+# 3試合はAIペアリング、1試合は「休みが多い順に4人集めてチーム分けだけ実力で
+# 調整する」調整試合(fairness_first)を挟む。均等さと実力バランスのトレードオフ
+# を踏まえた上での選択（完全な均等ではないが、AIペアリングのみより改善する）。
 REFILL_MODE_CYCLE = [
-    "ai_pairing",
+    "ai_pairing", "ai_pairing", "ai_pairing",
+    "fairness_first",
 ]
 
 
