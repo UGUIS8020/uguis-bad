@@ -263,7 +263,13 @@ def leave_court():
 @bp_game2.route("/rest", methods=["POST"])
 @login_required
 def rest():
-    """休憩モードに切り替え（試合中は不可）"""
+    """
+    休憩ボタン。今の状態によって挙動が変わる:
+    - 待機中(pending): 即座に休憩に切り替える
+    - 試合中(playing): 今の試合はそのまま続け、rest_requestedを立てておく。
+      試合が終わってpending/restingに振り分けられる際(_try_refill_court)に
+      自動的に休憩扱いになる（＝次回から休憩が適用される）
+    """
     try:
         user_id = current_user.get_id()
         entry_table = _entry_table()
@@ -277,8 +283,15 @@ def rest():
             return redirect(url_for("game2.court"))
 
         entry = items[0]
+
         if entry.get("entry_status") == "playing":
-            flash("試合中は休憩できません。", "warning")
+            entry_table.update_item(
+                Key={"entry_id": entry["entry_id"]},
+                UpdateExpression="SET rest_requested = :true, updated_at = :now",
+                ExpressionAttributeValues={":true": True, ":now": datetime.now(JST).isoformat()},
+            )
+            current_app.logger.info("[game2][rest] user=%s entry_id=%s 休憩を予約(次回から適用)", user_id, entry["entry_id"])
+            flash("休憩を予約しました。この試合が終わったら休憩になります。", "info")
             return redirect(url_for("game2.court"))
 
         entry_table.update_item(
@@ -296,6 +309,37 @@ def rest():
     except Exception as e:
         current_app.logger.error(f"[game2][rest] 休憩エラー: {e}")
         flash("休憩への切替に失敗しました", "danger")
+
+    return redirect(url_for("game2.court"))
+
+
+@bp_game2.route("/rest_request_cancel", methods=["POST"])
+@login_required
+def rest_request_cancel():
+    """試合中に予約した休憩をキャンセルする"""
+    try:
+        user_id = current_user.get_id()
+        entry_table = _entry_table()
+
+        items = entry_table.scan(
+            FilterExpression=Attr("user_id").eq(user_id) & Attr("entry_status").eq("playing"),
+            ConsistentRead=True,
+        ).get("Items", [])
+
+        if not items:
+            flash("試合中のエントリーが見つかりませんでした", "warning")
+            return redirect(url_for("game2.court"))
+
+        entry = items[0]
+        entry_table.update_item(
+            Key={"entry_id": entry["entry_id"]},
+            UpdateExpression="REMOVE rest_requested",
+        )
+        current_app.logger.info("[game2][rest_request_cancel] user=%s entry_id=%s 休憩予約をキャンセル", user_id, entry["entry_id"])
+        flash("休憩の予約をキャンセルしました。", "info")
+    except Exception as e:
+        current_app.logger.error(f"[game2][rest_request_cancel] エラー: {e}")
+        flash("キャンセルに失敗しました", "danger")
 
     return redirect(url_for("game2.court"))
 
