@@ -68,6 +68,19 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-primary btn-lg px-5">🏸 試合に参加</button>
             </form>
+            {% elif my_entry and my_entry.entry_status == 'playing' %}
+                {% if my_entry.rest_requested %}
+                <p class="text-muted mt-3 mb-1">この試合が終わったら休憩になります</p>
+                <form method="POST" action="{{ url_for('game2.rest_request_cancel') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-secondary">休憩予約をキャンセル</button>
+                </form>
+                {% else %}
+                <form method="POST" action="{{ url_for('game2.rest') }}" class="mt-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-warning btn-lg px-5">☕ 次から休憩する</button>
+                </form>
+                {% endif %}
             {% endif %}
         </div>
     </div>
