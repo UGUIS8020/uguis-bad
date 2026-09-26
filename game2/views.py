@@ -281,6 +281,38 @@ def rest():
     return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/resume", methods=["POST"])
+@login_required
+def resume():
+    """休憩から復帰（待機に戻す）"""
+    try:
+        user_id = current_user.get_id()
+        entry_table = _entry_table()
+
+        items = entry_table.scan(
+            FilterExpression=Attr("user_id").eq(user_id), ConsistentRead=True
+        ).get("Items", [])
+
+        if not items:
+            flash("エントリーが見つかりませんでした", "warning")
+            return redirect(url_for("game2.court"))
+
+        entry = items[0]
+        entry_table.update_item(
+            Key={"entry_id": entry["entry_id"]},
+            UpdateExpression="SET entry_status = :pending, match_id = :pending, resumed_at = :now",
+            ExpressionAttributeValues={
+                ":pending": "pending", ":now": datetime.now(JST).isoformat(),
+            },
+        )
+        current_app.logger.info("[game2][resume] user=%s entry_id=%s 復帰", user_id, entry["entry_id"])
+    except Exception as e:
+        current_app.logger.error(f"[game2][resume] 復帰エラー: {e}")
+        flash("復帰に失敗しました", "danger")
+
+    return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/create_pairings", methods=["POST"])
 @login_required
 def create_pairings():
