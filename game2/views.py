@@ -595,17 +595,32 @@ def _fairness_first_four(candidates):
     return team_a, team_b, best_diff
 
 
+def _full_random_four(candidates):
+    """
+    待機順・実力に関係なく、待機中の中から完全ランダムに4人選ぶ。
+    ただし選ばれた4人をどう2チームに分けるかだけは、_fairness_first_four と
+    同様に実力差が最小になる組み合わせを選ぶ（「調整はする」）。
+    """
+    import random as _random
+
+    four = _random.sample(candidates, 4) if len(candidates) > 4 else list(candidates)[:4]
+    return _fairness_first_four(four)
+
+
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
-AI_RESCUE_POOL_SIZE = 4  # AI救済ペアリング: 通常のAIペアリング(6人)よりさらに絞る
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# 8ステップのサイクル: AIペアリング×6 → 実力優先(バランスのみ、履歴無視)×1
-# → AI救済ペアリング(待機上位4人に絞ってバランス+履歴)×1 → 繰り返し
+# 15ステップのサイクル:
+#   完全ランダム(調整はする)×3 → AIペアリング×6
+#   → 実力優先(バランスのみ、履歴無視)×3 → 完全ランダム(調整はする)×3 → 繰り返し
+# 「AI救済ペアリング」は、安全弁(WAIT_RESCUE_THRESHOLD)と役割が重複しており
+# 効果も限定的だったため廃止した。
 REFILL_MODE_CYCLE = [
+    "full_random", "full_random", "full_random",
     "ai_pairing", "ai_pairing", "ai_pairing",
     "ai_pairing", "ai_pairing", "ai_pairing",
-    "balance_only",
-    "ai_rescue",
+    "balance_only", "balance_only", "balance_only",
+    "full_random", "full_random", "full_random",
 ]
 
 
@@ -746,9 +761,6 @@ def _try_refill_court(old_match_id, court_number):
         if mode == "ai_pairing":
             # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
             candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
-        elif mode == "ai_rescue":
-            # AIペアリングよりさらに待機上位に絞り込む(「救済」の役割)
-            candidates = _refill_candidate_pool(entry_table, pool_size=AI_RESCUE_POOL_SIZE)
         else:
             candidates = _refill_candidate_pool(entry_table)
 
@@ -761,7 +773,9 @@ def _try_refill_court(old_match_id, court_number):
 
         if mode == "fairness_first":
             team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
-        elif mode in ("ai_pairing", "ai_rescue"):
+        elif mode == "full_random":
+            team_a_entries, team_b_entries, diff = _full_random_four(candidates)
+        elif mode == "ai_pairing":
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
                 candidates, partner_counter, opponent_counter
