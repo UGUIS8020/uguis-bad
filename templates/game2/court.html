@@ -48,6 +48,14 @@
             {% endif %}
             {% if is_admin %}
                 <span class="text-muted ms-2">（全体状態: {{ status }}{% if courts %} / 進行中コート数: {{ courts|length }}{% endif %}）</span>
+                {% if awaiting_refill %}
+                <div class="text-muted small mt-1">
+                    空き待ち中:
+                    {% for c, sec in awaiting_refill.items() %}
+                        コート{{ c }}（あと{{ sec }}秒）
+                    {% endfor %}
+                </div>
+                {% endif %}
             {% endif %}
 
             {% if my_entry and my_entry.entry_status == 'pending' %}
