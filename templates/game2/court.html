@@ -18,10 +18,18 @@
     <div class="d-flex justify-content-between align-items-center my-3">
         <h3 class="mb-0">🧪 テストコート（開発中の新モード用）</h3>
         {% if my_entry and my_entry.entry_status != 'playing' %}
-        <form method="POST" action="{{ url_for('game2.leave_court') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-outline-secondary btn-sm">退出</button>
-        </form>
+        <div class="d-flex gap-2">
+            {% if my_entry.entry_status == 'pending' %}
+            <form method="POST" action="{{ url_for('game2.rest') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-warning btn-sm">休憩する</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('game2.leave_court') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-secondary btn-sm">退出</button>
+            </form>
+        </div>
         {% endif %}
     </div>
 

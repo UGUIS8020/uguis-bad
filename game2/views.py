@@ -241,6 +241,46 @@ def leave_court():
         return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/rest", methods=["POST"])
+@login_required
+def rest():
+    """休憩モードに切り替え（試合中は不可）"""
+    try:
+        user_id = current_user.get_id()
+        entry_table = _entry_table()
+
+        items = entry_table.scan(
+            FilterExpression=Attr("user_id").eq(user_id), ConsistentRead=True
+        ).get("Items", [])
+
+        if not items:
+            flash("エントリーが見つかりませんでした", "warning")
+            return redirect(url_for("game2.court"))
+
+        entry = items[0]
+        if entry.get("entry_status") == "playing":
+            flash("試合中は休憩できません。", "warning")
+            return redirect(url_for("game2.court"))
+
+        entry_table.update_item(
+            Key={"entry_id": entry["entry_id"]},
+            UpdateExpression=(
+                "SET entry_status = :resting, rest_started_at = :now, "
+                "rest_count = if_not_exists(rest_count, :zero) + :one"
+            ),
+            ExpressionAttributeValues={
+                ":resting": "resting", ":now": datetime.now(JST).isoformat(),
+                ":zero": 0, ":one": 1,
+            },
+        )
+        current_app.logger.info("[game2][rest] user=%s entry_id=%s 休憩に切替", user_id, entry["entry_id"])
+    except Exception as e:
+        current_app.logger.error(f"[game2][rest] 休憩エラー: {e}")
+        flash("休憩への切替に失敗しました", "danger")
+
+    return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/create_pairings", methods=["POST"])
 @login_required
 def create_pairings():
