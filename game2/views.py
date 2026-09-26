@@ -207,6 +207,40 @@ def entry():
     return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/leave_court", methods=["POST"])
+@login_required
+def leave_court():
+    """テストコートから退出する（エントリー削除）。試合中は退出不可"""
+    try:
+        user_id = current_user.get_id()
+        entry_table = _entry_table()
+
+        items = entry_table.scan(
+            FilterExpression=Attr("user_id").eq(user_id), ConsistentRead=True
+        ).get("Items", [])
+
+        if not items:
+            flash("エントリーが見つかりませんでした", "warning")
+            return redirect(url_for("game2.court"))
+
+        for e in items:
+            if e.get("entry_status") == "playing":
+                flash("試合中のため退出できません", "warning")
+                return redirect(url_for("game2.court"))
+
+        for e in items:
+            entry_table.delete_item(Key={"entry_id": e["entry_id"]})
+            current_app.logger.info("[game2][leave_court] deleted entry_id=%s", e["entry_id"])
+
+        flash("テストコートから退出しました", "info")
+        return redirect(url_for("index"))
+
+    except Exception as e:
+        current_app.logger.exception(f"[game2][leave_court] 退出エラー: {e}")
+        flash("退出に失敗しました", "danger")
+        return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/create_pairings", methods=["POST"])
 @login_required
 def create_pairings():
