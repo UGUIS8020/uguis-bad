@@ -36,6 +36,7 @@ from game.game_utils import (
     generate_balanced_pairs_and_matches,
     generate_full_random_pairings,
     update_trueskill_for_players_and_return_updates,
+    _rest_queue_pk,
 )
 from game.views import (
     persist_skill_to_bad_users,
@@ -1138,6 +1139,64 @@ def finish_current_match():
         raise
 
     flash("テストコート: 試合を終了しました", "success")
+    return redirect(url_for("game2.court"))
+
+
+@bp_game2.route("/reset_participants", methods=["POST"])
+@login_required
+def reset_participants():
+    """
+    練習終了ボタン: テストコートの全エントリーを削除し、休憩ローテーション
+    (continuous_rest_queue) とペアリングサイクル(cycle_index/refill_count)を
+    リセットする。既存システム（bad-game-*）には一切触れない。
+    """
+    if not current_user.administrator:
+        flash("管理者のみ実行できます。", "danger")
+        return redirect(url_for("game2.court"))
+
+    if has_ongoing_matches2():
+        flash(
+            "まだ試合中のコートがあるため、練習を終了できません。"
+            "先に全コートのスコアを送信するか、「緊急: 全員を通常コートへ移動」で"
+            "試合を終了してから、もう一度お試しください。",
+            "danger",
+        )
+        return redirect(url_for("game2.court"))
+
+    entry_table = _entry_table()
+    meta_table = _meta_table()
+
+    try:
+        items = entry_table.scan().get("Items", [])
+        deleted_count = 0
+        for item in items:
+            entry_table.delete_item(Key={"entry_id": item["entry_id"]})
+            deleted_count += 1
+
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={":idle": "idle"},
+        )
+
+        meta_table.delete_item(Key={"match_id": _rest_queue_pk(REST_QUEUE_KEY)})
+
+        meta_table.update_item(
+            Key={"match_id": META_PAIRING_PK},
+            UpdateExpression="SET cycle_index = :zero, refill_count = :zero REMOVE last_mode, last_match_id",
+            ExpressionAttributeValues={":zero": 0},
+        )
+
+        current_app.logger.info(
+            "[game2][reset_participants] 全エントリー削除: %d件 by %s",
+            deleted_count, current_user.get_id(),
+        )
+        flash(f"テストコート: 練習を終了しました（{deleted_count}件のエントリーとローテーションをリセット）", "success")
+    except Exception as e:
+        current_app.logger.error("[game2][reset_participants] エラー: %s", e, exc_info=True)
+        flash("練習終了処理中にエラーが発生しました", "danger")
+
     return redirect(url_for("game2.court"))
 
 
