@@ -596,16 +596,16 @@ def _fairness_first_four(candidates):
 
 
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
+AI_RESCUE_POOL_SIZE = 4  # AI救済ペアリング: 通常のAIペアリング(6人)よりさらに絞る
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# ローカルシミュレーション(simulate_pairing.py)で検証した結果、
-# AIペアリングのみだと「休み(試合数)のばらつき」が残るため、4試合を1セットとし、
-# 3試合はAIペアリング、1試合は「休みが多い順に4人集めてチーム分けだけ実力で
-# 調整する」調整試合(fairness_first)を挟む。均等さと実力バランスのトレードオフ
-# を踏まえた上での選択（完全な均等ではないが、AIペアリングのみより改善する）。
+# 8ステップのサイクル: AIペアリング×6 → 実力優先(バランスのみ、履歴無視)×1
+# → AI救済ペアリング(待機上位4人に絞ってバランス+履歴)×1 → 繰り返し
 REFILL_MODE_CYCLE = [
     "ai_pairing", "ai_pairing", "ai_pairing",
-    "fairness_first",
+    "ai_pairing", "ai_pairing", "ai_pairing",
+    "balance_only",
+    "ai_rescue",
 ]
 
 
@@ -746,6 +746,9 @@ def _try_refill_court(old_match_id, court_number):
         if mode == "ai_pairing":
             # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
             candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
+        elif mode == "ai_rescue":
+            # AIペアリングよりさらに待機上位に絞り込む(「救済」の役割)
+            candidates = _refill_candidate_pool(entry_table, pool_size=AI_RESCUE_POOL_SIZE)
         else:
             candidates = _refill_candidate_pool(entry_table)
 
@@ -758,7 +761,7 @@ def _try_refill_court(old_match_id, court_number):
 
         if mode == "fairness_first":
             team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
-        elif mode == "ai_pairing":
+        elif mode in ("ai_pairing", "ai_rescue"):
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
                 candidates, partner_counter, opponent_counter
