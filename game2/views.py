@@ -703,7 +703,7 @@ def _next_refill_mode(meta_table):
     return mode, refill_count
 
 
-COURT_REFILL_DELAY_SECONDS = 30  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
+COURT_REFILL_DELAY_SECONDS = 20  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
 
 
 def _try_refill_court(old_match_id, court_number):
