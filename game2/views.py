@@ -117,6 +117,12 @@ def sync_match_entries_with_updated_skills2(entry_mapping, updated_skills):
 @bp_game2.route("/court")
 @login_required
 def court():
+    # ページ読み込みのたびに、30秒の猶予を過ぎた「空きコート」があれば補充する
+    try:
+        _process_awaiting_refills()
+    except Exception as e:
+        current_app.logger.error("[game2] _process_awaiting_refills エラー: %s", e, exc_info=True)
+
     entry_table = _entry_table()
     meta_table = _meta_table()
 
@@ -153,6 +159,18 @@ def court():
     # ★コート番号順(1,2,3...)で常に同じ並びになるようにする
     courts = dict(sorted(courts.items()))
 
+    awaiting_refill = meta_current.get("awaiting_refill") or {}
+    awaiting_display = {}
+    if awaiting_refill:
+        now = datetime.now(JST)
+        for court_str, freed_at_iso in awaiting_refill.items():
+            try:
+                freed_at = datetime.fromisoformat(freed_at_iso)
+                remaining = max(0, int(COURT_REFILL_DELAY_SECONDS - (now - freed_at).total_seconds()))
+            except Exception:
+                remaining = 0
+            awaiting_display[int(court_str)] = remaining
+
     return render_template(
         "game2/court.html",
         status=status,
@@ -161,6 +179,7 @@ def court():
         resting=resting,
         my_entry=my_entry,
         is_admin=is_admin,
+        awaiting_refill=awaiting_display,
     )
 
 
@@ -640,11 +659,16 @@ def _next_refill_mode(meta_table):
     return mode, refill_count
 
 
+COURT_REFILL_DELAY_SECONDS = 30  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
+
+
 def _try_refill_court(old_match_id, court_number):
     """
     1コート分の結果が確定した直後に呼ぶ。
-    その4人をTrueSkill更新してpending化し、休憩ローテーション上位の候補の中から
-    実力バランスが良い4人を選んで、このコートだけ新しい試合を発行する。
+    その4人をTrueSkill更新してpending化する（次の組み合わせはすぐには
+    作らず、コートを「空き」として記録するだけ）。実際の次の組み合わせ選定は
+    _process_awaiting_refills() が、COURT_REFILL_DELAY_SECONDS 経過後に行う。
+    これにより、試合を終えた人が休憩ボタンを押す時間的猶予ができる。
     """
     entry_table = _entry_table()
     results_table = _results_table()
@@ -724,6 +748,39 @@ def _try_refill_court(old_match_id, court_number):
                 },
             )
 
+    # ★次の組み合わせはすぐには作らず、このコートを「空き」として記録するだけ。
+    #   実際の補充は _process_awaiting_refills() が COURT_REFILL_DELAY_SECONDS
+    #   経過後に行う（休憩したい人が申告する時間を確保するため）。
+    #   awaiting_refill はマップ属性なので、無い場合にネストしたSETが失敗しない
+    #   よう、先に空マップとして存在を保証してから値を入れる(2段階)。
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
+        ExpressionAttributeValues={":empty": {}},
+    )
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET awaiting_refill.#c = :now",
+        ExpressionAttributeNames={"#c": str(court_number)},
+        ExpressionAttributeValues={":now": now_jst},
+    )
+    current_app.logger.info(
+        "[game2][continuous] court=%s 空き待ち登録（%d秒後に自動補充）",
+        court_number, COURT_REFILL_DELAY_SECONDS,
+    )
+
+
+def _select_and_start_court(court_number):
+    """
+    空いているコートに、休憩ローテーション上位の候補の中から実力バランスが
+    良い4人を選んで新しい試合を発行する。_process_awaiting_refills() から
+    COURT_REFILL_DELAY_SECONDS 経過後に呼ばれる。
+    """
+    entry_table = _entry_table()
+    results_table = _results_table()
+    meta_table = _meta_table()
+    now_jst = datetime.now(JST).isoformat()
+
     mode, refill_count = _next_refill_mode(meta_table)
 
     # ★安全弁: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けている人が
@@ -786,7 +843,14 @@ def _try_refill_court(old_match_id, court_number):
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
-    tx_items = []
+    tx_items = [{
+        "Update": {
+            "TableName": "bad-game-matches",
+            "Key": {"match_id": {"S": META_CURRENT_PK}},
+            "UpdateExpression": "REMOVE awaiting_refill.#c",
+            "ExpressionAttributeNames": {"#c": str(court_number)},
+        }
+    }]
     for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
                       (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
         tx_items.append({
@@ -813,10 +877,39 @@ def _try_refill_court(old_match_id, court_number):
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
             current_app.logger.warning(
-                "[game2][continuous] court=%s 補充tx競合のためスキップ（次の提出時に再試行される）", court_number
+                "[game2][continuous] court=%s 補充tx競合のためスキップ（次のチェックで再試行される）", court_number
             )
         else:
             raise
+
+
+def _process_awaiting_refills():
+    """
+    「空き」として記録されているコートのうち、COURT_REFILL_DELAY_SECONDS
+    以上経過したものを実際に補充する。court()ページの読み込みや
+    submit_score()の直後など、頻繁に呼ばれる場所から都度チェックする
+    （バックグラウンドジョブは使わず、ポーリング的に処理する）。
+    """
+    meta_table = _meta_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    awaiting = meta_current.get("awaiting_refill") or {}
+    if not awaiting:
+        return
+
+    now = datetime.now(JST)
+    for court_str, freed_at_iso in list(awaiting.items()):
+        try:
+            freed_at = datetime.fromisoformat(freed_at_iso)
+        except Exception:
+            continue
+        elapsed = (now - freed_at).total_seconds()
+        if elapsed >= COURT_REFILL_DELAY_SECONDS:
+            try:
+                _select_and_start_court(int(court_str))
+            except Exception as e:
+                current_app.logger.error(
+                    "[game2][continuous] court=%s 補充処理でエラー: %s", court_str, e, exc_info=True
+                )
 
 
 @bp_game2.route("/submit_score/<match_id>/court/<int:court_number>", methods=["POST"])
@@ -888,13 +981,20 @@ def submit_score(match_id, court_number):
             match_id, court_number_int, team1_score, team2_score, winner,
         )
 
-        # ★Phase2: このコートの結果が確定した直後に、そのコートだけ自動補充する
+        # ★Phase2: このコートの結果が確定したら、そのコートを「空き」として記録する
+        #   （実際の次の組み合わせはCOURT_REFILL_DELAY_SECONDS秒後）
         try:
             _try_refill_court(match_id, court_number_int)
         except Exception as e:
             current_app.logger.error(
                 "[game2][continuous] court=%s 自動補充でエラー: %s", court_number_int, e, exc_info=True
             )
+
+        # ついでに、他のコートで猶予時間を過ぎているものがあれば処理しておく
+        try:
+            _process_awaiting_refills()
+        except Exception as e:
+            current_app.logger.error("[game2] _process_awaiting_refills エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
