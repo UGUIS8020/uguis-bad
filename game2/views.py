@@ -534,7 +534,7 @@ def _refill_candidate_pool(entry_table, pool_size=20):
     return _sort_and_limit_pool(pending, pool_size)
 
 
-RECENT_HISTORY_RESULTS = 40  # 直近何件の試合結果を「最近」とみなすか
+RECENT_HISTORY_RESULTS = 50  # 直近何件の試合結果を「最近」とみなすか
 PARTNER_REPEAT_WEIGHT = 1
 OPPONENT_REPEAT_WEIGHT = 2  # 対戦相手の重複の方が体感の偏りが大きいため重めに
 BALANCE_TIEBREAK_MARGIN_RATIO = 0.05  # 最良バランスの5%以内を「僅差」とみなす
