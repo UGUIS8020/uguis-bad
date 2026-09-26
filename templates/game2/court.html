@@ -55,6 +55,11 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-warning btn-lg px-5">☕ 休憩する</button>
             </form>
+            {% elif my_entry and my_entry.entry_status == 'resting' %}
+            <form method="POST" action="{{ url_for('game2.resume') }}" class="mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-primary btn-lg px-5">🏸 試合に参加</button>
+            </form>
             {% endif %}
         </div>
     </div>
