@@ -11,6 +11,7 @@
         .court-card { border-radius: 12px; margin-bottom: 16px; }
         .team-box { border-radius: 8px; padding: 10px; background: #f8f9fa; }
         .emergency-box { border: 2px solid #dc3545; border-radius: 12px; padding: 16px; margin-top: 30px; }
+        .badge-lg { font-size: 1.1rem; padding: 0.5em 0.9em; }
     </style>
 </head>
 <body>
@@ -100,10 +101,10 @@
                     {% if is_admin %}
                     <form method="POST" action="{{ url_for('game2.admin_rest_entry', entry_id=p.entry_id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="badge bg-secondary me-1 border-0">{{ p.display_name }}</button>
+                        <button type="submit" class="badge badge-lg bg-secondary me-1 mb-1 border-0">{{ p.display_name }}</button>
                     </form>
                     {% else %}
-                    <span class="badge bg-secondary me-1">{{ p.display_name }}</span>
+                    <span class="badge badge-lg bg-secondary me-1 mb-1">{{ p.display_name }}</span>
                     {% endif %}
                 {% endfor %}
             </p>
@@ -114,10 +115,10 @@
                     {% if is_admin %}
                     <form method="POST" action="{{ url_for('game2.admin_resume_entry', entry_id=p.entry_id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="badge bg-light text-dark border me-1">{{ p.display_name }}</button>
+                        <button type="submit" class="badge badge-lg bg-light text-dark border me-1 mb-1">{{ p.display_name }}</button>
                     </form>
                     {% else %}
-                    <span class="badge bg-light text-dark border me-1">{{ p.display_name }}</span>
+                    <span class="badge badge-lg bg-light text-dark border me-1 mb-1">{{ p.display_name }}</span>
                     {% endif %}
                 {% endfor %}
             </p>
