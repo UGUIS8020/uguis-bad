@@ -1071,7 +1071,15 @@ def _select_and_start_court(court_number):
         "Update": {
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
+            # ★同じコートに対して_select_and_start_courtが同時に2回呼ばれた場合
+            #   (例: ページ読み込みとsubmit_score直後の呼び出しが重なった場合)、
+            #   ConditionExpressionが無いとREMOVEは「既に無い属性の削除」を
+            #   エラーにせず黙って成功させてしまい、両方の呼び出しが別々の
+            #   4人を選んで同じコート番号に試合を作ってしまう(表示が
+            #   8人になるバグの原因になった)。attribute_existsを条件にする
+            #   ことで、後から来た方のトランザクションを確実に失敗させる。
             "UpdateExpression": "REMOVE awaiting_refill.#c",
+            "ConditionExpression": "attribute_exists(awaiting_refill.#c)",
             "ExpressionAttributeNames": {"#c": str(court_number)},
         }
     }]
