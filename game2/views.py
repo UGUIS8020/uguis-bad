@@ -60,7 +60,7 @@ PAIRING_MODE_LABELS = {
     "ai_pairing": "AIペアリング",
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
-    "safety_valve": "安全弁（待機解消優先）",
+    "safety_valve": "調整モード",
 }
 
 
