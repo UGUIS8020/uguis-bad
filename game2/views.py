@@ -553,12 +553,22 @@ def create_pairings():
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
 
+    # ★継続補充モードでは、練習終了を押さない限りstatusは"playing"のまま
+    #   変わらない（コートが全部空でも同じ）。以前はここに「statusが
+    #   playingでないこと」というConditionExpressionがあり、マッチング停止
+    #   →全コート終了→組み合わせ作成で再開、という流れを塞いでしまっていた。
+    #   二重作成の防止は上のhas_ongoing_matches2()と各エントリーの
+    #   ConditionExpression(entry_status = :pending)で十分なので、ここでは
+    #   条件を付けず、マッチング停止フラグ・古いawaiting_refillも一緒に
+    #   クリアして再開できるようにする。
     tx_items = [{
         "Update": {
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
-            "UpdateExpression": "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode",
-            "ConditionExpression": "attribute_not_exists(#st) OR #st <> :playing",
+            "UpdateExpression": (
+                "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode "
+                "REMOVE matching_paused, awaiting_refill"
+            ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
                 "#ua": "updated_at", "#pm": "pairing_mode",
@@ -1333,11 +1343,12 @@ def finish_current_match():
 @login_required
 def stop_matching():
     """
-    マッチング終了ボタン: 新規の自動補充を止める。進行中の試合はそのまま
+    マッチング停止ボタン: 新規の自動補充を止める。進行中の試合はそのまま
     続行できるが、スコアが送信されたコートはそれ以降、空いたままになる
     （_select_and_start_courtがmatching_pausedを見て補充をスキップする）。
-    全コートの試合が終わった後、「練習終了」ボタンが押せるようにするための
-    前段ボタン。
+    全コートの試合が終わった後、「組み合わせを作成」を押せば
+    matching_pausedを自動クリアして再開できる。そのまま終わりにしたい
+    場合は「練習終了」を押す。
     """
     if not current_user.administrator:
         flash("管理者のみ実行できます。", "danger")
@@ -1350,14 +1361,14 @@ def stop_matching():
         ExpressionAttributeValues={":true": True},
     )
     current_app.logger.info("[game2][stop_matching] by=%s", current_user.get_id())
-    flash("マッチングを終了しました。進行中の試合のスコアを送信すると、それ以降そのコートは再マッチングされません。", "info")
+    flash("マッチングを停止しました。進行中の試合のスコアを送信すると、それ以降そのコートは再マッチングされません。全コートが終わったら「組み合わせを作成」で再開できます。", "info")
     return redirect(url_for("game2.court"))
 
 
 @bp_game2.route("/resume_matching", methods=["POST"])
 @login_required
 def resume_matching():
-    """stop_matchingで止めた自動補充を再開する"""
+    """stop_matchingで止めた自動補充を、新しい組み合わせを作らずそのまま再開する"""
     if not current_user.administrator:
         flash("管理者のみ実行できます。", "danger")
         return redirect(url_for("game2.court"))
