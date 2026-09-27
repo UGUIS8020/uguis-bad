@@ -180,16 +180,16 @@
     <div class="card mb-3">
         <div class="card-body text-center">
             {% if matching_paused %}
-            <p class="text-muted small mb-2">マッチングは終了しています（進行中の試合のスコアを送信しても再マッチングされません）</p>
+            <p class="text-muted small mb-2">マッチングは停止中です（進行中の試合のスコアを送信しても再マッチングされません）。全コート終了後、「組み合わせを作成」で再開できます。</p>
             <form method="POST" action="{{ url_for('game2.resume_matching') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-outline-primary">マッチングを再開する</button>
+                <button type="submit" class="btn btn-outline-primary">そのまま再開する（新しい組み合わせは作らない）</button>
             </form>
             {% else %}
             <form method="POST" action="{{ url_for('game2.stop_matching') }}"
                   onsubmit="return confirm('新しいマッチングを止めます。進行中の試合のスコアを送信すると、それ以降そのコートは再マッチングされません。よろしいですか？');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-outline-secondary">マッチング終了</button>
+                <button type="submit" class="btn btn-outline-secondary">マッチング停止</button>
             </form>
             {% endif %}
         </div>
