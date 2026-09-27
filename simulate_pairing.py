@@ -31,7 +31,6 @@ from game2.views import (
     QUEUE_FORCE_COUNT,
     INITIAL_FULL_RANDOM_COUNT,
     SKILL_BURST_INTERVAL_MINUTES,
-    SKILL_BURST_LENGTH,
 )
 
 NUM_PLAYERS = 18
@@ -119,13 +118,18 @@ def simulate(n_matches, seed=None,
              minutes_per_match=10.0,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
-             skill_burst_length=SKILL_BURST_LENGTH,
              trace=False):
     """
-    本番の_next_refill_mode()と同じ「時間ベースのモード選定」をシミュレートする。
-    実際の壁時計時間の代わりに、1試合あたりminutes_per_match分かかると仮定して
-    経過時間を積算する(コートはnum_courts面並行で進むので、1回の補充ごとに
-    minutes_per_match/num_courts分だけ経過したとみなす)。
+    本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
+    _process_skill_burst / _execute_skill_burst)と同じロジックをシミュレート
+    する。実際の壁時計時間の代わりに、1試合あたりminutes_per_match分かかると
+    仮定して経過時間を積算する(コートはnum_courts面並行で進むので、1回の
+    補充ごとにminutes_per_match/num_courts分だけ経過したとみなす)。
+
+    スキルモードは本番と同じく「1コートずつ選ばれるモード」ではなく、前回の
+    一斉入れ替えからskill_burst_interval_minutes分経過したら、空いたコートを
+    即座には補充せず全コート(num_courts面)が空くまで集め、待機中全員を
+    スキル順の階層で一括採用する(held_courts集合でシミュレート)。
     """
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
@@ -143,12 +147,16 @@ def simulate(n_matches, seed=None,
     refill_count = 0
     queue_state = {"queue": [], "last_picked": []}  # 本番のDynamoDB永続キューに相当
     elapsed_minutes = 0.0
-    last_skill_burst_at = None
-    skill_burst_remaining = 0
+    # ★本番のcreate_pairings()と同じく、練習開始の瞬間を基準点にする
+    last_skill_burst_at = 0.0
+    held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
     for _ in range(n_matches):
+        playing_courts = [c for c in courts if c not in held_courts]
+        if not playing_courts:
+            break
         # 実際の練習ではどのコートが次に終わるかはランダム(機械的な順番ではない)
-        court_num = rng.randint(1, num_courts)
+        court_num = rng.choice(playing_courts)
         finished = courts[court_num]
         finished_all = finished["team_a"] + finished["team_b"]
 
@@ -170,22 +178,39 @@ def simulate(n_matches, seed=None,
 
         refill_count += 1
         elapsed_minutes += minutes_per_match / num_courts
+        del courts[court_num]  # このコートは今、試合が無い状態
 
-        # ★本番_next_refill_mode()と同じ時間ベースのモード選定
-        if refill_count <= initial_full_random:
-            mode = "full_random"
-        elif skill_burst_remaining > 0:
-            mode = "balance_only"
-            skill_burst_remaining -= 1
-        elif last_skill_burst_at is None:
-            last_skill_burst_at = elapsed_minutes
-            mode = "ai_pairing"
-        elif elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes:
-            mode = "balance_only"
-            skill_burst_remaining = skill_burst_length - 1
-            last_skill_burst_at = elapsed_minutes
-        else:
-            mode = "ai_pairing"
+        # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
+        #   に関わらず合流。まだなら、前回の一斉入れ替えからskill_burst_
+        #   interval_minutes分以上経過していれば新規に収集を始める。
+        skill_burst_collecting = bool(held_courts) or (
+            elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes
+        )
+
+        if skill_burst_collecting:
+            held_courts.add(court_num)
+            if trace:
+                print(f"#{refill_count} court={court_num} スキルモード一斉入れ替え待ちに登録"
+                      f" (held={sorted(held_courts)})")
+            if len(held_courts) >= num_courts:
+                candidates = skill_sorted_pending_local(pending)
+                held_list = sorted(held_courts)
+                usable_groups = min(len(held_list), len(candidates) // 4)
+                for i in range(usable_groups):
+                    c = held_list[i]
+                    four = candidates[i * 4:(i + 1) * 4]
+                    team_a, team_b, _diff = _skill_priority_four(four)
+                    chosen_uids = {p["user_id"] for p in team_a + team_b}
+                    pending = [p for p in pending if p["user_id"] not in chosen_uids]
+                    courts[c] = {"team_a": team_a, "team_b": team_b}
+                    if trace:
+                        print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
+                held_courts -= set(held_list[:usable_groups])
+                last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
+            continue
+
+        # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
+        mode = "full_random" if refill_count <= initial_full_random else "ai_pairing"
 
         # ★救済モード: WAIT_RESCUE_THRESHOLD回以上待った人がいれば、モードに
         #   関わらず強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
@@ -197,32 +222,21 @@ def simulate(n_matches, seed=None,
         if rescued:
             others = [p for p in pending if p not in rescued]
             candidates = rescued + others
-            if len(candidates) < 4:
-                continue
+            assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
             partner_counter, opponent_counter = get_recent_history_local(recent_results)
             team_a, team_b, _diff = _best_balanced_four(
                 candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
             )
-        elif mode == "balance_only":
-            # スキルモード: 休憩順は一切考慮しない
-            candidates = skill_sorted_pending_local(pending)
-            if len(candidates) < 4:
-                continue
-            team_a, team_b, _diff = _skill_priority_four(candidates)
         else:
             # 完全ランダム/AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
             forced = pop_next_from_queue_local(queue_state, pending, count=QUEUE_FORCE_COUNT)
-            if not forced:
-                continue
+            assert forced, "pendingは直前に終わった4人を含むため通常は空にならない"
             forced_uids = {p["user_id"] for p in forced}
             rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
             candidates = forced + rest_pool
-            if len(candidates) < 4:
-                continue
+            assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
 
-            if mode == "fairness_first":
-                team_a, team_b, _diff = _fairness_first_four(candidates)
-            elif mode == "full_random":
+            if mode == "full_random":
                 team_a, team_b, _diff = _full_random_four(candidates, force_top_n=len(forced))
             else:  # ai_pairing
                 partner_counter, opponent_counter = get_recent_history_local(recent_results)
