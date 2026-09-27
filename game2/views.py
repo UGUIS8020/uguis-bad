@@ -58,7 +58,7 @@ PAIRING_MODE_LABELS = {
     "full_random": "完全ランダム",
     "ai": "AIペアリング",
     "ai_pairing": "AIペアリング",
-    "balance_only": "実力優先",
+    "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "安全弁（待機解消優先）",
 }
