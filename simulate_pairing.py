@@ -26,7 +26,6 @@ from game2.views import (
     _skill_priority_four,
     _repeat_penalty2,
     RECENT_HISTORY_RESULTS,
-    AI_PAIRING_POOL_SIZE,
     WAIT_RESCUE_THRESHOLD,
     REFILL_MODE_CYCLE as PRODUCTION_CYCLE,
 )
@@ -143,7 +142,8 @@ def simulate(cycle, n_matches, seed=None, safety_valve=True, safety_threshold=WA
             )
         else:
             if mode == "ai_pairing":
-                candidates = refill_candidate_pool_local(pending, pool_size=AI_PAIRING_POOL_SIZE)
+                # 休みの調整は行わない: 待機順で絞らず、pending全員が候補
+                candidates = list(pending)
             elif mode == "balance_only":
                 candidates = skill_sorted_pending_local(pending)
             else:
@@ -155,10 +155,11 @@ def simulate(cycle, n_matches, seed=None, safety_valve=True, safety_threshold=WA
             if mode == "fairness_first":
                 team_a, team_b, _diff = _fairness_first_four(candidates)
             elif mode == "full_random":
-                team_a, team_b, _diff = _full_random_four(candidates)
+                # 休みの調整は行わない: 4人全員を完全ランダムに選ぶ
+                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=0)
             elif mode == "ai_pairing":
                 partner_counter, opponent_counter = get_recent_history_local(recent_results)
-                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter)
+                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=0)
             else:  # balance_only
                 team_a, team_b, _diff = _skill_priority_four(candidates)
 
