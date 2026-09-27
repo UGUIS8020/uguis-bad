@@ -145,6 +145,10 @@ def court():
         _process_held_pairs()
     except Exception as e:
         current_app.logger.error("[game2] _process_held_pairs エラー: %s", e, exc_info=True)
+    try:
+        _process_skill_burst()
+    except Exception as e:
+        current_app.logger.error("[game2] _process_skill_burst エラー: %s", e, exc_info=True)
 
     entry_table = _entry_table()
     meta_table = _meta_table()
@@ -200,6 +204,9 @@ def court():
     held_for_pairing = meta_current.get("held_for_pairing") or {}
     held_display = sorted(int(c) for c in held_for_pairing.keys())
 
+    awaiting_skill_burst = meta_current.get("awaiting_skill_burst") or {}
+    skill_burst_display = sorted(int(c) for c in awaiting_skill_burst.keys())
+
     return render_template(
         "game2/court.html",
         status=status,
@@ -211,6 +218,7 @@ def court():
         awaiting_refill=awaiting_display,
         matching_paused=bool(meta_current.get("matching_paused")),
         held_for_pairing=held_display,
+        awaiting_skill_burst=skill_burst_display,
     )
 
 
@@ -577,7 +585,7 @@ def create_pairings():
             "Key": {"match_id": {"S": META_CURRENT_PK}},
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode "
-                "REMOVE matching_paused, awaiting_refill, held_for_pairing"
+                "REMOVE matching_paused, awaiting_refill, held_for_pairing, awaiting_skill_burst"
             ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
@@ -619,8 +627,7 @@ def create_pairings():
         Key={"match_id": META_PAIRING_PK},
         UpdateExpression=(
             "SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now, "
-            "last_skill_burst_at=:now "
-            "REMOVE skill_burst_remaining"
+            "last_skill_burst_at=:now"
         ),
         ExpressionAttributeValues={
             ":ci": next_cycle_index, ":m": mode, ":mid": str(match_id), ":now": now_jst,
@@ -963,8 +970,12 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   1. 練習開始直後、INITIAL_FULL_RANDOM_COUNT回は完全ランダム
 #   2. それ以降は基本的にAIペアリング
 #   3. ただし、前回スキルモードを差し込んでからSKILL_BURST_INTERVAL_MINUTES分
-#      以上経過していたら、スキルモードをSKILL_BURST_LENGTH回連続で差し込む
-#      (差し込み後はまたAIペアリングに戻る)
+#      以上経過したら、スキルモード一斉入れ替えを行う。これは通常のモード
+#      選定(_next_refill_mode/1コートずつの補充)とは別の仕組みで、
+#      全コートが空くのを待ってから、待機中全員をスキル順に並べて一括で
+#      組み直す(_try_refill_court/_process_skill_burst/_execute_skill_burst
+#      を参照)。一斉入れ替えで作られた試合が個別に終わったあとは、通常の
+#      1コートずつの補充(このAIペアリング)に戻る。
 # 休みの調整は二重構成:
 #   1. 完全ランダム/AIペアリングは、_pop_next_from_play_queue()による永続
 #      キューの先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ
@@ -973,16 +984,15 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
 #      長時間待ちを防ぐ保険)
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、完全ランダムを連続させる回数
-SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモードを差し込むか
-SKILL_BURST_LENGTH = 3  # 差し込むスキルモードの連続回数
+SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
 
 
 def _next_refill_mode(meta_table):
     """
     補充のたびに meta#continuous_pairing の refill_count を加算し、次のモードを決める。
+    スキルモード一斉入れ替えはここでは扱わない(_try_refill_court /
+    _process_skill_burst が、通常の1コート補充より先に横取りする)。
     """
-    now_jst = datetime.now(JST)
-
     resp = meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
         UpdateExpression="ADD refill_count :one",
@@ -994,46 +1004,31 @@ def _next_refill_mode(meta_table):
     if refill_count <= INITIAL_FULL_RANDOM_COUNT:
         return "full_random", refill_count
 
-    pairing_meta = meta_table.get_item(
-        Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
-    ).get("Item", {}) or {}
-    skill_burst_remaining = int(pairing_meta.get("skill_burst_remaining", 0) or 0)
-
-    if skill_burst_remaining > 0:
-        meta_table.update_item(
-            Key={"match_id": META_PAIRING_PK},
-            UpdateExpression="SET skill_burst_remaining = :n",
-            ExpressionAttributeValues={":n": skill_burst_remaining - 1},
-        )
-        return "balance_only", refill_count
-
-    last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
-    should_burst = False
-    if not last_burst_at_iso:
-        # ★初回基準点がまだ無ければ、ここで基準点だけ設定する(この回はAI
-        #   ペアリングのまま。基準点設定から1時間後に初めて差し込まれる)
-        meta_table.update_item(
-            Key={"match_id": META_PAIRING_PK},
-            UpdateExpression="SET last_skill_burst_at = :now",
-            ExpressionAttributeValues={":now": now_jst.isoformat()},
-        )
-    else:
-        try:
-            last_burst_at = datetime.fromisoformat(last_burst_at_iso)
-            elapsed_minutes = (now_jst - last_burst_at).total_seconds() / 60
-            should_burst = elapsed_minutes >= SKILL_BURST_INTERVAL_MINUTES
-        except Exception:
-            should_burst = False
-
-    if should_burst:
-        meta_table.update_item(
-            Key={"match_id": META_PAIRING_PK},
-            UpdateExpression="SET last_skill_burst_at = :now, skill_burst_remaining = :n",
-            ExpressionAttributeValues={":now": now_jst.isoformat(), ":n": SKILL_BURST_LENGTH - 1},
-        )
-        return "balance_only", refill_count
-
     return "ai_pairing", refill_count
+
+
+def _skill_burst_should_collect(meta_current, pairing_meta):
+    """
+    このタイミングで空いたコートを、スキルモード一斉入れ替えの収集対象
+    (awaiting_skill_burst)に加えるべきかどうかを判定する。
+
+    - 既に収集が始まっている(awaiting_skill_burstに1つでもコートがある)
+      場合は、経過時間に関わらず最後まで合流させる(全コートが揃うまで待つ)。
+    - まだ始まっていなければ、前回のスキルモード一斉入れ替えから
+      SKILL_BURST_INTERVAL_MINUTES分以上経過しているかどうかで、新規に
+      収集を開始すべきか判定する。
+    """
+    if meta_current.get("awaiting_skill_burst"):
+        return True
+    last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
+    if not last_burst_at_iso:
+        return False
+    try:
+        last_burst_at = datetime.fromisoformat(last_burst_at_iso)
+    except Exception:
+        return False
+    elapsed_minutes = (datetime.now(JST) - last_burst_at).total_seconds() / 60
+    return elapsed_minutes >= SKILL_BURST_INTERVAL_MINUTES
 
 
 COURT_REFILL_DELAY_SECONDS = 20  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
@@ -1127,6 +1122,33 @@ def _try_refill_court(old_match_id, court_number):
                 },
             )
 
+    meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    court_count = int(meta_current_now.get("court_count", 0) or 0)
+
+    # ★スキルモード一斉入れ替え: 前回のスキルモード一斉入れ替えから
+    #   SKILL_BURST_INTERVAL_MINUTES分以上経過している場合、このコートは
+    #   単独では補充せず、全コートが空くまで待つ(awaiting_skill_burstに登録)。
+    #   全コート揃ったら_process_skill_burst()が待機中全員をスキル順に並べて
+    #   一括で組み直す。既に収集が始まっている場合は、経過時間に関わらず
+    #   最後まで合流させる(バッファが少ない場合のペア待ちより優先する)。
+    pairing_meta_now = meta_table.get_item(Key={"match_id": META_PAIRING_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if _skill_burst_should_collect(meta_current_now, pairing_meta_now):
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_skill_burst = if_not_exists(awaiting_skill_burst, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_skill_burst.#c = :now",
+            ExpressionAttributeNames={"#c": str(court_number)},
+            ExpressionAttributeValues={":now": now_jst},
+        )
+        current_app.logger.info(
+            "[game2][continuous] court=%s スキルモード一斉入れ替えのため待機に登録", court_number,
+        )
+        return
+
     # ★参加人数が少ないと、待機バッファがほぼ無く、空いたコートを単独で
     #   即補充してもほぼ同じ顔ぶれがそのまま戻ってくるだけになってしまう
     #   （例: 8〜10人で2コート、12〜14人で3コートなど）。
@@ -1134,8 +1156,6 @@ def _try_refill_court(old_match_id, court_number):
     #   LOW_BUFFER_THRESHOLD人以下の場合は、単独では補充せず、もう1コート
     #   分空くのを待ってから2コート分まとめて組み直すことで、混ざり合う
     #   余地を作る。
-    meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
-    court_count = int(meta_current_now.get("court_count", 0) or 0)
     active_items = entry_table.scan(
         FilterExpression=Attr("entry_status").is_in(["pending", "playing"]), ConsistentRead=True
     ).get("Items", [])
@@ -1236,18 +1256,6 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "[game2][continuous] court=%s 救済モード発動: %d人を強制的に含める(%s)",
             court_number, len(rescued), [p.get("display_name") for p in rescued],
         )
-    elif mode == "balance_only":
-        # スキルモード: 休憩順は一切考慮しない(要望通りの仕様)。
-        # ただしパートナー重複は、実力差がほぼ同点の場合のタイブレークとして考慮する。
-        candidates = _skill_sorted_pending(entry_table)
-        if len(candidates) < 4:
-            current_app.logger.info(
-                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
-                court_number, len(candidates),
-            )
-            return
-        partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
-        team_a_entries, team_b_entries, diff = _skill_priority_four(candidates, partner_counter=partner_counter)
     else:
         # 完全ランダム／AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
         # (旧システムと同じ「休む人を先に決める」発想。通常時の公平性)
@@ -1451,6 +1459,191 @@ def _process_held_pairs():
                 )
 
 
+SKILL_BURST_MAX_WAIT_SECONDS = 300  # スキルモード一斉入れ替えで、揃わないコートを何秒まで待つか(安全弁)
+
+
+def _mark_skill_burst_consumed(meta_table, now_jst_iso):
+    """このスキルモード一斉入れ替えを消費済みにする(次はSKILL_BURST_INTERVAL_MINUTES後)。"""
+    meta_table.update_item(
+        Key={"match_id": META_PAIRING_PK},
+        UpdateExpression="SET last_skill_burst_at = :now",
+        ExpressionAttributeValues={":now": now_jst_iso},
+    )
+
+
+def _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst_iso):
+    """スキルモード一斉入れ替えの対象から外れたコートを、通常の空き待ちに戻す。"""
+    for c in court_numbers:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_refill.#c = :now",
+            ExpressionAttributeNames={"#c": str(c)},
+            ExpressionAttributeValues={":now": now_jst_iso},
+        )
+
+
+def _execute_skill_burst(court_numbers):
+    """
+    スキルモード一斉入れ替え: 指定された全コート分をまとめて、待機中全員を
+    スキル順に並べ、上から4人ずつの「層」ごとに一括で組み直す(一番実力が
+    高い層をコート番号が最も小さいコートに、以下降順に割り当てる)。
+
+    court_numbersはawaiting_skill_burstに集まった、今まさに空いた全コート。
+    まず、この呼び出しが対象コートの「担当」であることを、awaiting_skill_burst
+    からの一括削除(全コート分をまとめて1つの条件付き更新で)によって確定させる。
+    一部でも既に他の処理に取られていれば(競合)、この回は何もせず見送る
+    (次のポーリングで状態を見直して再試行される)。
+
+    実行後は、このバーストを消費済み扱いにする(_mark_skill_burst_consumed)。
+    以降、この一斉入れ替えで作られた試合が個別に終わったコートは、通常の
+    1コートずつの補充(_try_refill_court→awaiting_refill)に自然に戻る
+    (_next_refill_modeはこのバースト機構と無関係にfull_random/ai_pairingしか
+    返さないため)。
+    """
+    entry_table = _entry_table()
+    results_table = _results_table()
+    meta_table = _meta_table()
+    now_jst = datetime.now(JST).isoformat()
+
+    court_numbers = sorted(court_numbers)
+    remove_expr = "REMOVE " + ", ".join(f"awaiting_skill_burst.#c{i}" for i in range(len(court_numbers)))
+    condition_expr = " AND ".join(f"attribute_exists(awaiting_skill_burst.#c{i})" for i in range(len(court_numbers)))
+    names = {f"#c{i}": str(c) for i, c in enumerate(court_numbers)}
+    try:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression=remove_expr,
+            ConditionExpression=condition_expr,
+            ExpressionAttributeNames=names,
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            current_app.logger.info(
+                "[game2][continuous] スキルモード一斉入れ替え: 既に他の処理が担当済みのため見送り"
+            )
+            return
+        raise
+
+    candidates = _skill_sorted_pending(entry_table)
+    usable_groups = min(len(court_numbers), len(candidates) // 4)
+
+    if usable_groups == 0:
+        current_app.logger.info(
+            "[game2][continuous] スキルモード一斉入れ替え: 補充する人数が足りないため見送ります(候補%d人)",
+            len(candidates),
+        )
+        _mark_skill_burst_consumed(meta_table, now_jst)
+        _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst)
+        return
+
+    partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
+
+    import boto3
+    dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
+    tx_items = []
+    assigned = []
+    for i in range(usable_groups):
+        court_number = court_numbers[i]
+        four = candidates[i * 4:(i + 1) * 4]
+        team_a_entries, team_b_entries, diff = _skill_priority_four(four, partner_counter=partner_counter)
+        new_match_id = generate_match_id2()
+        for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
+                          (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
+            tx_items.append({
+                "Update": {
+                    "TableName": "bad-game2-match_entries",
+                    "Key": {"entry_id": {"S": pl["entry_id"]}},
+                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
+                    "ConditionExpression": "entry_status = :pending",
+                    "ExpressionAttributeValues": {
+                        ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
+                        ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
+                        ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": "balance_only"},
+                    },
+                }
+            })
+        assigned.append((court_number, new_match_id, diff, [e.get("display_name") for e in team_a_entries + team_b_entries]))
+
+    try:
+        dynamodb_client.transact_write_items(TransactItems=tx_items)
+        for court_number, new_match_id, diff, names_list in assigned:
+            current_app.logger.info(
+                "[game2][continuous] court=%s スキルモード一斉入れ替え補充: new_match_id=%s balance_diff=%.2f members=%s",
+                court_number, new_match_id, diff, names_list,
+            )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
+            current_app.logger.warning(
+                "[game2][continuous] スキルモード一斉入れ替えtx競合のため見送り(通常補充に戻します)"
+            )
+            _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst)
+            return
+        raise
+
+    # ★人数不足で一部のコートしか埋められなかった場合、残りは通常の空き待ちに戻す
+    leftover_courts = court_numbers[usable_groups:]
+    if leftover_courts:
+        _return_courts_to_awaiting_refill(meta_table, leftover_courts, now_jst)
+
+    _mark_skill_burst_consumed(meta_table, now_jst)
+
+
+def _process_skill_burst():
+    """
+    スキルモード一斉入れ替えの収集(awaiting_skill_burst)を処理する。現在の
+    コート数(court_count)分すべてのコートが集まったら、待機中全員をスキル
+    順に並べて一括で組み直す。長時間コートが揃わない場合の安全弁として、
+    最初に空いたコートからSKILL_BURST_MAX_WAIT_SECONDS経過していれば、
+    揃っていないコート数のままでも実行する。
+    """
+    meta_table = _meta_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    awaiting = meta_current.get("awaiting_skill_burst") or {}
+    if not awaiting:
+        return
+
+    court_count = int(meta_current.get("court_count", 0) or 0)
+    now = datetime.now(JST)
+    collected = []
+    for court_str, freed_at_iso in awaiting.items():
+        try:
+            freed_at = datetime.fromisoformat(freed_at_iso)
+        except Exception:
+            continue
+        collected.append((int(court_str), freed_at))
+    if not collected:
+        return
+    collected.sort(key=lambda x: x[1])  # 古い順
+
+    oldest_waited = (now - collected[0][1]).total_seconds()
+    newest_waited = (now - collected[-1][1]).total_seconds()
+    ready = court_count > 0 and len(collected) >= court_count
+    timed_out = oldest_waited >= SKILL_BURST_MAX_WAIT_SECONDS
+
+    if not (ready or timed_out):
+        return
+    if newest_waited < COURT_REFILL_DELAY_SECONDS:
+        # 最後に空いたコートの、休憩したい人が申告する猶予をまだ確保中
+        return
+
+    court_numbers = [c for c, _ in collected]
+    current_app.logger.info(
+        "[game2][continuous] スキルモード一斉入れ替え実行: courts=%s (ready=%s timed_out=%s)",
+        court_numbers, ready, timed_out,
+    )
+    try:
+        _execute_skill_burst(court_numbers)
+    except Exception as e:
+        current_app.logger.error(
+            "[game2][continuous] スキルモード一斉入れ替えでエラー: %s", e, exc_info=True
+        )
+
+
 @bp_game2.route("/submit_score/<match_id>/court/<int:court_number>", methods=["POST"])
 @login_required
 def submit_score(match_id, court_number):
@@ -1538,6 +1731,10 @@ def submit_score(match_id, court_number):
             _process_held_pairs()
         except Exception as e:
             current_app.logger.error("[game2] _process_held_pairs エラー: %s", e, exc_info=True)
+        try:
+            _process_skill_burst()
+        except Exception as e:
+            current_app.logger.error("[game2] _process_skill_burst エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
@@ -1717,7 +1914,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
@@ -1728,7 +1925,7 @@ def reset_participants():
             Key={"match_id": META_PAIRING_PK},
             UpdateExpression=(
                 "SET cycle_index = :zero, refill_count = :zero "
-                "REMOVE last_mode, last_match_id, last_skill_burst_at, skill_burst_remaining"
+                "REMOVE last_mode, last_match_id, last_skill_burst_at"
             ),
             ExpressionAttributeValues={":zero": 0},
         )
