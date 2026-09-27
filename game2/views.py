@@ -953,6 +953,7 @@ def _skill_priority_four(candidates, partner_counter=None):
 
 
 WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
+QUEUE_FORCE_COUNT = 2  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
 # 9ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×3
@@ -1200,17 +1201,17 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
         partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
         team_a_entries, team_b_entries, diff = _skill_priority_four(candidates, partner_counter=partner_counter)
     else:
-        # 完全ランダム／AIペアリング: 永続キューの先頭1人を必ず含める
-        # (旧システムと同じ「休む人を先に決める」発想。通常時の穏やかな公平性)
-        forced = _pop_next_from_play_queue(entry_table, meta_table, count=1)
+        # 完全ランダム／AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
+        # (旧システムと同じ「休む人を先に決める」発想。通常時の公平性)
+        forced = _pop_next_from_play_queue(entry_table, meta_table, count=QUEUE_FORCE_COUNT)
         if not forced:
             current_app.logger.info(
                 "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします",
                 court_number,
             )
             return
-        forced_uid = forced[0]["user_id"]
-        rest_pool = [e for e in _all_pending_unordered(entry_table) if e.get("user_id") != forced_uid]
+        forced_uids = {p["user_id"] for p in forced}
+        rest_pool = [e for e in _all_pending_unordered(entry_table) if e.get("user_id") not in forced_uids]
         candidates = forced + rest_pool
 
         if len(candidates) < 4:
@@ -1223,12 +1224,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
         if mode == "full_random":
             partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _full_random_four(
-                candidates, force_top_n=1, partner_counter=partner_counter
+                candidates, force_top_n=len(forced), partner_counter=partner_counter
             )
         else:  # ai_pairing
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
-                candidates, partner_counter, opponent_counter, force_top_n=1
+                candidates, partner_counter, opponent_counter, force_top_n=len(forced)
             )
 
     used_mode = "safety_valve" if rescued else mode

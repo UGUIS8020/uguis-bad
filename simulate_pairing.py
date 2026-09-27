@@ -28,6 +28,7 @@ from game2.views import (
     _repeat_penalty2,
     RECENT_HISTORY_RESULTS,
     WAIT_RESCUE_THRESHOLD,
+    QUEUE_FORCE_COUNT,
     REFILL_MODE_CYCLE as PRODUCTION_CYCLE,
 )
 
@@ -177,12 +178,12 @@ def simulate(cycle, n_matches, seed=None,
                 continue
             team_a, team_b, _diff = _skill_priority_four(candidates)
         else:
-            # 完全ランダム/AIペアリング: 永続キューの先頭1人を必ず含める
-            forced = pop_next_from_queue_local(queue_state, pending, count=1)
+            # 完全ランダム/AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
+            forced = pop_next_from_queue_local(queue_state, pending, count=QUEUE_FORCE_COUNT)
             if not forced:
                 continue
-            forced_uid = forced[0]["user_id"]
-            rest_pool = [p for p in pending if p["user_id"] != forced_uid]
+            forced_uids = {p["user_id"] for p in forced}
+            rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
             candidates = forced + rest_pool
             if len(candidates) < 4:
                 continue
@@ -190,10 +191,10 @@ def simulate(cycle, n_matches, seed=None,
             if mode == "fairness_first":
                 team_a, team_b, _diff = _fairness_first_four(candidates)
             elif mode == "full_random":
-                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=1)
+                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=len(forced))
             else:  # ai_pairing
                 partner_counter, opponent_counter = get_recent_history_local(recent_results)
-                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=1)
+                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=len(forced))
 
         chosen_uids = {p["user_id"] for p in team_a + team_b}
         if trace:
