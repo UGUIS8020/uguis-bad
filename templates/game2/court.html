@@ -63,6 +63,12 @@
                     {% for c in held_for_pairing %}コート{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}
                 </div>
                 {% endif %}
+                {% if awaiting_skill_burst %}
+                <div class="text-muted small mt-1">
+                    スキルモード待ち中（全コートが空くのを待って実力順に一斉に組み直します）:
+                    {% for c in awaiting_skill_burst %}コート{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+                {% endif %}
             {% endif %}
 
             {% if my_entry and my_entry.entry_status == 'pending' %}
