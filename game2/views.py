@@ -41,8 +41,10 @@ from game.game_utils import (
 from game.views import (
     persist_skill_to_bad_users,
     _pick_waiters_by_rest_queue,
+    _save_rest_queue_optimistic,
 )
 from utils.timezone import JST
+from itertools import groupby
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +62,6 @@ PAIRING_MODE_LABELS = {
     "ai_pairing": "AIペアリング",
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
-    "safety_valve": "AIペアリング",  # 内部的には調整モード(待ちすぎの人を強制救済)だが、
-                                    # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
 }
 
 
@@ -617,42 +617,82 @@ def create_pairings():
     return redirect(url_for("game2.court"))
 
 
-def _sort_and_limit_pool(pending, pool_size=20):
-    """
-    pending中の人のリストを「休憩ローテーション上、次に出るべき順」に並べて
-    上位を返す。match_countが同点の場合、以前はjoined_at(チェックイン時刻)
-    の早い順で決めていたが、そうすると「たまたま一番早くチェックインした人」
-    が同点になるたびに毎回タイブレークで優先され続けてしまい、特定の人が
-    構造的に多く出続ける偏りが生じた(実際に発生した不具合)。
-    先にシャッフルしてからmatch_countだけで安定ソートすることで、
-    同点内の順序を試合ごとにランダムにする。
-    """
-    shuffled = list(pending)
-    random.shuffle(shuffled)
-    sorted_pending = sorted(shuffled, key=lambda e: e.get("match_count", 0))
-    return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
-
-
-def _refill_candidate_pool(entry_table, pool_size=20):
-    """
-    pending中の人を「休憩ローテーション上、次に出るべき順」に並べて返す。
-    pool_sizeは組み合わせ探索が重くなりすぎないための保険的な上限で、
-    実運用の人数(20人程度まで)なら実質pending全員が候補になる
-    （以前は8人に絞っていたため、直前に空いた4人を含めても候補が
-    足りず、重複回避の余地が狭くなっていた）。
-    """
-    pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
-    return _sort_and_limit_pool(pending, pool_size)
-
-
 def _all_pending_unordered(entry_table):
     """
     待機中の人を、休憩ローテーション上の順序を一切考慮せず全員返す。
-    AIペアリングモード(force_top_n=0で実力バランス+履歴だけで選ぶ)用。
-    休みの調整は調整モード(安全弁)だけに任せるため、候補選定の時点でも
-    待機順による絞り込みをしない。
+    AIペアリングモード(force_top_n=1の強制枠を除く残り3枠)用。
     """
     return entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
+
+
+def _pop_next_from_play_queue(entry_table, meta_table, count=1, *, queue_key=REST_QUEUE_KEY, max_retries=5):
+    """
+    休みの調整を担う、唯一の仕組み。旧システム(game/views.py の
+    _pick_waiters_by_rest_queue)と同じ考え方の永続キューを使うが、
+    「休む人」ではなく「次に出るべき人」を先頭から取り出す点が逆になっている。
+
+    - 通常時: DynamoDBに保存された永続キューの先頭からcount人を取り出すだけ
+      （真のFIFO）。
+    - キューが足りない場合: 待機中全員をmatch_count(通算試合数)の少ない順に
+      並べ直す。ただし同じmatch_count同士は必ずシャッフルしてから並べる
+      （これをしないと同じ顔ぶれが固まって毎回一緒に選ばれ続けてしまう）。
+      直前に選ばれた人たちは、連続で選ばれないよう最後尾に回す。
+
+    WAIT_RESCUE_THRESHOLDのような「何回逃したら救済する」という事後的な
+    しきい値判定は使わず、常にこのキューの先頭を優先的に含めることで
+    公平性を保証する（旧システムが「休む人を先に確定する」のと同じ発想）。
+    """
+    import random as _random
+
+    pk = _rest_queue_pk(queue_key)
+
+    for attempt in range(1, max_retries + 1):
+        pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
+        by_id = {e["user_id"]: e for e in pending if e.get("user_id")}
+        current_user_set = set(by_id.keys())
+
+        resp = meta_table.get_item(Key={"match_id": pk}, ConsistentRead=True)
+        qi = resp.get("Item") or {}
+        queue = [uid for uid in qi.get("queue", []) if uid in current_user_set]
+        generation = int(qi.get("generation", 1) or 1)
+        version = int(qi.get("version", 0) or 0)
+
+        if len(queue) < count:
+            generation += 1
+            last_picked_uids = set(qi.get("last_waiters", []))
+            sorted_entries = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
+            all_uids = [e["user_id"] for e in sorted_entries if e.get("user_id")]
+            others = [uid for uid in all_uids if uid not in last_picked_uids]
+            prev_picked = [uid for uid in all_uids if uid in last_picked_uids]
+
+            shuffled = []
+            for _, g in groupby(others, key=lambda uid: by_id.get(uid, {}).get("match_count", 0)):
+                g = list(g)
+                _random.shuffle(g)
+                shuffled.extend(g)
+
+            new_queue_ordered = shuffled + prev_picked
+            picked_uids = new_queue_ordered[:count]
+            queue_next = new_queue_ordered[count:]
+        else:
+            picked_uids = queue[:count]
+            queue_next = queue[count:]
+
+        if len(picked_uids) < count:
+            return []
+
+        ok = _save_rest_queue_optimistic(
+            meta_table, queue_key=queue_key, queue=queue_next,
+            generation=generation, prev_version=version,
+            last_waiters=picked_uids,
+        )
+        if not ok:
+            continue
+
+        return [by_id[uid] for uid in picked_uids if uid in by_id]
+
+    current_app.logger.error("[game2][continuous] 永続キューの保存に失敗しました(競合過多)")
+    return []
 
 
 RECENT_HISTORY_RESULTS = 50  # 直近何件の試合結果を「最近」とみなすか
@@ -867,13 +907,14 @@ def _skill_priority_four(candidates):
     return team_a, team_b, best_key[1]
 
 
-WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
-
 # 9ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×3
 #   → スキルモード(スキル上位優先、休憩順・履歴は無視)×3 → 繰り返し
-# 「AI救済ペアリング」は、安全弁(WAIT_RESCUE_THRESHOLD)と役割が重複しており
-# 効果も限定的だったため廃止した。
+# 休みの調整は、完全ランダム/AIペアリングそれぞれで_pop_next_from_play_queue()
+# による永続キューの先頭1人の強制含めだけで行う(旧システムと同じ「休む人を
+# 先に決める」発想)。スキルモードは休憩順を考慮しない。
+# 以前あった事後的なしきい値救済(WAIT_RESCUE_THRESHOLD)は、この永続キュー
+# 方式に置き換えて廃止した。
 REFILL_MODE_CYCLE = [
     "full_random", "full_random", "full_random",
     "ai_pairing", "ai_pairing", "ai_pairing",
@@ -932,13 +973,6 @@ def _try_refill_court(old_match_id, court_number):
 
     player_mapping = {e["user_id"]: e["entry_id"] for e in finished_entries if "user_id" in e}
 
-    # ★安全弁用: 「今から待機に入る」時点でのrefill_countを記録しておき、
-    #   後で(次にrefill_countがいくつ進んだか)=待たされた補充回数として使う
-    pairing_meta_before = meta_table.get_item(
-        Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
-    ).get("Item", {}) or {}
-    refill_count_at_pending = int(pairing_meta_before.get("refill_count", 0))
-
     try:
         from game.game_utils import parse_players
         team_a = parse_players(result.get("team_a", []))
@@ -976,13 +1010,11 @@ def _try_refill_court(old_match_id, court_number):
                 Key={"entry_id": entry_id},
                 UpdateExpression=(
                     "SET entry_status=:pending, updated_at=:now, "
-                    "match_count = if_not_exists(match_count, :zero) + :one, "
-                    "pending_since_refill_count = :rc "
+                    "match_count = if_not_exists(match_count, :zero) + :one "
                     "REMOVE court_number, team, match_id"
                 ),
                 ExpressionAttributeValues={
                     ":pending": "pending", ":now": now_jst, ":zero": 0, ":one": 1,
-                    ":rc": refill_count_at_pending,
                 },
             )
 
@@ -1028,47 +1060,30 @@ def _select_and_start_court(court_number):
 
     mode, refill_count = _next_refill_mode(meta_table)
 
-    # ★安全弁: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けている人が
-    #   いれば、モードに関わらず強制的に含める（極端な長時間待ちを防ぐ）
-    all_pending = _refill_candidate_pool(entry_table, pool_size=999)
-    rescued = sorted(
-        [
-            p for p in all_pending
-            if refill_count - int(p.get("pending_since_refill_count", refill_count)) >= WAIT_RESCUE_THRESHOLD
-        ],
-        key=lambda p: int(p.get("pending_since_refill_count", refill_count)),
-    )[:4]
-
-    if rescued:
-        rescued_uids = {p["entry_id"] for p in rescued}
-        others = _sort_and_limit_pool(
-            [p for p in all_pending if p["entry_id"] not in rescued_uids], pool_size=20
-        )
-        candidates = rescued + others
+    if mode == "balance_only":
+        # スキルモード: 休憩順は一切考慮しない(要望通りの仕様)
+        candidates = _skill_sorted_pending(entry_table)
         if len(candidates) < 4:
             current_app.logger.info(
                 "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
                 court_number, len(candidates),
             )
             return
-        partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
-        team_a_entries, team_b_entries, diff = _best_balanced_four(
-            candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
-        )
-        current_app.logger.info(
-            "[game2][continuous] court=%s 安全弁発動: %d人を強制的に含める(%s)",
-            court_number, len(rescued), [p.get("display_name") for p in rescued],
-        )
+        team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
     else:
-        if mode == "ai_pairing":
-            # ★休みの調整は行わない: 待機順で候補を絞らず、待機中全員を対象に
-            #   実力バランス+履歴だけで選ぶ
-            candidates = _all_pending_unordered(entry_table)
-        elif mode == "balance_only":
-            # 実力優先: 休憩ローテーションは無視し、スキルスコア上位から選ぶ
-            candidates = _skill_sorted_pending(entry_table)
-        else:
-            candidates = _refill_candidate_pool(entry_table)
+        # 完全ランダム／AIペアリング: 休みの調整は、永続キューから
+        # 最優先の1人を必ず含めることでのみ行う(旧システムと同じ「休む人を
+        # 先に決める」発想。WAIT_RESCUE_THRESHOLDのような事後救済は廃止)
+        forced = _pop_next_from_play_queue(entry_table, meta_table, count=1)
+        if not forced:
+            current_app.logger.info(
+                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします",
+                court_number,
+            )
+            return
+        forced_uid = forced[0]["user_id"]
+        rest_pool = [e for e in _all_pending_unordered(entry_table) if e.get("user_id") != forced_uid]
+        candidates = forced + rest_pool
 
         if len(candidates) < 4:
             current_app.logger.info(
@@ -1077,24 +1092,14 @@ def _select_and_start_court(court_number):
             )
             return
 
-        if mode == "fairness_first":
-            team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
-        elif mode == "full_random":
-            # ★休みの調整は行わない: 4人全員を完全ランダムに選ぶ
-            team_a_entries, team_b_entries, diff = _full_random_four(candidates, force_top_n=0)
-        elif mode == "ai_pairing":
-            # ★force_top_n=0: AIペアリングモード自体が持っていた「待機上位1名を
-            #   必ず含める」というミニ救済機能をやめ、純粋に実力バランス＋履歴
-            #   だけで4人を選ぶ。待たされすぎている人の救済は、別枠の調整モード
-            #   (WAIT_RESCUE_THRESHOLDによる安全弁)にのみ任せる。
+        if mode == "full_random":
+            team_a_entries, team_b_entries, diff = _full_random_four(candidates, force_top_n=1)
+        else:  # ai_pairing
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
-                candidates, partner_counter, opponent_counter, force_top_n=0
+                candidates, partner_counter, opponent_counter, force_top_n=1
             )
-        else:  # balance_only
-            team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
 
-    used_mode = "safety_valve" if rescued else mode
     new_match_id = generate_match_id2()
 
     import boto3
@@ -1126,7 +1131,7 @@ def _select_and_start_court(court_number):
                 "ExpressionAttributeValues": {
                     ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                     ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
-                    ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": used_mode},
+                    ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": mode},
                 },
             }
         })
