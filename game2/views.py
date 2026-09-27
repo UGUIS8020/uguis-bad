@@ -858,7 +858,7 @@ def _skill_priority_four(candidates):
 
 
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
-WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
+WAIT_RESCUE_THRESHOLD = 3  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
 # 12ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×3
