@@ -953,7 +953,7 @@ def _skill_priority_four(candidates, partner_counter=None):
 
 
 WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
-QUEUE_FORCE_COUNT = 2  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
+QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
 # 9ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×3
