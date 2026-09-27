@@ -803,12 +803,25 @@ def _best_balanced_four(candidates, partner_counter=None, opponent_counter=None,
     return team_a, team_b, diff
 
 
-def _fairness_first_four(candidates):
+def _partner_penalty(team_a, team_b, partner_counter):
+    """パートナー重複だけを見るペナルティ（対戦相手の重複は見ない）"""
+    a_uids = [e.get("user_id") for e in team_a]
+    b_uids = [e.get("user_id") for e in team_b]
+    penalty = 0
+    if a_uids[0] and a_uids[1]:
+        penalty += partner_counter.get(frozenset(a_uids), 0)
+    if b_uids[0] and b_uids[1]:
+        penalty += partner_counter.get(frozenset(b_uids), 0)
+    return penalty
+
+
+def _fairness_first_four(candidates, partner_counter=None):
     """
     休憩ローテーション上の待機順、上位4人をそのまま採用する（スキルバランスは
-    「誰を選ぶか」には一切使わない）。ただし選ばれた4人をどう2チームに
-    分けるかだけは、3通りのパターンの中で最も実力差が小さいものを選ぶ
-    （これは公平性に影響しないので併用して問題ない）。
+    「誰を選ぶか」には一切使わない）。選ばれた4人をどう2チームに分けるかは、
+    まず3通りのパターンの中で最も実力差が小さいものを選ぶ。実力差がほぼ
+    同点の複数パターンがある場合は、直近のパートナー履歴が少ない方を優先する
+    （対戦相手の重複は見ない。実力差自体を崩してまで回避することはない）。
     """
     def conservative(e):
         return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
@@ -817,19 +830,24 @@ def _fairness_first_four(candidates):
     scores = [conservative(e) for e in four]
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
 
-    best = None
-    best_diff = float("inf")
+    options = []
     for (i1, i2), (i3, i4) in pairing_patterns:
         diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
-        if diff < best_diff:
-            best_diff = diff
-            best = ([four[i1], four[i2]], [four[i3], four[i4]])
+        options.append((diff, [four[i1], four[i2]], [four[i3], four[i4]]))
 
-    team_a, team_b = best
-    return team_a, team_b, best_diff
+    min_diff = min(o[0] for o in options)
+
+    if partner_counter:
+        margin = max(BALANCE_TIEBREAK_MARGIN_FLOOR, min_diff * BALANCE_TIEBREAK_MARGIN_RATIO)
+        near_best = [o for o in options if o[0] <= min_diff + margin]
+        diff, team_a, team_b = min(near_best, key=lambda o: _partner_penalty(o[1], o[2], partner_counter))
+    else:
+        diff, team_a, team_b = min(options, key=lambda o: o[0])
+
+    return team_a, team_b, diff
 
 
-def _full_random_four(candidates, force_top_n=1):
+def _full_random_four(candidates, force_top_n=1, partner_counter=None):
     """
     完全ランダムモード。ただし待機順(candidatesの先頭)最上位force_top_n人は
     必ず含める。旧システム(game/views.py)の「誰が休むかは先にキューだけで
@@ -837,7 +855,8 @@ def _full_random_four(candidates, force_top_n=1):
     モードの抽選に完全に委ねきってしまわないようにするための最低保証。
     残りの枠は実力・待機順に関係なく完全ランダムに選ぶ。
     チーム分けは_fairness_first_fourと同様に実力差が最小になる組み合わせを
-    選ぶ（「調整はする」）。
+    選ぶ（「調整はする」）。partner_counterを渡せば、実力差がほぼ同点の
+    場合にパートナー重複が少ない方を優先する。
     """
     import random as _random
 
@@ -853,7 +872,7 @@ def _full_random_four(candidates, force_top_n=1):
     four = must_include + chosen_rest
     if len(four) < 4:
         four = candidates[:4]
-    return _fairness_first_four(four)
+    return _fairness_first_four(four, partner_counter=partner_counter)
 
 
 def _skill_sorted_pending(entry_table):
@@ -868,7 +887,7 @@ def _skill_sorted_pending(entry_table):
 SKILL_PRIORITY_SPREAD_THRESHOLD = 20  # 選ばれた4人の実力差(最大-最小)がこれを超えたら「外れ値あり」とみなす
 
 
-def _skill_priority_four(candidates):
+def _skill_priority_four(candidates, partner_counter=None):
     """
     実力優先モード: 休憩ローテーションは無視し、待機中のスキルスコアが
     最も高い4人をそのまま選ぶ。
@@ -876,12 +895,13 @@ def _skill_priority_four(candidates):
     チーム分けはハイブリッド方式:
     - 選ばれた4人の実力差(最大-最小)がSKILL_PRIORITY_SPREAD_THRESHOLD以下
       （皆ほぼ同レベル）の場合は、定番の「1位+4位 vs 2位+3位」（チーム間
-      合計差が最小になる組み方）でペアリングする。
+      合計差が最小になる組み方）でペアリングする。実力差がほぼ同点の
+      複数パターンがある場合は、直近のパートナー履歴が少ない方を優先する。
     - それを超える場合（上級者に混じって初級者が1人だけ選ばれてしまった、
       などの外れ値があるケース）は、単純にチーム間合計差だけを最小化すると
       上級者+初級者 vs 中級者+中級者 のような組み合わせが選ばれてしまうため、
       まず「チーム内の実力差が大きい方」を最小化し、それが同じ場合に限り
-      チーム間の合計差で決める。
+      チーム間の合計差、さらに同じ場合はパートナー履歴で決める。
     """
     def conservative(e):
         return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
@@ -892,29 +912,34 @@ def _skill_priority_four(candidates):
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
 
     if spread <= SKILL_PRIORITY_SPREAD_THRESHOLD:
-        best = None
-        best_diff = float("inf")
+        options = []
         for (i1, i2), (i3, i4) in pairing_patterns:
             diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
-            if diff < best_diff:
-                best_diff = diff
-                best = ([four[i1], four[i2]], [four[i3], four[i4]])
-        team_a, team_b = best
-        return team_a, team_b, best_diff
+            options.append((diff, [four[i1], four[i2]], [four[i3], four[i4]]))
+        min_diff = min(o[0] for o in options)
+        if partner_counter:
+            margin = max(BALANCE_TIEBREAK_MARGIN_FLOOR, min_diff * BALANCE_TIEBREAK_MARGIN_RATIO)
+            near_best = [o for o in options if o[0] <= min_diff + margin]
+            diff, team_a, team_b = min(near_best, key=lambda o: _partner_penalty(o[1], o[2], partner_counter))
+        else:
+            diff, team_a, team_b = min(options, key=lambda o: o[0])
+        return team_a, team_b, diff
 
-    best = None
-    best_key = None
+    options2 = []
     for (i1, i2), (i3, i4) in pairing_patterns:
         within_team_a = abs(scores[i1] - scores[i2])
         within_team_b = abs(scores[i3] - scores[i4])
         between_diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
-        key = (max(within_team_a, within_team_b), between_diff)
-        if best_key is None or key < best_key:
-            best_key = key
-            best = ([four[i1], four[i2]], [four[i3], four[i4]])
+        options2.append(((max(within_team_a, within_team_b), between_diff), [four[i1], four[i2]], [four[i3], four[i4]]))
 
-    team_a, team_b = best
-    return team_a, team_b, best_key[1]
+    min_key = min(o[0] for o in options2)
+    if partner_counter:
+        near_best2 = [o for o in options2 if o[0] == min_key]
+        key, team_a, team_b = min(near_best2, key=lambda o: _partner_penalty(o[1], o[2], partner_counter))
+    else:
+        key, team_a, team_b = min(options2, key=lambda o: o[0])
+
+    return team_a, team_b, key[1]
 
 
 WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
@@ -1153,7 +1178,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             court_number, len(rescued), [p.get("display_name") for p in rescued],
         )
     elif mode == "balance_only":
-        # スキルモード: 休憩順は一切考慮しない(要望通りの仕様)
+        # スキルモード: 休憩順は一切考慮しない(要望通りの仕様)。
+        # ただしパートナー重複は、実力差がほぼ同点の場合のタイブレークとして考慮する。
         candidates = _skill_sorted_pending(entry_table)
         if len(candidates) < 4:
             current_app.logger.info(
@@ -1161,7 +1187,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 court_number, len(candidates),
             )
             return
-        team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
+        partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
+        team_a_entries, team_b_entries, diff = _skill_priority_four(candidates, partner_counter=partner_counter)
     else:
         # 完全ランダム／AIペアリング: 永続キューの先頭1人を必ず含める
         # (旧システムと同じ「休む人を先に決める」発想。通常時の穏やかな公平性)
@@ -1184,7 +1211,10 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             return
 
         if mode == "full_random":
-            team_a_entries, team_b_entries, diff = _full_random_four(candidates, force_top_n=1)
+            partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
+            team_a_entries, team_b_entries, diff = _full_random_four(
+                candidates, force_top_n=1, partner_counter=partner_counter
+            )
         else:  # ai_pairing
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
