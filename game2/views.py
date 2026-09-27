@@ -136,7 +136,7 @@ def sync_match_entries_with_updated_skills2(entry_mapping, updated_skills):
 @bp_game2.route("/court")
 @login_required
 def court():
-    # ページ読み込みのたびに、30秒の猶予を過ぎた「空きコート」があれば補充する
+    # ページ読み込みのたびに、猶予(COURT_REFILL_DELAY_SECONDS秒)を過ぎた「空きコート」があれば補充する
     try:
         _process_awaiting_refills()
     except Exception as e:
@@ -1031,7 +1031,7 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
     return elapsed_minutes >= SKILL_BURST_INTERVAL_MINUTES
 
 
-COURT_REFILL_DELAY_SECONDS = 20  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
+COURT_REFILL_DELAY_SECONDS = 15  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
 LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
 
