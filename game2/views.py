@@ -1297,9 +1297,19 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 forced = forced + [lowest]
                 forced_uids.add(lowest["user_id"])
             remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
+            excluded_display_name = None
             if remaining2:
                 highest = max(remaining2, key=lambda e: int(e.get("match_count", 0) or 0))
                 excluded_uid = highest["user_id"]
+                excluded_display_name = highest.get("display_name")
+            current_app.logger.info(
+                "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): "
+                "優先=%s(試合数%s) 除外=%s",
+                court_number, refill_count,
+                lowest.get("display_name") if remaining else None,
+                lowest.get("match_count") if remaining else None,
+                excluded_display_name,
+            )
 
         rest_pool = [
             e for e in all_pending
