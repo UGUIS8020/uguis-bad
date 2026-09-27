@@ -52,6 +52,21 @@ REST_QUEUE_KEY = "continuous_rest_queue"
 META_CURRENT_PK = "meta#continuous_current"
 META_PAIRING_PK = "meta#continuous_pairing"
 
+# コート表示に使う、ペアリングモードの日本語ラベル
+PAIRING_MODE_LABELS = {
+    "random": "バランス考慮",
+    "full_random": "完全ランダム",
+    "ai": "AIペアリング",
+    "ai_pairing": "AIペアリング",
+    "balance_only": "実力優先",
+    "fairness_first": "休憩優先",
+    "safety_valve": "安全弁（待機解消優先）",
+}
+
+
+def _mode_label(mode):
+    return PAIRING_MODE_LABELS.get(mode, "自動進行中")
+
 
 def _entry_table():
     return current_app.dynamodb.Table("bad-game2-match_entries")
@@ -140,7 +155,10 @@ def court():
     for e in all_entries:
         if e.get("entry_status") == "playing" and e.get("court_number") is not None:
             c = int(e.get("court_number"))
-            courts.setdefault(c, {"A": [], "B": [], "match_id": e.get("match_id")})
+            courts.setdefault(c, {
+                "A": [], "B": [], "match_id": e.get("match_id"),
+                "mode_label": _mode_label(e.get("pairing_mode")),
+            })
             team = e.get("team", "A")
             courts[c][team].append(e)
 
@@ -557,12 +575,12 @@ def create_pairings():
                 "Update": {
                     "TableName": "bad-game2-match_entries",
                     "Key": {"entry_id": {"S": entry_id}},
-                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now",
+                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
                     "ConditionExpression": "entry_status = :pending",
                     "ExpressionAttributeValues": {
                         ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                         ":mid": {"S": str(match_id)}, ":c": {"N": str(court_num)},
-                        ":t": {"S": team}, ":now": {"S": now_jst},
+                        ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": mode},
                     },
                 }
             })
@@ -1017,6 +1035,8 @@ def _select_and_start_court(court_number):
             )
         else:  # balance_only
             team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
+
+    used_mode = "safety_valve" if rescued else mode
     new_match_id = generate_match_id2()
 
     import boto3
@@ -1035,12 +1055,12 @@ def _select_and_start_court(court_number):
             "Update": {
                 "TableName": "bad-game2-match_entries",
                 "Key": {"entry_id": {"S": pl["entry_id"]}},
-                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now",
+                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
                 "ConditionExpression": "entry_status = :pending",
                 "ExpressionAttributeValues": {
                     ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                     ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
-                    ":t": {"S": team}, ":now": {"S": now_jst},
+                    ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": used_mode},
                 },
             }
         })
