@@ -618,8 +618,18 @@ def create_pairings():
 
 
 def _sort_and_limit_pool(pending, pool_size=20):
-    """pending中の人のリストを「休憩ローテーション上、次に出るべき順」に並べて上位を返す"""
-    sorted_pending = sorted(pending, key=lambda e: (e.get("match_count", 0), e.get("joined_at", "")))
+    """
+    pending中の人のリストを「休憩ローテーション上、次に出るべき順」に並べて
+    上位を返す。match_countが同点の場合、以前はjoined_at(チェックイン時刻)
+    の早い順で決めていたが、そうすると「たまたま一番早くチェックインした人」
+    が同点になるたびに毎回タイブレークで優先され続けてしまい、特定の人が
+    構造的に多く出続ける偏りが生じた(実際に発生した不具合)。
+    先にシャッフルしてからmatch_countだけで安定ソートすることで、
+    同点内の順序を試合ごとにランダムにする。
+    """
+    shuffled = list(pending)
+    random.shuffle(shuffled)
+    sorted_pending = sorted(shuffled, key=lambda e: e.get("match_count", 0))
     return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
 
 
