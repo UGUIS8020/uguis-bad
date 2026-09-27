@@ -617,7 +617,11 @@ def create_pairings():
 
     meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
-        UpdateExpression="SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now",
+        UpdateExpression=(
+            "SET cycle_index=:ci, last_mode=:m, last_match_id=:mid, updated_at=:now, "
+            "last_skill_burst_at=:now "
+            "REMOVE skill_burst_remaining"
+        ),
         ExpressionAttributeValues={
             ":ci": next_cycle_index, ":m": mode, ":mid": str(match_id), ":now": now_jst,
         },
