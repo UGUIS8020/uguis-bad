@@ -121,6 +121,8 @@ def simulate(n_matches, seed=None,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
              enable_continuous_balance=True,
              continuous_balance_cycle=CONTINUOUS_BALANCE_CYCLE,
+             enable_rescue=True,
+             wait_rescue_threshold=WAIT_RESCUE_THRESHOLD,
              trace=False):
     """
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
@@ -216,12 +218,12 @@ def simulate(n_matches, seed=None,
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
         mode = "full_random" if refill_count <= initial_full_random else "ai_pairing"
 
-        # ★救済モード: WAIT_RESCUE_THRESHOLD回以上待った人がいれば、モードに
+        # ★救済モード: wait_rescue_threshold回以上待った人がいれば、モードに
         #   関わらず強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
         rescued = sorted(
-            [p for p in pending if p["wait_rounds"] >= WAIT_RESCUE_THRESHOLD],
+            [p for p in pending if p["wait_rounds"] >= wait_rescue_threshold],
             key=lambda p: -p["wait_rounds"],
-        )[:4]
+        )[:4] if enable_rescue else []
 
         if rescued:
             others = [p for p in pending if p not in rescued]
