@@ -741,12 +741,54 @@ def _full_random_four(candidates):
     return _fairness_first_four(four)
 
 
+def _skill_sorted_pending(entry_table):
+    """pending中の人をスキルスコア(conservative)降順で返す（休憩ローテーションは無視）"""
+    def conservative(e):
+        return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
+
+    pending = entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
+    return sorted(pending, key=conservative, reverse=True)
+
+
+def _skill_priority_four(candidates):
+    """
+    実力優先モード: 休憩ローテーションは無視し、待機中のスキルスコアが
+    最も高い4人をそのまま選ぶ。
+
+    チーム分けは、単純に「Aチーム合計とBチーム合計の差」を最小化すると、
+    上級者+初級者 vs 中級者+中級者 のような組み合わせ（チーム間の合計は
+    近いが、片方のチーム内の実力差が極端に大きい）が選ばれてしまう。
+    そこで、まず「チーム内の実力差が大きい方」を最小化し、それが同じ場合に
+    限りチーム間の合計差で決める。
+    """
+    def conservative(e):
+        return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
+
+    four = sorted(candidates, key=conservative, reverse=True)[:4]
+    scores = [conservative(e) for e in four]
+    pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
+
+    best = None
+    best_key = None
+    for (i1, i2), (i3, i4) in pairing_patterns:
+        within_team_a = abs(scores[i1] - scores[i2])
+        within_team_b = abs(scores[i3] - scores[i4])
+        between_diff = abs((scores[i1] + scores[i2]) - (scores[i3] + scores[i4]))
+        key = (max(within_team_a, within_team_b), between_diff)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = ([four[i1], four[i2]], [four[i3], four[i4]])
+
+    team_a, team_b = best
+    return team_a, team_b, best_key[1]
+
+
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
 # 12ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×6
-#   → 実力優先(バランスのみ、履歴無視)×3 → 繰り返し
+#   → 実力優先(スキル上位優先、休憩順・履歴は無視)×3 → 繰り返し
 # 「AI救済ペアリング」は、安全弁(WAIT_RESCUE_THRESHOLD)と役割が重複しており
 # 効果も限定的だったため廃止した。
 REFILL_MODE_CYCLE = [
@@ -932,6 +974,9 @@ def _select_and_start_court(court_number):
         if mode == "ai_pairing":
             # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
             candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
+        elif mode == "balance_only":
+            # 実力優先: 休憩ローテーションは無視し、スキルスコア上位から選ぶ
+            candidates = _skill_sorted_pending(entry_table)
         else:
             candidates = _refill_candidate_pool(entry_table)
 
@@ -952,7 +997,7 @@ def _select_and_start_court(court_number):
                 candidates, partner_counter, opponent_counter
             )
         else:  # balance_only
-            team_a_entries, team_b_entries, diff = _best_balanced_four(candidates)
+            team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
     new_match_id = generate_match_id2()
 
     import boto3
