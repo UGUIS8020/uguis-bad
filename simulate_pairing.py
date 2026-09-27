@@ -18,6 +18,7 @@ import argparse
 import random
 import statistics
 from collections import Counter, defaultdict
+from itertools import groupby
 
 from game2.views import (
     _best_balanced_four,
@@ -68,11 +69,6 @@ def get_recent_history_local(recent_results, max_results=RECENT_HISTORY_RESULTS)
     return partner_counter, opponent_counter
 
 
-def refill_candidate_pool_local(pending, pool_size=20):
-    sorted_pending = sorted(pending, key=lambda e: (e["match_count"], e["joined_at"]))
-    return sorted_pending[:max(4, min(pool_size, len(sorted_pending)))]
-
-
 def skill_sorted_pending_local(pending):
     """スキルモード用: 休憩ローテーションは無視し、スキルスコア降順で返す"""
     def conservative(e):
@@ -80,7 +76,42 @@ def skill_sorted_pending_local(pending):
     return sorted(pending, key=conservative, reverse=True)
 
 
-def simulate(cycle, n_matches, seed=None, safety_valve=True, safety_threshold=WAIT_RESCUE_THRESHOLD,
+def pop_next_from_queue_local(queue_state, pending, count=1):
+    """
+    本番の_pop_next_from_play_queue()と同じロジックをメモリ上で行う。
+    queue_stateは{"queue": [...], "last_picked": [...]}をシミュレーション
+    全体で使い回す(本番のDynamoDB永続キューに相当)。
+    """
+    by_id = {p["user_id"]: p for p in pending}
+    current_user_set = set(by_id.keys())
+    queue = [uid for uid in queue_state["queue"] if uid in current_user_set]
+
+    if len(queue) < count:
+        last_picked_uids = set(queue_state.get("last_picked", []))
+        sorted_entries = sorted(pending, key=lambda e: (e["match_count"], e.get("joined_at", "")))
+        all_uids = [e["user_id"] for e in sorted_entries]
+        others = [uid for uid in all_uids if uid not in last_picked_uids]
+        prev_picked = [uid for uid in all_uids if uid in last_picked_uids]
+
+        shuffled = []
+        for _, g in groupby(others, key=lambda uid: by_id[uid]["match_count"]):
+            g = list(g)
+            random.shuffle(g)
+            shuffled.extend(g)
+
+        new_queue_ordered = shuffled + prev_picked
+        picked_uids = new_queue_ordered[:count]
+        queue_next = new_queue_ordered[count:]
+    else:
+        picked_uids = queue[:count]
+        queue_next = queue[count:]
+
+    queue_state["queue"] = queue_next
+    queue_state["last_picked"] = picked_uids
+    return [by_id[uid] for uid in picked_uids if uid in by_id]
+
+
+def simulate(cycle, n_matches, seed=None,
              num_players=NUM_PLAYERS, num_courts=NUM_COURTS, trace=False):
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
@@ -96,6 +127,7 @@ def simulate(cycle, n_matches, seed=None, safety_valve=True, safety_threshold=WA
     recent_results = []  # [(team_a, team_b), ...] 新しい順ではなく古い順に追加
     match_log = []  # 全試合: (court_num, team_a, team_b, diff)
     refill_count = 0
+    queue_state = {"queue": [], "last_picked": []}  # 本番のDynamoDB永続キューに相当
 
     for _ in range(n_matches):
         # 実際の練習ではどのコートが次に終わるかはランダム(機械的な順番ではない)
@@ -122,46 +154,46 @@ def simulate(cycle, n_matches, seed=None, safety_valve=True, safety_threshold=WA
         refill_count += 1
         mode = cycle[(refill_count - 1) % len(cycle)]
 
-        # ★安全弁: 一定ラウンド以上待った人がいれば、モードに関わらず強制的に含める
-        rescued = []
-        if safety_valve:
-            rescued = sorted(
-                [p for p in pending if p["wait_rounds"] >= safety_threshold],
-                key=lambda p: -p["wait_rounds"],
-            )[:4]
+        # ★救済モード: WAIT_RESCUE_THRESHOLD回以上待った人がいれば、モードに
+        #   関わらず強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
+        rescued = sorted(
+            [p for p in pending if p["wait_rounds"] >= WAIT_RESCUE_THRESHOLD],
+            key=lambda p: -p["wait_rounds"],
+        )[:4]
 
         if rescued:
             others = [p for p in pending if p not in rescued]
-            others_sorted = refill_candidate_pool_local(others, pool_size=20)
-            merged = rescued + others_sorted
-            if len(merged) < 4:
+            candidates = rescued + others
+            if len(candidates) < 4:
                 continue
             partner_counter, opponent_counter = get_recent_history_local(recent_results)
             team_a, team_b, _diff = _best_balanced_four(
-                merged, partner_counter, opponent_counter, force_top_n=len(rescued)
+                candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
             )
+        elif mode == "balance_only":
+            # スキルモード: 休憩順は一切考慮しない
+            candidates = skill_sorted_pending_local(pending)
+            if len(candidates) < 4:
+                continue
+            team_a, team_b, _diff = _skill_priority_four(candidates)
         else:
-            if mode == "ai_pairing":
-                # 休みの調整は行わない: 待機順で絞らず、pending全員が候補
-                candidates = list(pending)
-            elif mode == "balance_only":
-                candidates = skill_sorted_pending_local(pending)
-            else:
-                candidates = refill_candidate_pool_local(pending)
-
+            # 完全ランダム/AIペアリング: 永続キューの先頭1人を必ず含める
+            forced = pop_next_from_queue_local(queue_state, pending, count=1)
+            if not forced:
+                continue
+            forced_uid = forced[0]["user_id"]
+            rest_pool = [p for p in pending if p["user_id"] != forced_uid]
+            candidates = forced + rest_pool
             if len(candidates) < 4:
                 continue
 
             if mode == "fairness_first":
                 team_a, team_b, _diff = _fairness_first_four(candidates)
             elif mode == "full_random":
-                # 休みの調整は行わない: 4人全員を完全ランダムに選ぶ
-                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=0)
-            elif mode == "ai_pairing":
+                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=1)
+            else:  # ai_pairing
                 partner_counter, opponent_counter = get_recent_history_local(recent_results)
-                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=0)
-            else:  # balance_only
-                team_a, team_b, _diff = _skill_priority_four(candidates)
+                team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=1)
 
         chosen_uids = {p["user_id"] for p in team_a + team_b}
         if trace:
