@@ -744,9 +744,9 @@ def _full_random_four(candidates):
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# 15ステップのサイクル:
+# 12ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×6
-#   → 実力優先(バランスのみ、履歴無視)×3 → 完全ランダム(調整はする)×3 → 繰り返し
+#   → 実力優先(バランスのみ、履歴無視)×3 → 繰り返し
 # 「AI救済ペアリング」は、安全弁(WAIT_RESCUE_THRESHOLD)と役割が重複しており
 # 効果も限定的だったため廃止した。
 REFILL_MODE_CYCLE = [
@@ -754,7 +754,6 @@ REFILL_MODE_CYCLE = [
     "ai_pairing", "ai_pairing", "ai_pairing",
     "ai_pairing", "ai_pairing", "ai_pairing",
     "balance_only", "balance_only", "balance_only",
-    "full_random", "full_random", "full_random",
 ]
 
 
