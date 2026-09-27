@@ -31,6 +31,7 @@ from game2.views import (
     QUEUE_FORCE_COUNT,
     INITIAL_FULL_RANDOM_COUNT,
     SKILL_BURST_INTERVAL_MINUTES,
+    CONTINUOUS_BALANCE_CYCLE,
 )
 
 NUM_PLAYERS = 18
@@ -118,13 +119,16 @@ def simulate(n_matches, seed=None,
              minutes_per_match=10.0,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
+             enable_continuous_balance=True,
+             continuous_balance_cycle=CONTINUOUS_BALANCE_CYCLE,
              trace=False):
     """
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
-    _process_skill_burst / _execute_skill_burst)と同じロジックをシミュレート
-    する。実際の壁時計時間の代わりに、1試合あたりminutes_per_match分かかると
-    仮定して経過時間を積算する(コートはnum_courts面並行で進むので、1回の
-    補充ごとにminutes_per_match/num_courts分だけ経過したとみなす)。
+    _process_skill_burst / _execute_skill_burst)+ 継続的バランス調整と同じ
+    ロジックをシミュレートする。実際の壁時計時間の代わりに、1試合あたり
+    minutes_per_match分かかると仮定して経過時間を積算する(コートは
+    num_courts面並行で進むので、1回の補充ごとにminutes_per_match/num_courts
+    分だけ経過したとみなす)。
 
     スキルモードは本番と同じく「1コートずつ選ばれるモード」ではなく、前回の
     一斉入れ替えからskill_burst_interval_minutes分経過したら、空いたコートを
@@ -232,8 +236,41 @@ def simulate(n_matches, seed=None,
             forced = pop_next_from_queue_local(queue_state, pending, count=QUEUE_FORCE_COUNT)
             assert forced, "pendingは直前に終わった4人を含むため通常は空にならない"
             forced_uids = {p["user_id"] for p in forced}
-            rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
+
+            # ★継続的バランス調整: 毎回のAIペアリング/完全ランダムの補充で、
+            #   参加回数が最も少ない人を優先的に含め、逆に参加回数が最も多い
+            #   人は今回の候補から除外する(休憩にはしない。次回はまた対象に
+            #   なりうる)。毎回適用すると実力バランスの質が目に見えて落ちる
+            #   ため、continuous_balance_cycle回ごとにオン/オフを交互に切り
+            #   替える(例:3回=通常AI/3回=調整ありAI)。
+            if continuous_balance_cycle > 0:
+                cycle_on = (((refill_count - 1) // continuous_balance_cycle) % 2) == 1
+            else:
+                cycle_on = True
+            apply_continuous_balance = enable_continuous_balance and cycle_on
+
+            excluded_uid = None
+            if apply_continuous_balance:
+                remaining = [p for p in pending if p["user_id"] not in forced_uids]
+                if remaining:
+                    lowest = min(remaining, key=lambda p: p["match_count"])
+                    if lowest["user_id"] not in forced_uids:
+                        forced = forced + [lowest]
+                        forced_uids.add(lowest["user_id"])
+                remaining2 = [p for p in pending if p["user_id"] not in forced_uids]
+                if remaining2:
+                    highest = max(remaining2, key=lambda p: p["match_count"])
+                    excluded_uid = highest["user_id"]
+
+            rest_pool = [
+                p for p in pending
+                if p["user_id"] not in forced_uids and p["user_id"] != excluded_uid
+            ]
             candidates = forced + rest_pool
+            if len(candidates) < 4:
+                # 除外すると4人未満になる場合は、除外をやめて通常通りにする
+                rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
+                candidates = forced + rest_pool
             assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
 
             if mode == "full_random":

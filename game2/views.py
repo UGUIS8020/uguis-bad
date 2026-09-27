@@ -175,6 +175,10 @@ def court():
 
     pending = [e for e in all_entries if e.get("entry_status") == "pending"]
     resting = [e for e in all_entries if e.get("entry_status") == "resting"]
+    # ★「参加者」= コートに入っている全員(試合中+待機中+休憩中)。
+    #   非管理者にはcourtsを自分のコートだけに絞る(下記)ため、その前の
+    #   all_entries時点で数えておく必要がある。
+    total_participants = len(all_entries)
 
     is_admin = getattr(current_user, "administrator", False)
 
@@ -213,6 +217,7 @@ def court():
         courts=courts,
         pending=pending,
         resting=resting,
+        total_participants=total_participants,
         my_entry=my_entry,
         is_admin=is_admin,
         awaiting_refill=awaiting_display,
@@ -983,8 +988,14 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   2. さらにモードを問わず、WAIT_RESCUE_THRESHOLD回以上補充を逃し続けている
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
 #      長時間待ちを防ぐ保険)
+#   3. さらに、完全ランダム/AIペアリングはCONTINUOUS_BALANCE_CYCLE回ごとに
+#      オン/オフを交互に切り替えながら、参加回数が最も少ない人を優先的に
+#      含め、最も多い人は今回の候補から除外する「継続的バランス調整」を行う
+#      (毎回適用すると実力バランスの質が目に見えて落ちるため、間欠的に
+#      効かせて公平性とのバランスを取る。シミュレーションで確認済み)
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、完全ランダムを連続させる回数
 SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
+CONTINUOUS_BALANCE_CYCLE = 3  # 継続的バランス調整のオン/オフを何回ごとに切り替えるか
 
 
 def _next_refill_mode(meta_table):
@@ -1267,8 +1278,38 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             )
             return
         forced_uids = {p["user_id"] for p in forced}
-        rest_pool = [e for e in _all_pending_unordered(entry_table) if e.get("user_id") not in forced_uids]
+
+        # ★継続的バランス調整: CONTINUOUS_BALANCE_CYCLE回ごとにオン/オフを
+        #   交互に切り替えながら、参加回数(match_count)が最も少ない人を
+        #   優先的に含め、最も多い人は今回の候補から除外する(休憩にはしない。
+        #   次回はまた対象になりうる)。毎回適用すると実力バランスの質が
+        #   目に見えて落ちるため、間欠的に効かせて公平性とのバランスを取る
+        #   (シミュレーションで確認済み: 毎回適用とほぼ同じ公平性改善を、
+        #   実力差への悪影響を4割ほど抑えて実現できる)。
+        apply_continuous_balance = (
+            ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
+        ) == 1
+        excluded_uid = None
+        if apply_continuous_balance:
+            remaining = [e for e in all_pending if e.get("user_id") not in forced_uids]
+            if remaining:
+                lowest = min(remaining, key=lambda e: int(e.get("match_count", 0) or 0))
+                forced = forced + [lowest]
+                forced_uids.add(lowest["user_id"])
+            remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
+            if remaining2:
+                highest = max(remaining2, key=lambda e: int(e.get("match_count", 0) or 0))
+                excluded_uid = highest["user_id"]
+
+        rest_pool = [
+            e for e in all_pending
+            if e.get("user_id") not in forced_uids and e.get("user_id") != excluded_uid
+        ]
         candidates = forced + rest_pool
+        if len(candidates) < 4:
+            # ★除外すると4人未満になってしまう場合は、除外をやめて通常通りにする
+            rest_pool = [e for e in all_pending if e.get("user_id") not in forced_uids]
+            candidates = forced + rest_pool
 
         if len(candidates) < 4:
             current_app.logger.info(

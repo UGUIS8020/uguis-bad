@@ -42,7 +42,9 @@ def create_users(count):
         uid = str(uuid.uuid4())
         gender = "male" if i % 2 == 1 else "female"
         skill_score = Decimal(str(random.randint(15, 70)))
-        email = f"manual_test_{i:02d}_{uid[:6]}@test.invalid"
+        # ★@test.invalidはemail_validatorが「予約済み特殊ドメイン」として
+        #   ログインフォームで弾いてしまうため使えない。example.comを使う。
+        email = f"manual_test_{i:02d}_{uid[:6]}@example.com"
         display_name = f"{PREFIX}選手{i:02d}"
 
         users_table.put_item(Item={
