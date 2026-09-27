@@ -382,6 +382,39 @@ def admin_rest_entry(entry_id):
     return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/admin_resume_entry/<entry_id>", methods=["POST"])
+@login_required
+def admin_resume_entry(entry_id):
+    """管理者が休憩中の名前タップで、その人を直接待機に戻す"""
+    if not current_user.administrator:
+        flash("管理者のみ実行できます。", "danger")
+        return redirect(url_for("game2.court"))
+
+    entry_table = _entry_table()
+    item = entry_table.get_item(Key={"entry_id": entry_id}, ConsistentRead=True).get("Item")
+    if not item:
+        flash("エントリーが見つかりませんでした", "warning")
+        return redirect(url_for("game2.court"))
+
+    if item.get("entry_status") != "resting":
+        flash("休憩中の参加者のみ待機に戻せます", "warning")
+        return redirect(url_for("game2.court"))
+
+    entry_table.update_item(
+        Key={"entry_id": entry_id},
+        UpdateExpression="SET entry_status = :pending, match_id = :pending, resumed_at = :now",
+        ExpressionAttributeValues={
+            ":pending": "pending", ":now": datetime.now(JST).isoformat(),
+        },
+    )
+    current_app.logger.info(
+        "[game2][admin_resume_entry] admin=%s entry_id=%s(%s) を待機に戻す",
+        current_user.get_id(), entry_id, item.get("display_name"),
+    )
+    flash(f"{item.get('display_name', '参加者')}を待機に戻しました", "info")
+    return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/resume", methods=["POST"])
 @login_required
 def resume():

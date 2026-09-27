@@ -107,13 +107,19 @@
                     {% endif %}
                 {% endfor %}
             </p>
-            {% if is_admin %}
-            <p class="text-muted small mb-0 mt-1">（管理者: 待機中の名前をタップすると休憩に切り替えられます）</p>
-            {% endif %}
             {% endif %}
             {% if resting %}
             <p class="mb-0 mt-1">
-                {% for p in resting %}<span class="badge bg-light text-dark border me-1">{{ p.display_name }}</span>{% endfor %}
+                {% for p in resting %}
+                    {% if is_admin %}
+                    <form method="POST" action="{{ url_for('game2.admin_resume_entry', entry_id=p.entry_id) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="badge bg-light text-dark border me-1">{{ p.display_name }}</button>
+                    </form>
+                    {% else %}
+                    <span class="badge bg-light text-dark border me-1">{{ p.display_name }}</span>
+                    {% endif %}
+                {% endfor %}
             </p>
             {% endif %}
         </div>
