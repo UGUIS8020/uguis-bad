@@ -1072,9 +1072,13 @@ def _select_and_start_court(court_number):
         elif mode == "full_random":
             team_a_entries, team_b_entries, diff = _full_random_four(candidates)
         elif mode == "ai_pairing":
+            # ★force_top_n=0: AIペアリングモード自体が持っていた「待機上位1名を
+            #   必ず含める」というミニ救済機能をやめ、純粋に実力バランス＋履歴
+            #   だけで4人を選ぶ。待たされすぎている人の救済は、別枠の調整モード
+            #   (WAIT_RESCUE_THRESHOLDによる安全弁)にのみ任せる。
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
-                candidates, partner_counter, opponent_counter
+                candidates, partner_counter, opponent_counter, force_top_n=0
             )
         else:  # balance_only
             team_a_entries, team_b_entries, diff = _skill_priority_four(candidates)
