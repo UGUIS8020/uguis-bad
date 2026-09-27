@@ -968,7 +968,7 @@ def _skill_priority_four(candidates, partner_counter=None):
     return team_a, team_b, key[1]
 
 
-WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
+WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
 QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
 # モード選定ルール(ステップ数の固定サイクルではなく、時間ベース):
