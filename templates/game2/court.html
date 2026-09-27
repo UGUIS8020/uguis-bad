@@ -57,6 +57,12 @@
                     {% endfor %}
                 </div>
                 {% endif %}
+                {% if held_for_pairing %}
+                <div class="text-muted small mt-1">
+                    ペア待ち中（待機者が少ないため、もう1コート空くのを待ってまとめて組み直します）:
+                    {% for c in held_for_pairing %}コート{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+                {% endif %}
             {% endif %}
 
             {% if my_entry and my_entry.entry_status == 'pending' %}

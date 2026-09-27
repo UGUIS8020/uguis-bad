@@ -141,6 +141,10 @@ def court():
         _process_awaiting_refills()
     except Exception as e:
         current_app.logger.error("[game2] _process_awaiting_refills エラー: %s", e, exc_info=True)
+    try:
+        _process_held_pairs()
+    except Exception as e:
+        current_app.logger.error("[game2] _process_held_pairs エラー: %s", e, exc_info=True)
 
     entry_table = _entry_table()
     meta_table = _meta_table()
@@ -193,6 +197,9 @@ def court():
                 remaining = 0
             awaiting_display[int(court_str)] = remaining
 
+    held_for_pairing = meta_current.get("held_for_pairing") or {}
+    held_display = sorted(int(c) for c in held_for_pairing.keys())
+
     return render_template(
         "game2/court.html",
         status=status,
@@ -203,6 +210,7 @@ def court():
         is_admin=is_admin,
         awaiting_refill=awaiting_display,
         matching_paused=bool(meta_current.get("matching_paused")),
+        held_for_pairing=held_display,
     )
 
 
@@ -569,7 +577,7 @@ def create_pairings():
             "Key": {"match_id": {"S": META_CURRENT_PK}},
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode "
-                "REMOVE matching_paused, awaiting_refill"
+                "REMOVE matching_paused, awaiting_refill, held_for_pairing"
             ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
@@ -945,6 +953,8 @@ def _next_refill_mode(meta_table):
 
 
 COURT_REFILL_DELAY_SECONDS = 20  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
+LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする
+PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
 
 
 def _try_refill_court(old_match_id, court_number):
@@ -1033,6 +1043,38 @@ def _try_refill_court(old_match_id, court_number):
                 },
             )
 
+    # ★参加人数が少ないと、待機バッファがほぼ無く、空いたコートを単独で
+    #   即補充してもほぼ同じ顔ぶれがそのまま戻ってくるだけになってしまう
+    #   （例: 8〜10人で2コート、12〜14人で3コートなど）。
+    #   このコートを除いた「今すぐ試合に戻れる人数(バッファ)」が
+    #   LOW_BUFFER_THRESHOLD人以下の場合は、単独では補充せず、もう1コート
+    #   分空くのを待ってから2コート分まとめて組み直すことで、混ざり合う
+    #   余地を作る。
+    meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    court_count = int(meta_current_now.get("court_count", 0) or 0)
+    active_items = entry_table.scan(
+        FilterExpression=Attr("entry_status").is_in(["pending", "playing"]), ConsistentRead=True
+    ).get("Items", [])
+    buffer = len(active_items) - court_count * 4
+
+    if court_count >= 2 and buffer <= LOW_BUFFER_THRESHOLD:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET held_for_pairing = if_not_exists(held_for_pairing, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET held_for_pairing.#c = :now",
+            ExpressionAttributeNames={"#c": str(court_number)},
+            ExpressionAttributeValues={":now": now_jst},
+        )
+        current_app.logger.info(
+            "[game2][continuous] court=%s 待機バッファが少ない(buffer=%d)ためペア待ちに登録",
+            court_number, buffer,
+        )
+        return
+
     # ★次の組み合わせはすぐには作らず、このコートを「空き」として記録するだけ。
     #   実際の補充は _process_awaiting_refills() が COURT_REFILL_DELAY_SECONDS
     #   経過後に行う（休憩したい人が申告する時間を確保するため）。
@@ -1055,11 +1097,16 @@ def _try_refill_court(old_match_id, court_number):
     )
 
 
-def _select_and_start_court(court_number):
+def _select_and_start_court(court_number, clear_awaiting_refill=True):
     """
     空いているコートに、休憩ローテーション上位の候補の中から実力バランスが
     良い4人を選んで新しい試合を発行する。_process_awaiting_refills() から
     COURT_REFILL_DELAY_SECONDS 経過後に呼ばれる。
+
+    clear_awaiting_refill=False の場合は、トランザクションにawaiting_refill
+    解除を含めない（_process_held_pairs()からの呼び出し用。こちらは
+    held_for_pairingを対象にした別の競合ガード(_clear_held_for_pairing)を
+    既に済ませているため）。
     """
     entry_table = _entry_table()
     results_table = _results_table()
@@ -1149,22 +1196,24 @@ def _select_and_start_court(court_number):
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
-    tx_items = [{
-        "Update": {
-            "TableName": "bad-game-matches",
-            "Key": {"match_id": {"S": META_CURRENT_PK}},
-            # ★同じコートに対して_select_and_start_courtが同時に2回呼ばれた場合
-            #   (例: ページ読み込みとsubmit_score直後の呼び出しが重なった場合)、
-            #   ConditionExpressionが無いとREMOVEは「既に無い属性の削除」を
-            #   エラーにせず黙って成功させてしまい、両方の呼び出しが別々の
-            #   4人を選んで同じコート番号に試合を作ってしまう(表示が
-            #   8人になるバグの原因になった)。attribute_existsを条件にする
-            #   ことで、後から来た方のトランザクションを確実に失敗させる。
-            "UpdateExpression": "REMOVE awaiting_refill.#c",
-            "ConditionExpression": "attribute_exists(awaiting_refill.#c)",
-            "ExpressionAttributeNames": {"#c": str(court_number)},
-        }
-    }]
+    tx_items = []
+    if clear_awaiting_refill:
+        tx_items.append({
+            "Update": {
+                "TableName": "bad-game-matches",
+                "Key": {"match_id": {"S": META_CURRENT_PK}},
+                # ★同じコートに対して_select_and_start_courtが同時に2回呼ばれた場合
+                #   (例: ページ読み込みとsubmit_score直後の呼び出しが重なった場合)、
+                #   ConditionExpressionが無いとREMOVEは「既に無い属性の削除」を
+                #   エラーにせず黙って成功させてしまい、両方の呼び出しが別々の
+                #   4人を選んで同じコート番号に試合を作ってしまう(表示が
+                #   8人になるバグの原因になった)。attribute_existsを条件にする
+                #   ことで、後から来た方のトランザクションを確実に失敗させる。
+                "UpdateExpression": "REMOVE awaiting_refill.#c",
+                "ConditionExpression": "attribute_exists(awaiting_refill.#c)",
+                "ExpressionAttributeNames": {"#c": str(court_number)},
+            }
+        })
     for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
                       (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
         tx_items.append({
@@ -1223,6 +1272,93 @@ def _process_awaiting_refills():
             except Exception as e:
                 current_app.logger.error(
                     "[game2][continuous] court=%s 補充処理でエラー: %s", court_str, e, exc_info=True
+                )
+
+
+def _clear_held_for_pairing(meta_table, court_number):
+    """
+    held_for_pairingから指定コートを取り除く。取り除けたらTrue、既に他の処理で
+    取り除かれていた(競合)場合はFalseを返す。呼び出し側はFalseの場合、
+    そのコートへの後続処理(_select_and_start_court)を行ってはいけない
+    （既に別の処理がこのコートを担当している）。
+    """
+    try:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="REMOVE held_for_pairing.#c",
+            ConditionExpression="attribute_exists(held_for_pairing.#c)",
+            ExpressionAttributeNames={"#c": str(court_number)},
+        )
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _process_held_pairs():
+    """
+    待機バッファが少ないため単独補充を保留されている(held_for_pairing)コートを
+    処理する。2コート分揃い、かつ最初に保留されたコートからCOURT_REFILL_DELAY_
+    SECONDS以上経過していれば、その2コートをまとめて処理する。
+    実際には_select_and_start_courtを2回順番に呼ぶだけでよい。1回目の呼び出しで
+    そのコートの分だけ待機プールから抜けるので、2回目の呼び出し時には両コート
+    分の人がまとめて候補になっており、自然に混ざり合った組み合わせになる。
+
+    片方のコートだけがPAIR_HOLD_MAX_WAIT_SECONDS以上待たされている場合
+    (ペア相手がなかなか現れない場合)は、待たせすぎないよう単独ででも補充する。
+    """
+    meta_table = _meta_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    held = meta_current.get("held_for_pairing") or {}
+    if not held:
+        return
+
+    now = datetime.now(JST)
+    held_list = []
+    for court_str, freed_at_iso in held.items():
+        try:
+            freed_at = datetime.fromisoformat(freed_at_iso)
+        except Exception:
+            continue
+        held_list.append((int(court_str), freed_at))
+    held_list.sort(key=lambda x: x[1])  # 古い順
+
+    if len(held_list) >= 2:
+        oldest_court, oldest_freed_at = held_list[0]
+        if (now - oldest_freed_at).total_seconds() >= COURT_REFILL_DELAY_SECONDS:
+            pair = held_list[:2]
+            current_app.logger.info(
+                "[game2][continuous] ペア補充実行: コート%s とコート%s をまとめて組み直します",
+                pair[0][0], pair[1][0],
+            )
+            for court_num, _freed_at in pair:
+                if not _clear_held_for_pairing(meta_table, court_num):
+                    current_app.logger.info(
+                        "[game2][continuous] court=%s 既に他の処理が担当済みのためスキップ", court_num,
+                    )
+                    continue
+                try:
+                    _select_and_start_court(court_num, clear_awaiting_refill=False)
+                except Exception as e:
+                    current_app.logger.error(
+                        "[game2][continuous] court=%s ペア補充処理でエラー: %s", court_num, e, exc_info=True
+                    )
+            return
+
+    # 安全弁: ペア相手が来ないまま長時間待たされているコートは単独ででも補充する
+    for court_num, freed_at in held_list:
+        if (now - freed_at).total_seconds() >= PAIR_HOLD_MAX_WAIT_SECONDS:
+            if not _clear_held_for_pairing(meta_table, court_num):
+                continue
+            current_app.logger.info(
+                "[game2][continuous] court=%s ペア相手が来ないため単独補充します", court_num,
+            )
+            try:
+                _select_and_start_court(court_num, clear_awaiting_refill=False)
+            except Exception as e:
+                current_app.logger.error(
+                    "[game2][continuous] court=%s 単独補充処理でエラー: %s", court_num, e, exc_info=True
                 )
 
 
@@ -1309,6 +1445,10 @@ def submit_score(match_id, court_number):
             _process_awaiting_refills()
         except Exception as e:
             current_app.logger.error("[game2] _process_awaiting_refills エラー: %s", e, exc_info=True)
+        try:
+            _process_held_pairs()
+        except Exception as e:
+            current_app.logger.error("[game2] _process_held_pairs エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
@@ -1488,7 +1628,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
