@@ -179,6 +179,24 @@
     {% if is_admin %}
     <div class="card mb-3">
         <div class="card-body text-center">
+            {% if matching_paused %}
+            <p class="text-muted small mb-2">マッチングは終了しています（進行中の試合のスコアを送信しても再マッチングされません）</p>
+            <form method="POST" action="{{ url_for('game2.resume_matching') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-primary">マッチングを再開する</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('game2.stop_matching') }}"
+                  onsubmit="return confirm('新しいマッチングを止めます。進行中の試合のスコアを送信すると、それ以降そのコートは再マッチングされません。よろしいですか？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-secondary">マッチング終了</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body text-center">
             <form method="POST" action="{{ url_for('game2.reset_participants') }}"
                   onsubmit="return confirm('テストコートの参加者全員を削除して練習を終了します。よろしいですか？');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

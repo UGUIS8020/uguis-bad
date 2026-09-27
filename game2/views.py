@@ -200,6 +200,7 @@ def court():
         my_entry=my_entry,
         is_admin=is_admin,
         awaiting_refill=awaiting_display,
+        matching_paused=bool(meta_current.get("matching_paused")),
     )
 
 
@@ -992,6 +993,13 @@ def _select_and_start_court(court_number):
     meta_table = _meta_table()
     now_jst = datetime.now(JST).isoformat()
 
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if meta_current.get("matching_paused"):
+        current_app.logger.info(
+            "[game2][continuous] court=%s マッチング停止中のため補充をスキップ", court_number
+        )
+        return
+
     mode, refill_count = _next_refill_mode(meta_table)
 
     # ★安全弁: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けている人が
@@ -1313,6 +1321,49 @@ def finish_current_match():
     return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/stop_matching", methods=["POST"])
+@login_required
+def stop_matching():
+    """
+    マッチング終了ボタン: 新規の自動補充を止める。進行中の試合はそのまま
+    続行できるが、スコアが送信されたコートはそれ以降、空いたままになる
+    （_select_and_start_courtがmatching_pausedを見て補充をスキップする）。
+    全コートの試合が終わった後、「練習終了」ボタンが押せるようにするための
+    前段ボタン。
+    """
+    if not current_user.administrator:
+        flash("管理者のみ実行できます。", "danger")
+        return redirect(url_for("game2.court"))
+
+    meta_table = _meta_table()
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET matching_paused = :true",
+        ExpressionAttributeValues={":true": True},
+    )
+    current_app.logger.info("[game2][stop_matching] by=%s", current_user.get_id())
+    flash("マッチングを終了しました。進行中の試合のスコアを送信すると、それ以降そのコートは再マッチングされません。", "info")
+    return redirect(url_for("game2.court"))
+
+
+@bp_game2.route("/resume_matching", methods=["POST"])
+@login_required
+def resume_matching():
+    """stop_matchingで止めた自動補充を再開する"""
+    if not current_user.administrator:
+        flash("管理者のみ実行できます。", "danger")
+        return redirect(url_for("game2.court"))
+
+    meta_table = _meta_table()
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="REMOVE matching_paused",
+    )
+    current_app.logger.info("[game2][resume_matching] by=%s", current_user.get_id())
+    flash("マッチングを再開しました。", "info")
+    return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/reset_participants", methods=["POST"])
 @login_required
 def reset_participants():
@@ -1346,7 +1397,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
