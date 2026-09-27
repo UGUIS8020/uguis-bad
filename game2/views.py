@@ -645,6 +645,16 @@ def _refill_candidate_pool(entry_table, pool_size=20):
     return _sort_and_limit_pool(pending, pool_size)
 
 
+def _all_pending_unordered(entry_table):
+    """
+    待機中の人を、休憩ローテーション上の順序を一切考慮せず全員返す。
+    AIペアリングモード(force_top_n=0で実力バランス+履歴だけで選ぶ)用。
+    休みの調整は調整モード(安全弁)だけに任せるため、候補選定の時点でも
+    待機順による絞り込みをしない。
+    """
+    return entry_table.scan(FilterExpression=Attr("entry_status").eq("pending"), ConsistentRead=True).get("Items", [])
+
+
 RECENT_HISTORY_RESULTS = 50  # 直近何件の試合結果を「最近」とみなすか
 PARTNER_REPEAT_WEIGHT = 1
 OPPONENT_REPEAT_WEIGHT = 2  # 対戦相手の重複の方が体感の偏りが大きいため重めに
@@ -857,7 +867,6 @@ def _skill_priority_four(candidates):
     return team_a, team_b, best_key[1]
 
 
-AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
 # 9ステップのサイクル:
@@ -1052,8 +1061,9 @@ def _select_and_start_court(court_number):
         )
     else:
         if mode == "ai_pairing":
-            # 待機上位(長く待っている人)だけに候補を絞ってから、その中でバランス+履歴を見る
-            candidates = _refill_candidate_pool(entry_table, pool_size=AI_PAIRING_POOL_SIZE)
+            # ★休みの調整は行わない: 待機順で候補を絞らず、待機中全員を対象に
+            #   実力バランス+履歴だけで選ぶ
+            candidates = _all_pending_unordered(entry_table)
         elif mode == "balance_only":
             # 実力優先: 休憩ローテーションは無視し、スキルスコア上位から選ぶ
             candidates = _skill_sorted_pending(entry_table)
@@ -1070,7 +1080,8 @@ def _select_and_start_court(court_number):
         if mode == "fairness_first":
             team_a_entries, team_b_entries, diff = _fairness_first_four(candidates)
         elif mode == "full_random":
-            team_a_entries, team_b_entries, diff = _full_random_four(candidates)
+            # ★休みの調整は行わない: 4人全員を完全ランダムに選ぶ
+            team_a_entries, team_b_entries, diff = _full_random_four(candidates, force_top_n=0)
         elif mode == "ai_pairing":
             # ★force_top_n=0: AIペアリングモード自体が持っていた「待機上位1名を
             #   必ず含める」というミニ救済機能をやめ、純粋に実力バランス＋履歴
