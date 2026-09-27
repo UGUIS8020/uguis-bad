@@ -860,16 +860,15 @@ def _skill_priority_four(candidates):
 AI_PAIRING_POOL_SIZE = 6  # AIペアリングモードで「待機上位」とみなす人数
 WAIT_RESCUE_THRESHOLD = 3  # 何回の補充機会を待たされたら安全弁で強制的に含めるか
 
-# 12ステップのサイクル:
+# 9ステップのサイクル:
 #   完全ランダム(調整はする)×3 → AIペアリング×3
-#   → スキルモード(スキル上位優先、休憩順・履歴は無視)×3 → AIペアリング×3 → 繰り返し
+#   → スキルモード(スキル上位優先、休憩順・履歴は無視)×3 → 繰り返し
 # 「AI救済ペアリング」は、安全弁(WAIT_RESCUE_THRESHOLD)と役割が重複しており
 # 効果も限定的だったため廃止した。
 REFILL_MODE_CYCLE = [
     "full_random", "full_random", "full_random",
     "ai_pairing", "ai_pairing", "ai_pairing",
     "balance_only", "balance_only", "balance_only",
-    "ai_pairing", "ai_pairing", "ai_pairing",
 ]
 
 
