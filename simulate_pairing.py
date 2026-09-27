@@ -29,7 +29,9 @@ from game2.views import (
     RECENT_HISTORY_RESULTS,
     WAIT_RESCUE_THRESHOLD,
     QUEUE_FORCE_COUNT,
-    REFILL_MODE_CYCLE as PRODUCTION_CYCLE,
+    INITIAL_FULL_RANDOM_COUNT,
+    SKILL_BURST_INTERVAL_MINUTES,
+    SKILL_BURST_LENGTH,
 )
 
 NUM_PLAYERS = 18
@@ -112,8 +114,19 @@ def pop_next_from_queue_local(queue_state, pending, count=1):
     return [by_id[uid] for uid in picked_uids if uid in by_id]
 
 
-def simulate(cycle, n_matches, seed=None,
-             num_players=NUM_PLAYERS, num_courts=NUM_COURTS, trace=False):
+def simulate(n_matches, seed=None,
+             num_players=NUM_PLAYERS, num_courts=NUM_COURTS,
+             minutes_per_match=10.0,
+             initial_full_random=INITIAL_FULL_RANDOM_COUNT,
+             skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
+             skill_burst_length=SKILL_BURST_LENGTH,
+             trace=False):
+    """
+    本番の_next_refill_mode()と同じ「時間ベースのモード選定」をシミュレートする。
+    実際の壁時計時間の代わりに、1試合あたりminutes_per_match分かかると仮定して
+    経過時間を積算する(コートはnum_courts面並行で進むので、1回の補充ごとに
+    minutes_per_match/num_courts分だけ経過したとみなす)。
+    """
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
     by_uid = {p["user_id"]: p for p in players}
@@ -129,6 +142,9 @@ def simulate(cycle, n_matches, seed=None,
     match_log = []  # 全試合: (court_num, team_a, team_b, diff)
     refill_count = 0
     queue_state = {"queue": [], "last_picked": []}  # 本番のDynamoDB永続キューに相当
+    elapsed_minutes = 0.0
+    last_skill_burst_at = None
+    skill_burst_remaining = 0
 
     for _ in range(n_matches):
         # 実際の練習ではどのコートが次に終わるかはランダム(機械的な順番ではない)
@@ -153,7 +169,23 @@ def simulate(cycle, n_matches, seed=None,
         recent_results.append((finished["team_a"], finished["team_b"]))
 
         refill_count += 1
-        mode = cycle[(refill_count - 1) % len(cycle)]
+        elapsed_minutes += minutes_per_match / num_courts
+
+        # ★本番_next_refill_mode()と同じ時間ベースのモード選定
+        if refill_count <= initial_full_random:
+            mode = "full_random"
+        elif skill_burst_remaining > 0:
+            mode = "balance_only"
+            skill_burst_remaining -= 1
+        elif last_skill_burst_at is None:
+            last_skill_burst_at = elapsed_minutes
+            mode = "ai_pairing"
+        elif elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes:
+            mode = "balance_only"
+            skill_burst_remaining = skill_burst_length - 1
+            last_skill_burst_at = elapsed_minutes
+        else:
+            mode = "ai_pairing"
 
         # ★救済モード: WAIT_RESCUE_THRESHOLD回以上待った人がいれば、モードに
         #   関わらず強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
@@ -260,20 +292,12 @@ def evaluate(match_log, label, by_uid=None):
     }
 
 
-CANDIDATE_CYCLES = {
-    "現行本番(ランダム3/AI6/スキル3)": PRODUCTION_CYCLE,
-    "8step(無視3/AI1/重視3/AI1)": (
-        ["fairness_first"] * 3 + ["ai_pairing"] + ["balance_only"] * 3 + ["ai_pairing"]
-    ),
-    "均等(無視/AI/重視 各1)×多め": (
-        ["fairness_first", "ai_pairing", "balance_only"] * 1
-    ),
-    "無視多め(無視5/AI3/重視2)": (
-        ["fairness_first"] * 5 + ["ai_pairing"] * 3 + ["balance_only"] * 2
-    ),
-    "AI中心(AI6/無視2/重視2)": (
-        ["ai_pairing"] * 6 + ["fairness_first"] * 2 + ["balance_only"] * 2
-    ),
+# --compareで比較する、スキルモードを差し込む間隔(分)の候補
+CANDIDATE_BURST_INTERVALS = {
+    "30分ごと": 30,
+    "現行本番(60分ごと)": SKILL_BURST_INTERVAL_MINUTES,
+    "90分ごと": 90,
+    "差し込みなし(999分=実質無し)": 999,
 }
 
 
@@ -286,19 +310,19 @@ def main():
 
     if args.compare:
         results = {}
-        for label, cycle in CANDIDATE_CYCLES.items():
-            log, by_uid = simulate(cycle, args.matches, seed=args.seed)
+        for label, interval in CANDIDATE_BURST_INTERVALS.items():
+            log, by_uid = simulate(args.matches, seed=args.seed, skill_burst_interval_minutes=interval)
             results[label] = evaluate(log, label, by_uid)
 
         print("\n" + "=" * 70)
         print("=== まとめ ===")
-        print(f"{'サイクル':30s} {'待ち平均':>8s} {'待ち最大':>8s} {'差平均':>8s} {'差最大':>8s} {'重複計':>6s}")
+        print(f"{'スキル差し込み間隔':30s} {'待ち平均':>8s} {'待ち最大':>8s} {'差平均':>8s} {'差最大':>8s} {'重複計':>6s}")
         for label, m in results.items():
             total_repeat = m["repeat_partner"] + m["repeat_opp"]
             print(f"{label:30s} {m['wait_avg']:8.2f} {m['wait_max']:8d} {m['diff_avg']:8.2f} {m['diff_max']:8.2f} {total_repeat:6d}")
     else:
-        log, by_uid = simulate(PRODUCTION_CYCLE, args.matches, seed=args.seed)
-        evaluate(log, "現行本番サイクル", by_uid)
+        log, by_uid = simulate(args.matches, seed=args.seed)
+        evaluate(log, "現行本番設定", by_uid)
 
 
 if __name__ == "__main__":

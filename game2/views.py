@@ -955,28 +955,30 @@ def _skill_priority_four(candidates, partner_counter=None):
 WAIT_RESCUE_THRESHOLD = 4  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
 QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
-# 9ステップのサイクル:
-#   完全ランダム(調整はする)×3 → AIペアリング×3
-#   → スキルモード(スキル上位優先、休憩順・履歴は無視)×3 → 繰り返し
+# モード選定ルール(ステップ数の固定サイクルではなく、時間ベース):
+#   1. 練習開始直後、INITIAL_FULL_RANDOM_COUNT回は完全ランダム
+#   2. それ以降は基本的にAIペアリング
+#   3. ただし、前回スキルモードを差し込んでからSKILL_BURST_INTERVAL_MINUTES分
+#      以上経過していたら、スキルモードをSKILL_BURST_LENGTH回連続で差し込む
+#      (差し込み後はまたAIペアリングに戻る)
 # 休みの調整は二重構成:
 #   1. 完全ランダム/AIペアリングは、_pop_next_from_play_queue()による永続
-#      キューの先頭1人を毎回必ず含める(旧システムと同じ「休む人を先に決める」
-#      発想。通常時の穏やかな公平性)
+#      キューの先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ
+#      「休む人を先に決める」発想。通常時の穏やかな公平性)
 #   2. さらにモードを問わず、WAIT_RESCUE_THRESHOLD回以上補充を逃し続けている
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
 #      長時間待ちを防ぐ保険)
-REFILL_MODE_CYCLE = [
-    "full_random", "full_random", "full_random",
-    "ai_pairing", "ai_pairing", "ai_pairing",
-    "balance_only", "balance_only", "balance_only",
-]
+INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、完全ランダムを連続させる回数
+SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモードを差し込むか
+SKILL_BURST_LENGTH = 3  # 差し込むスキルモードの連続回数
 
 
 def _next_refill_mode(meta_table):
     """
-    補充のたびに meta#continuous_pairing の refill_count を加算し、
-    REFILL_MODE_CYCLE に従って次のモードを決める。
+    補充のたびに meta#continuous_pairing の refill_count を加算し、次のモードを決める。
     """
+    now_jst = datetime.now(JST)
+
     resp = meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
         UpdateExpression="ADD refill_count :one",
@@ -984,8 +986,50 @@ def _next_refill_mode(meta_table):
         ReturnValues="UPDATED_NEW",
     )
     refill_count = int(resp["Attributes"]["refill_count"])
-    mode = REFILL_MODE_CYCLE[(refill_count - 1) % len(REFILL_MODE_CYCLE)]
-    return mode, refill_count
+
+    if refill_count <= INITIAL_FULL_RANDOM_COUNT:
+        return "full_random", refill_count
+
+    pairing_meta = meta_table.get_item(
+        Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
+    ).get("Item", {}) or {}
+    skill_burst_remaining = int(pairing_meta.get("skill_burst_remaining", 0) or 0)
+
+    if skill_burst_remaining > 0:
+        meta_table.update_item(
+            Key={"match_id": META_PAIRING_PK},
+            UpdateExpression="SET skill_burst_remaining = :n",
+            ExpressionAttributeValues={":n": skill_burst_remaining - 1},
+        )
+        return "balance_only", refill_count
+
+    last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
+    should_burst = False
+    if not last_burst_at_iso:
+        # ★初回基準点がまだ無ければ、ここで基準点だけ設定する(この回はAI
+        #   ペアリングのまま。基準点設定から1時間後に初めて差し込まれる)
+        meta_table.update_item(
+            Key={"match_id": META_PAIRING_PK},
+            UpdateExpression="SET last_skill_burst_at = :now",
+            ExpressionAttributeValues={":now": now_jst.isoformat()},
+        )
+    else:
+        try:
+            last_burst_at = datetime.fromisoformat(last_burst_at_iso)
+            elapsed_minutes = (now_jst - last_burst_at).total_seconds() / 60
+            should_burst = elapsed_minutes >= SKILL_BURST_INTERVAL_MINUTES
+        except Exception:
+            should_burst = False
+
+    if should_burst:
+        meta_table.update_item(
+            Key={"match_id": META_PAIRING_PK},
+            UpdateExpression="SET last_skill_burst_at = :now, skill_burst_remaining = :n",
+            ExpressionAttributeValues={":now": now_jst.isoformat(), ":n": SKILL_BURST_LENGTH - 1},
+        )
+        return "balance_only", refill_count
+
+    return "ai_pairing", refill_count
 
 
 COURT_REFILL_DELAY_SECONDS = 20  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
@@ -1678,7 +1722,10 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_PAIRING_PK},
-            UpdateExpression="SET cycle_index = :zero, refill_count = :zero REMOVE last_mode, last_match_id",
+            UpdateExpression=(
+                "SET cycle_index = :zero, refill_count = :zero "
+                "REMOVE last_mode, last_match_id, last_skill_burst_at, skill_burst_remaining"
+            ),
             ExpressionAttributeValues={":zero": 0},
         )
 
