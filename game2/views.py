@@ -747,15 +747,30 @@ def _fairness_first_four(candidates):
     return team_a, team_b, best_diff
 
 
-def _full_random_four(candidates):
+def _full_random_four(candidates, force_top_n=1):
     """
-    待機順・実力に関係なく、待機中の中から完全ランダムに4人選ぶ。
-    ただし選ばれた4人をどう2チームに分けるかだけは、_fairness_first_four と
-    同様に実力差が最小になる組み合わせを選ぶ（「調整はする」）。
+    完全ランダムモード。ただし待機順(candidatesの先頭)最上位force_top_n人は
+    必ず含める。旧システム(game/views.py)の「誰が休むかは先にキューだけで
+    決め、スキルバランスはその後」という考え方に合わせ、「誰が出るか」を
+    モードの抽選に完全に委ねきってしまわないようにするための最低保証。
+    残りの枠は実力・待機順に関係なく完全ランダムに選ぶ。
+    チーム分けは_fairness_first_fourと同様に実力差が最小になる組み合わせを
+    選ぶ（「調整はする」）。
     """
     import random as _random
 
-    four = _random.sample(candidates, 4) if len(candidates) > 4 else list(candidates)[:4]
+    must_include = list(candidates[:force_top_n])
+    rest_pool = list(candidates[force_top_n:])
+    remaining_needed = 4 - len(must_include)
+
+    if len(rest_pool) >= remaining_needed:
+        chosen_rest = _random.sample(rest_pool, remaining_needed)
+    else:
+        chosen_rest = rest_pool
+
+    four = must_include + chosen_rest
+    if len(four) < 4:
+        four = candidates[:4]
     return _fairness_first_four(four)
 
 
