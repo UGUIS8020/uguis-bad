@@ -96,8 +96,20 @@
             <p class="text-muted mt-2 mb-1">待機中: {{ pending|length }}人 / 休憩中: {{ resting|length }}人</p>
             {% if pending %}
             <p class="mb-0">
-                {% for p in pending %}<span class="badge bg-secondary me-1">{{ p.display_name }}</span>{% endfor %}
+                {% for p in pending %}
+                    {% if is_admin %}
+                    <form method="POST" action="{{ url_for('game2.admin_rest_entry', entry_id=p.entry_id) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="badge bg-secondary me-1 border-0">{{ p.display_name }}</button>
+                    </form>
+                    {% else %}
+                    <span class="badge bg-secondary me-1">{{ p.display_name }}</span>
+                    {% endif %}
+                {% endfor %}
             </p>
+            {% if is_admin %}
+            <p class="text-muted small mb-0 mt-1">（管理者: 待機中の名前をタップすると休憩に切り替えられます）</p>
+            {% endif %}
             {% endif %}
             {% if resting %}
             <p class="mb-0 mt-1">
