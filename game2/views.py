@@ -890,23 +890,33 @@ SKILL_PRIORITY_SPREAD_THRESHOLD = 20  # 選ばれた4人の実力差(最大-最�
 def _skill_priority_four(candidates, partner_counter=None):
     """
     実力優先モード: 休憩ローテーションは無視し、待機中のスキルスコアが
-    最も高い4人をそのまま選ぶ。
+    最も高い人たちを中心に選ぶ。
+
+    まず、待機中で最もスキルが高い人を基準に、そこから
+    SKILL_PRIORITY_SPREAD_THRESHOLD以内の人だけに候補を絞ってから上位4人を
+    選ぶ。これにより「極端にスキルが低い人」が候補に混ざらないようにする
+    （例えば1人だけ飛び抜けて強い人がいる場合、その人がいつも同じ「2番目に
+    強い人」とばかりパートナーになり続けてしまう問題を避けるため。実力が
+    近い候補が4人に満たない場合は、従来通り単純に上位4人を使う）。
 
     チーム分けはハイブリッド方式:
     - 選ばれた4人の実力差(最大-最小)がSKILL_PRIORITY_SPREAD_THRESHOLD以下
       （皆ほぼ同レベル）の場合は、定番の「1位+4位 vs 2位+3位」（チーム間
       合計差が最小になる組み方）でペアリングする。実力差がほぼ同点の
       複数パターンがある場合は、直近のパートナー履歴が少ない方を優先する。
-    - それを超える場合（上級者に混じって初級者が1人だけ選ばれてしまった、
-      などの外れ値があるケース）は、単純にチーム間合計差だけを最小化すると
-      上級者+初級者 vs 中級者+中級者 のような組み合わせが選ばれてしまうため、
-      まず「チーム内の実力差が大きい方」を最小化し、それが同じ場合に限り
-      チーム間の合計差、さらに同じ場合はパートナー履歴で決める。
+    - それを超える場合（候補を絞ってもなお実力差が大きい、など）は、
+      単純にチーム間合計差だけを最小化すると上級者+初級者 vs 中級者+中級者
+      のような組み合わせが選ばれてしまうため、まず「チーム内の実力差が
+      大きい方」を最小化し、それが同じ場合に限りチーム間の合計差、
+      さらに同じ場合はパートナー履歴で決める。
     """
     def conservative(e):
         return float(e.get("skill_score", 50.0)) - 3 * float(e.get("skill_sigma", 8.333))
 
-    four = sorted(candidates, key=conservative, reverse=True)[:4]
+    sorted_all = sorted(candidates, key=conservative, reverse=True)
+    top_skill = conservative(sorted_all[0])
+    close_pool = [e for e in sorted_all if top_skill - conservative(e) <= SKILL_PRIORITY_SPREAD_THRESHOLD]
+    four = close_pool[:4] if len(close_pool) >= 4 else sorted_all[:4]
     scores = [conservative(e) for e in four]
     spread = max(scores) - min(scores)
     pairing_patterns = [((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))]
