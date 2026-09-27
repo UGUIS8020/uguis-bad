@@ -60,7 +60,8 @@ PAIRING_MODE_LABELS = {
     "ai_pairing": "AIペアリング",
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
-    "safety_valve": "調整モード",
+    "safety_valve": "AIペアリング",  # 内部的には調整モード(待ちすぎの人を強制救済)だが、
+                                    # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
 }
 
 
