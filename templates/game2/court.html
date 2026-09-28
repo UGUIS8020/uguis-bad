@@ -233,18 +233,25 @@
 </div>
 
 <script>
-    // 10秒ごとに再読み込みするが、スコア入力欄を操作中(フォーカス中や
-    // 値を入力済み)は邪魔しないよう見送り、少し後に再チェックする。
+    // 10秒ごとに再読み込みするが、スコア入力欄を操作中(フォーカス中、または
+    // 直近に入力した直後)は邪魔しないよう見送り、少し後に再チェックする。
+    // ※以前はデフォルト値(21)と違う値が入っているだけで無期限にリロードを
+    //   止めてしまい、フォーカスが外れた後もページが固まって見える不具合が
+    //   あったため、「直近SCORE_EDIT_GRACE_MS以内に入力があったか」で判定する。
+    const SCORE_EDIT_GRACE_MS = 15000;
+    let lastScoreInputAt = 0;
+    document.addEventListener('input', (e) => {
+        if (e.target && e.target.matches('input[name="team1_score"], input[name="team2_score"]')) {
+            lastScoreInputAt = Date.now();
+        }
+    });
+
     function isUserEnteringScore() {
         const active = document.activeElement;
         if (active && active.matches('input[name="team1_score"], input[name="team2_score"]')) {
             return true;
         }
-        const scoreInputs = document.querySelectorAll('input[name="team1_score"], input[name="team2_score"]');
-        for (const el of scoreInputs) {
-            if (el.value && el.value !== '21') return true;
-        }
-        return false;
+        return (Date.now() - lastScoreInputAt) < SCORE_EDIT_GRACE_MS;
     }
 
     function scheduleReload() {

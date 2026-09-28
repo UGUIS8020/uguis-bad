@@ -64,8 +64,9 @@ PAIRING_MODE_LABELS = {
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
                                     # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
-    "participation_priority": "AIペアリング",  # 内部的にはスキルモード直後の参加回数優先割り込みだが、
-                                              # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
+    "participation_priority": "AIペアリング調整",  # スキルモード直後の参加回数優先割り込み。
+                                                # ロジックはAIペアリングと同じ(_best_balanced_four)だが、
+                                                # 区別できるよう表示だけ分けている
 }
 
 
