@@ -64,6 +64,8 @@ PAIRING_MODE_LABELS = {
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
                                     # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
+    "participation_priority": "AIペアリング",  # 内部的にはスキルモード直後の参加回数優先割り込みだが、
+                                              # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
 }
 
 
@@ -149,6 +151,10 @@ def court():
         _process_skill_burst()
     except Exception as e:
         current_app.logger.error("[game2] _process_skill_burst エラー: %s", e, exc_info=True)
+    try:
+        _process_participation_priority()
+    except Exception as e:
+        current_app.logger.error("[game2] _process_participation_priority エラー: %s", e, exc_info=True)
 
     entry_table = _entry_table()
     meta_table = _meta_table()
@@ -590,7 +596,8 @@ def create_pairings():
             "Key": {"match_id": {"S": META_CURRENT_PK}},
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode "
-                "REMOVE matching_paused, awaiting_refill, held_for_pairing, awaiting_skill_burst"
+                "REMOVE matching_paused, awaiting_refill, held_for_pairing, awaiting_skill_burst, "
+                "post_skill_courts, held_for_participation"
             ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
@@ -1136,6 +1143,37 @@ def _try_refill_court(old_match_id, court_number):
     meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     court_count = int(meta_current_now.get("court_count", 0) or 0)
 
+    # ★スキルモード一斉入れ替え直後の「参加回数優先」割り込み: このコートが
+    #   直前のスキルバーストで作られた3コートのひとつなら(post_skill_courts)、
+    #   2コート集まるまで(または残りが1つになったら単独で)保留してから
+    #   まとめて参加回数優先で補充する(_process_participation_priority)。
+    #   3コートすべてが空くのを待つより早く、かつ通常のAIペアリングに
+    #   即座に戻すより参加回数の偏りに対抗できる。
+    post_skill_courts = set(int(c) for c in (meta_current_now.get("post_skill_courts") or []))
+    if court_number in post_skill_courts:
+        post_skill_courts.discard(court_number)
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET post_skill_courts = :remaining",
+            ExpressionAttributeValues={":remaining": list(post_skill_courts)},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET held_for_participation = if_not_exists(held_for_participation, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET held_for_participation.#c = :now",
+            ExpressionAttributeNames={"#c": str(court_number)},
+            ExpressionAttributeValues={":now": now_jst},
+        )
+        current_app.logger.info(
+            "[game2][continuous] court=%s 参加回数優先バッチ待ちに登録(残りスキルコート=%s)",
+            court_number, sorted(post_skill_courts),
+        )
+        return
+
     # ★スキルモード一斉入れ替え: 前回のスキルモード一斉入れ替えから
     #   SKILL_BURST_INTERVAL_MINUTES分以上経過している場合、このコートは
     #   単独では補充せず、全コートが空くまで待つ(awaiting_skill_burstに登録)。
@@ -1510,6 +1548,163 @@ def _process_held_pairs():
                 )
 
 
+def _clear_held_for_participation(meta_table, court_number):
+    """
+    held_for_participationから指定コートを取り除く。取り除けたらTrue、既に
+    他の処理で取り除かれていた(競合)場合はFalseを返す(_clear_held_for_pairing
+    と同じ考え方)。
+    """
+    try:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="REMOVE held_for_participation.#c",
+            ConditionExpression="attribute_exists(held_for_participation.#c)",
+            ExpressionAttributeNames={"#c": str(court_number)},
+        )
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _select_participation_priority_court(court_number):
+    """
+    参加回数(match_count)が最も少ない4人を強制的に選び、実力バランス
+    (パートナー/対戦相手履歴のタイブレーク込み)で2v2に分けて指定コートに
+    割り当てる。スキルモード一斉入れ替え直後の「参加回数優先」割り込み専用。
+    """
+    entry_table = _entry_table()
+    results_table = _results_table()
+    meta_table = _meta_table()
+    now_jst = datetime.now(JST).isoformat()
+
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if meta_current.get("matching_paused"):
+        current_app.logger.info(
+            "[game2][continuous] court=%s マッチング停止中のため参加回数優先補充をスキップ", court_number
+        )
+        return
+
+    candidates = sorted(
+        _all_pending_unordered(entry_table),
+        key=lambda e: int(e.get("match_count", 0) or 0),
+    )
+    if len(candidates) < 4:
+        current_app.logger.info(
+            "[game2][continuous] court=%s 参加回数優先補充: 候補が足りないため見送り(候補%d人)",
+            court_number, len(candidates),
+        )
+        return
+
+    four = candidates[:4]
+    partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
+    team_a_entries, team_b_entries, diff = _best_balanced_four(
+        four, partner_counter, opponent_counter, force_top_n=4
+    )
+
+    new_match_id = generate_match_id2()
+    import boto3
+    dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
+    tx_items = []
+    for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
+                      (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
+        tx_items.append({
+            "Update": {
+                "TableName": "bad-game2-match_entries",
+                "Key": {"entry_id": {"S": pl["entry_id"]}},
+                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
+                "ConditionExpression": "entry_status = :pending",
+                "ExpressionAttributeValues": {
+                    ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
+                    ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
+                    ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": "participation_priority"},
+                },
+            }
+        })
+
+    try:
+        dynamodb_client.transact_write_items(TransactItems=tx_items)
+        current_app.logger.info(
+            "[game2][continuous] court=%s 参加回数優先補充: new_match_id=%s balance_diff=%.2f members=%s",
+            court_number, new_match_id, diff, [e.get("display_name") for e in team_a_entries + team_b_entries],
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
+            current_app.logger.warning(
+                "[game2][continuous] court=%s 参加回数優先補充tx競合のため見送り(次のチェックで再試行される)",
+                court_number,
+            )
+        else:
+            raise
+
+
+def _process_participation_priority():
+    """
+    スキルモード一斉入れ替え直後の「参加回数優先」割り込み(held_for_participation)
+    を処理する。スキルバーストで作られた3コートのうち、先に2コート分揃い、
+    かつ後から空いた方のコートからCOURT_REFILL_DELAY_SECONDS以上経過して
+    いれば、その2コートをまとめて処理する(_process_held_pairsと同じ考え方。
+    1回目の呼び出しでそのコートの分だけ待機プールから抜けるので、2回目の
+    呼び出し時には自然に混ざり合う)。残り1コート(post_skill_countsが空に
+    なった時点)は、同様の猶予後に単独で処理する。
+    """
+    meta_table = _meta_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    held = meta_current.get("held_for_participation") or {}
+    if not held:
+        return
+
+    post_skill_courts = meta_current.get("post_skill_courts") or []
+
+    now = datetime.now(JST)
+    held_list = []
+    for court_str, freed_at_iso in held.items():
+        try:
+            freed_at = datetime.fromisoformat(freed_at_iso)
+        except Exception:
+            continue
+        held_list.append((int(court_str), freed_at))
+    held_list.sort(key=lambda x: x[1])  # 古い順
+
+    if len(held_list) >= 2:
+        pair = held_list[:2]
+        newest_freed_at = pair[-1][1]
+        if (now - newest_freed_at).total_seconds() >= COURT_REFILL_DELAY_SECONDS:
+            current_app.logger.info(
+                "[game2][continuous] 参加回数優先バッチ実行: コート%s とコート%s をまとめて組み直します",
+                pair[0][0], pair[1][0],
+            )
+            for court_num, _freed_at in pair:
+                if not _clear_held_for_participation(meta_table, court_num):
+                    current_app.logger.info(
+                        "[game2][continuous] court=%s 既に他の処理が担当済みのためスキップ", court_num,
+                    )
+                    continue
+                try:
+                    _select_participation_priority_court(court_num)
+                except Exception as e:
+                    current_app.logger.error(
+                        "[game2][continuous] court=%s 参加回数優先補充でエラー: %s", court_num, e, exc_info=True
+                    )
+            return
+
+    if len(held_list) == 1 and not post_skill_courts:
+        court_num, freed_at = held_list[0]
+        if (now - freed_at).total_seconds() >= COURT_REFILL_DELAY_SECONDS:
+            if not _clear_held_for_participation(meta_table, court_num):
+                return
+            current_app.logger.info(
+                "[game2][continuous] court=%s 参加回数優先補充(単独、3コート目)を実行", court_num,
+            )
+            try:
+                _select_participation_priority_court(court_num)
+            except Exception as e:
+                current_app.logger.error(
+                    "[game2][continuous] court=%s 参加回数優先補充でエラー: %s", court_num, e, exc_info=True
+                )
+
+
 SKILL_BURST_MAX_WAIT_SECONDS = 300  # スキルモード一斉入れ替えで、揃わないコートを何秒まで待つか(安全弁)
 
 
@@ -1640,6 +1835,15 @@ def _execute_skill_burst(court_numbers):
     leftover_courts = court_numbers[usable_groups:]
     if leftover_courts:
         _return_courts_to_awaiting_refill(meta_table, leftover_courts, now_jst)
+
+    # ★実際にスキル階層で組めたコートは、次にそのコートが空いたら「参加回数
+    #   優先」の割り込み対象にする(_try_refill_court参照)
+    assigned_court_numbers = court_numbers[:usable_groups]
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET post_skill_courts = :courts",
+        ExpressionAttributeValues={":courts": assigned_court_numbers},
+    )
 
     _mark_skill_burst_consumed(meta_table, now_jst)
 
@@ -1786,6 +1990,10 @@ def submit_score(match_id, court_number):
             _process_skill_burst()
         except Exception as e:
             current_app.logger.error("[game2] _process_skill_burst エラー: %s", e, exc_info=True)
+        try:
+            _process_participation_priority()
+        except Exception as e:
+            current_app.logger.error("[game2] _process_participation_priority エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
@@ -1965,7 +2173,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, post_skill_courts, held_for_participation",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )

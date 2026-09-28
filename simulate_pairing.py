@@ -123,6 +123,7 @@ def simulate(n_matches, seed=None,
              continuous_balance_cycle=CONTINUOUS_BALANCE_CYCLE,
              enable_rescue=True,
              wait_rescue_threshold=WAIT_RESCUE_THRESHOLD,
+             enable_post_skill_participation_priority=True,
              trace=False):
     """
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
@@ -157,8 +158,17 @@ def simulate(n_matches, seed=None,
     last_skill_burst_at = 0.0
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
+    # ★スキルモード一斉入れ替え直後の「参加回数優先」割り込みモード:
+    #   スキルバーストで作られた3コートのうち、先に2つが終わるのを待って
+    #   参加回数優先でまとめて補充し、残り1つが終わったらそれも単独で
+    #   参加回数優先で補充する(合計3回)。3コートすべてが終わるのを待つ
+    #   より早く、通常のAIペアリングに戻すよりは参加回数の偏りに対抗できる
+    #   か検証する。
+    post_skill_courts = set()  # スキルバーストで作られ、まだこの特別処理の対象になっていないコート
+    held_for_participation = set()  # 参加回数優先バッチ待ちで、今は試合が無いコート
+
     for _ in range(n_matches):
-        playing_courts = [c for c in courts if c not in held_courts]
+        playing_courts = [c for c in courts if c not in held_courts and c not in held_for_participation]
         if not playing_courts:
             break
         # 実際の練習ではどのコートが次に終わるかはランダム(機械的な順番ではない)
@@ -185,6 +195,37 @@ def simulate(n_matches, seed=None,
         refill_count += 1
         elapsed_minutes += minutes_per_match / num_courts
         del courts[court_num]  # このコートは今、試合が無い状態
+
+        # ★スキルモード一斉入れ替え直後の「参加回数優先」割り込み: このコートが
+        #   スキルバーストで作られた3コートのひとつなら、対象から外し
+        #   (2回目以降の通常補充ではこの特別扱いをしない)、2コート集まるまで
+        #   保留してからまとめて参加回数優先で補充する。3つ目は単独で処理する。
+        if court_num in post_skill_courts:
+            post_skill_courts.discard(court_num)
+            held_for_participation.add(court_num)
+            if trace:
+                print(f"#{refill_count} court={court_num} 参加回数優先バッチ待ちに登録"
+                      f" (held={sorted(held_for_participation)}, 残りスキルコート={sorted(post_skill_courts)})")
+
+            should_process = len(held_for_participation) >= 2 or not post_skill_courts
+            if should_process:
+                held_list = sorted(held_for_participation)
+                partner_counter, opponent_counter = get_recent_history_local(recent_results)
+                for c in held_list:
+                    candidates = sorted(pending, key=lambda p: p["match_count"])
+                    if len(candidates) < 4:
+                        break
+                    lowest4 = candidates[:4]
+                    team_a, team_b, _diff = _best_balanced_four(
+                        lowest4, partner_counter, opponent_counter, force_top_n=4
+                    )
+                    chosen_uids = {p["user_id"] for p in team_a + team_b}
+                    pending = [p for p in pending if p["user_id"] not in chosen_uids]
+                    courts[c] = {"team_a": team_a, "team_b": team_b}
+                    held_for_participation.discard(c)
+                    if trace:
+                        print(f"    → court={c} 参加回数優先補充: {sorted(chosen_uids)}")
+            continue
 
         # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
         #   に関わらず合流。まだなら、前回の一斉入れ替えからskill_burst_
@@ -213,6 +254,8 @@ def simulate(n_matches, seed=None,
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
                 last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
+                if enable_post_skill_participation_priority:
+                    post_skill_courts |= set(held_list[:usable_groups])
             continue
 
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
