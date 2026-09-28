@@ -159,6 +159,10 @@ def court():
         _process_new_court_opportunity()
     except Exception as e:
         current_app.logger.error("[game2] _process_new_court_opportunity エラー: %s", e, exc_info=True)
+    try:
+        _reconcile_orphaned_courts()
+    except Exception as e:
+        current_app.logger.error("[game2] _reconcile_orphaned_courts エラー: %s", e, exc_info=True)
 
     entry_table = _entry_table()
     meta_table = _meta_table()
@@ -1495,8 +1499,18 @@ def _process_new_court_opportunity():
     if court_count >= max_courts:
         return
 
+    # ★開設済みだがまだ実際に人が割り当てられていないコート(awaiting_refill /
+    #   held_for_pairing)がある場合、その分の4人ずつは既に「予約済み」として
+    #   待機人数から差し引く。差し引かずに数えると、まだ補充されていない
+    #   コートの分の待機者を「新しいコートを開くのに十分な人数」として
+    #   二重にカウントしてしまい、実際には補充できない人数のまま次のコートを
+    #   開いてしまう(コートが永遠に空いたままになる不具合の原因だった)。
+    awaiting_refill = meta_current.get("awaiting_refill") or {}
+    held_for_pairing = meta_current.get("held_for_pairing") or {}
+    reserved = 4 * (len(awaiting_refill) + len(held_for_pairing))
+
     pending = _all_pending_unordered(entry_table)
-    if len(pending) < NEW_COURT_MIN_PENDING:
+    if len(pending) - reserved < NEW_COURT_MIN_PENDING:
         return
 
     new_court_number = court_count + 1
@@ -1529,6 +1543,65 @@ def _process_new_court_opportunity():
         "(上限%d、%d秒後に補充)",
         len(pending), new_court_number, max_courts, COURT_REFILL_DELAY_SECONDS,
     )
+
+
+def _reconcile_orphaned_courts():
+    """
+    court_countが実際のコート状況とズレて、誰も割り当てられておらず、
+    どの待ち行列(awaiting_refill/held_for_pairing/held_for_participation/
+    awaiting_skill_burst)にも登録されていない「迷子のコート」がないか
+    毎回チェックする。
+
+    本来、court_countを増やす処理(_process_new_court_opportunity)は
+    同時にそのコート番号をawaiting_refillへ必ず登録するので迷子は
+    起きないはずだが、_select_and_start_courtの補充トランザクションが
+    競合(TransactionCanceledException)した場合など、まれに
+    awaiting_refillから外れたのに実際の補充は成功していない、という
+    状態になりうる。一度そうなると、そのコートを補充するきっかけが
+    どこにも無くなり永遠に空いたまま放置されてしまう
+    (2026-09-29の実運用で実際に発生した不具合)。ここで毎回軽くチェックし、
+    見つかり次第awaiting_refillに登録し直して通常の補充経路に乗せる。
+    """
+    meta_table = _meta_table()
+    entry_table = _entry_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if meta_current.get("status") != "playing":
+        return
+
+    court_count = int(meta_current.get("court_count", 0) or 0)
+    if court_count <= 0:
+        return
+
+    tracked = set()
+    for key in ("awaiting_refill", "held_for_pairing", "held_for_participation", "awaiting_skill_burst"):
+        tracked |= set((meta_current.get(key) or {}).keys())
+
+    playing_courts = set()
+    for e in entry_table.scan(
+        FilterExpression=Attr("entry_status").eq("playing"), ConsistentRead=True
+    ).get("Items", []):
+        if e.get("court_number") is not None:
+            playing_courts.add(int(e["court_number"]))
+
+    now_jst = datetime.now(JST).isoformat()
+    for court_num in range(1, court_count + 1):
+        if court_num in playing_courts or str(court_num) in tracked:
+            continue
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET awaiting_refill.#c = :now",
+            ExpressionAttributeNames={"#c": str(court_num)},
+            ExpressionAttributeValues={":now": now_jst},
+        )
+        current_app.logger.warning(
+            "[game2][continuous] court=%s 迷子状態(誰も割り当てられず待ち行列にも未登録)を検知、補充待ちに再登録しました",
+            court_num,
+        )
 
 
 def _clear_held_for_pairing(meta_table, court_number):
@@ -2068,6 +2141,10 @@ def submit_score(match_id, court_number):
             _process_new_court_opportunity()
         except Exception as e:
             current_app.logger.error("[game2] _process_new_court_opportunity エラー: %s", e, exc_info=True)
+        try:
+            _reconcile_orphaned_courts()
+        except Exception as e:
+            current_app.logger.error("[game2] _reconcile_orphaned_courts エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
