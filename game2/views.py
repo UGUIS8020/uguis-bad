@@ -155,6 +155,10 @@ def court():
         _process_participation_priority()
     except Exception as e:
         current_app.logger.error("[game2] _process_participation_priority エラー: %s", e, exc_info=True)
+    try:
+        _process_new_court_opportunity()
+    except Exception as e:
+        current_app.logger.error("[game2] _process_new_court_opportunity エラー: %s", e, exc_info=True)
 
     entry_table = _entry_table()
     meta_table = _meta_table()
@@ -595,17 +599,18 @@ def create_pairings():
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
             "UpdateExpression": (
-                "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode "
+                "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc "
                 "REMOVE matching_paused, awaiting_refill, held_for_pairing, awaiting_skill_burst, "
                 "post_skill_courts, held_for_participation"
             ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
-                "#ua": "updated_at", "#pm": "pairing_mode",
+                "#ua": "updated_at", "#pm": "pairing_mode", "#mc": "max_courts",
             },
             "ExpressionAttributeValues": {
                 ":playing": {"S": "playing"}, ":mid": {"S": str(match_id)},
                 ":cc": {"N": str(len(matches))}, ":now": {"S": now_jst}, ":mode": {"S": mode},
+                ":maxc": {"N": str(max_courts)},
             },
         }
     }]
@@ -1461,6 +1466,71 @@ def _process_awaiting_refills():
                 )
 
 
+NEW_COURT_MIN_PENDING = 4  # 待機中がこの人数以上溜まったら新しいコートを開く
+
+
+def _process_new_court_opportunity():
+    """
+    練習中に参加者が増えた場合、組み合わせ作成時に指定したコート数上限
+    (max_courts)まで、新しいコートを自動的に開く。
+
+    継続補充方式では、court_countは組み合わせ作成時点の人数から決まる
+    固定値のまま変わらない設計だったため、後から参加者がゆっくり集まって
+    くる実際の運用(シミュレーションのように最初から全員揃っているのとは
+    違う)では、待機人数が1コート分(4人)以上に達しても新しいコートが
+    永遠に作られない不具合があった。ここで、待機人数が十分になり次第
+    court_countをmax_courtsの範囲内で1つずつ増やし、通常のawaiting_refill
+    経路(_process_awaiting_refills)に乗せて補充させる。
+    """
+    meta_table = _meta_table()
+    entry_table = _entry_table()
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if meta_current.get("status") != "playing":
+        return
+    if meta_current.get("matching_paused"):
+        return
+
+    court_count = int(meta_current.get("court_count", 0) or 0)
+    max_courts = int(meta_current.get("max_courts", court_count) or court_count)
+    if court_count >= max_courts:
+        return
+
+    pending = _all_pending_unordered(entry_table)
+    if len(pending) < NEW_COURT_MIN_PENDING:
+        return
+
+    new_court_number = court_count + 1
+    try:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET court_count = :new",
+            ConditionExpression="court_count = :old",
+            ExpressionAttributeValues={":new": new_court_number, ":old": court_count},
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return  # 他のリクエストが既に増やした(競合)
+        raise
+
+    now_jst = datetime.now(JST).isoformat()
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
+        ExpressionAttributeValues={":empty": {}},
+    )
+    meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="SET awaiting_refill.#c = :now",
+        ExpressionAttributeNames={"#c": str(new_court_number)},
+        ExpressionAttributeValues={":now": now_jst},
+    )
+    current_app.logger.info(
+        "[game2][continuous] 待機%d人に達したため新しいコート%dを開きます"
+        "(上限%d、%d秒後に補充)",
+        len(pending), new_court_number, max_courts, COURT_REFILL_DELAY_SECONDS,
+    )
+
+
 def _clear_held_for_pairing(meta_table, court_number):
     """
     held_for_pairingから指定コートを取り除く。取り除けたらTrue、既に他の処理で
@@ -1994,6 +2064,10 @@ def submit_score(match_id, court_number):
             _process_participation_priority()
         except Exception as e:
             current_app.logger.error("[game2] _process_participation_priority エラー: %s", e, exc_info=True)
+        try:
+            _process_new_court_opportunity()
+        except Exception as e:
+            current_app.logger.error("[game2] _process_new_court_opportunity エラー: %s", e, exc_info=True)
 
         flash(f"コート{court_number_int}のスコアを送信しました（{team1_score}-{team2_score}）", "success")
         return redirect(url_for("game2.court"))
@@ -2173,7 +2247,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, post_skill_courts, held_for_participation",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, post_skill_courts, held_for_participation",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
