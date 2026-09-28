@@ -167,7 +167,7 @@
                     {% if is_admin %}
                     <form method="POST" action="{{ url_for('game2.admin_rest_entry', entry_id=p.entry_id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="badge badge-lg bg-secondary me-1 mb-1 border-0">{{ p.display_name }}</button>
+                        <button type="submit" class="badge badge-lg bg-secondary me-1 mb-1 border-0">{{ p.display_name }}（{{ p.match_count|default(0) }}回）</button>
                     </form>
                     {% else %}
                     <span class="badge badge-lg bg-secondary me-1 mb-1">{{ p.display_name }}</span>
@@ -181,7 +181,7 @@
                     {% if is_admin %}
                     <form method="POST" action="{{ url_for('game2.admin_resume_entry', entry_id=p.entry_id) }}" class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="badge badge-lg bg-light text-dark border me-1 mb-1">{{ p.display_name }}</button>
+                        <button type="submit" class="badge badge-lg bg-light text-dark border me-1 mb-1">{{ p.display_name }}（{{ p.match_count|default(0) }}回）</button>
                     </form>
                     {% else %}
                     <span class="badge badge-lg bg-light text-dark border me-1 mb-1">{{ p.display_name }}</span>
