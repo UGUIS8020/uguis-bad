@@ -61,8 +61,8 @@ PAIRING_MODE_LABELS = {
                               # 「完全」ランダムという表示は誤解を招く
     "ai": "AIペアリング",
     "ai_pairing": "AIペアリング",
-    "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(CONTINUOUS_BALANCE_CYCLE
-                                             # 回ごとにオン/オフ)がオンの回のAIペアリング
+    "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(参加回数の多い人を除外)
+                                             # が適用された回のAIペアリング
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
@@ -984,30 +984,30 @@ WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら救済モ
 QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
 # モード選定ルール(ステップ数の固定サイクルではなく、時間ベース):
-#   1. 練習開始直後、INITIAL_FULL_RANDOM_COUNT回は完全ランダム
-#   2. それ以降は基本的にAIペアリング
-#   3. ただし、前回スキルモードを差し込んでからSKILL_BURST_INTERVAL_MINUTES分
-#      以上経過したら、スキルモード一斉入れ替えを行う。これは通常のモード
-#      選定(_next_refill_mode/1コートずつの補充)とは別の仕組みで、
-#      全コートが空くのを待ってから、待機中全員をスキル順に並べて一括で
-#      組み直す(_try_refill_court/_process_skill_burst/_execute_skill_burst
-#      を参照)。一斉入れ替えで作られた試合が個別に終わったあとは、通常の
-#      1コートずつの補充(このAIペアリング)に戻る。
+#   1. 練習開始直後、INITIAL_FULL_RANDOM_COUNT回はランダム
+#   2. 続くINITIAL_AI_PURE_COUNT回は調整なしの純粋なAIペアリング
+#   3. それ以降は、参加回数の多い人を除外する「調整AIペアリング」のみ
+#      (以前は3回ごとにオン/オフを切り替えていたが、常時オンに変更)
+#   4. ただし、練習開始からSKILL_BURST_INTERVAL_MINUTES分経過した時点で
+#      一度だけ、スキルモード一斉入れ替えを行う(以降は繰り返さない)。
+#      これは通常のモード選定(_next_refill_mode/1コートずつの補充)とは
+#      別の仕組みで、全コートが空くのを待ってから、待機中全員をスキル順に
+#      並べて一括で組み直す(_try_refill_court/_process_skill_burst/
+#      _execute_skill_burstを参照)。一斉入れ替えで作られた試合が個別に
+#      終わったあとは、通常の1コートずつの補充に戻る。
 # 休みの調整は二重構成:
-#   1. 完全ランダム/AIペアリングは、_pop_next_from_play_queue()による永続
+#   1. ランダム/AIペアリングは、_pop_next_from_play_queue()による永続
 #      キューの先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ
 #      「休む人を先に決める」発想。通常時の穏やかな公平性)
 #   2. さらにモードを問わず、WAIT_RESCUE_THRESHOLD回以上補充を逃し続けている
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
 #      長時間待ちを防ぐ保険)
-#   3. さらに、完全ランダム/AIペアリングはCONTINUOUS_BALANCE_CYCLE回ごとに
-#      オン/オフを交互に切り替えながら、参加回数が最も少ない人を優先的に
-#      含め、最も多い人は今回の候補から除外する「継続的バランス調整」を行う
-#      (毎回適用すると実力バランスの質が目に見えて落ちるため、間欠的に
-#      効かせて公平性とのバランスを取る。シミュレーションで確認済み)
-INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、完全ランダムを連続させる回数
-SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
-CONTINUOUS_BALANCE_CYCLE = 3  # 継続的バランス調整のオン/オフを何回ごとに切り替えるか
+#   3. さらに、調整AIペアリングの期間は毎回、参加回数が最も多い人を
+#      今回の候補から除外する「継続的バランス調整」を行う(休憩にはしない。
+#      次回はまた対象になりうる)
+INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
+INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIペアリングを連続させる回数
+SKILL_BURST_INTERVAL_MINUTES = 60  # 練習開始から何分後にスキルモード一斉入れ替えを行うか(1回のみ)
 
 
 def _next_refill_mode(meta_table):
@@ -1037,12 +1037,15 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
 
     - 既に収集が始まっている(awaiting_skill_burstに1つでもコートがある)
       場合は、経過時間に関わらず最後まで合流させる(全コートが揃うまで待つ)。
-    - まだ始まっていなければ、前回のスキルモード一斉入れ替えから
-      SKILL_BURST_INTERVAL_MINUTES分以上経過しているかどうかで、新規に
-      収集を開始すべきか判定する。
+    - まだ始まっていなければ、練習開始からSKILL_BURST_INTERVAL_MINUTES分
+      以上経過しているかどうかで、新規に収集を開始すべきか判定する。
+    - スキルモード一斉入れ替えは練習中に1回だけ行う仕様のため、既に
+      1回実行済み(skill_burst_done)なら、以降は二度と収集を開始しない。
     """
     if meta_current.get("awaiting_skill_burst"):
         return True
+    if pairing_meta.get("skill_burst_done"):
+        return False
     last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
     if not last_burst_at_iso:
         return False
@@ -1148,8 +1151,8 @@ def _try_refill_court(old_match_id, court_number):
     meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     court_count = int(meta_current_now.get("court_count", 0) or 0)
 
-    # ★スキルモード一斉入れ替え: 前回のスキルモード一斉入れ替えから
-    #   SKILL_BURST_INTERVAL_MINUTES分以上経過している場合、このコートは
+    # ★スキルモード一斉入れ替え: 練習開始からSKILL_BURST_INTERVAL_MINUTES分
+    #   以上経過していて、かつまだ1回も実行していない場合、このコートは
     #   単独では補充せず、全コートが空くまで待つ(awaiting_skill_burstに登録)。
     #   全コート揃ったら_process_skill_burst()が待機中全員をスキル順に並べて
     #   一括で組み直す。既に収集が始まっている場合は、経過時間に関わらず
@@ -1309,17 +1312,16 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 return
             forced_uids = {p["user_id"] for p in forced}
 
-            # ★継続的バランス調整: CONTINUOUS_BALANCE_CYCLE回ごとにオン/オフを
-            #   交互に切り替えながら、参加回数(match_count)が最も多い人を
-            #   今回の候補から除外する(休憩にはしない。次回はまた対象になりうる)。
+            # ★継続的バランス調整: 練習開始直後のランダムINITIAL_FULL_RANDOM_COUNT回・
+            #   純粋なAIペアリングINITIAL_AI_PURE_COUNT回が終わった後は、毎回
+            #   参加回数(match_count)が最も多い人を今回の候補から除外する
+            #   (休憩にはしない。次回はまた対象になりうる)。
             #   以前は「最も少ない人を強制参加」も併用していたが、遅れて参加
             #   した人がmatch_count=0のため毎回最優先で拾われてしまう懸念があり、
             #   シミュレーションで検証の上、除外のみに変更した(永続キュー自体が
             #   参加回数の少ない人を優先する仕組みを既に持っているため、除外
             #   だけでも一定の公平性は保てる)。
-            apply_continuous_balance = (
-                ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
-            ) == 1
+            apply_continuous_balance = refill_count > (INITIAL_FULL_RANDOM_COUNT + INITIAL_AI_PURE_COUNT)
             continuous_balance_applied = apply_continuous_balance
             excluded_uid = None
             if apply_continuous_balance:
@@ -1669,11 +1671,15 @@ SKILL_BURST_MAX_WAIT_SECONDS = 300  # スキルモード一斉入れ替えで、
 
 
 def _mark_skill_burst_consumed(meta_table, now_jst_iso):
-    """このスキルモード一斉入れ替えを消費済みにする(次はSKILL_BURST_INTERVAL_MINUTES後)。"""
+    """
+    スキルモード一斉入れ替えを実行済みにする。練習中に1回だけ行う仕様のため、
+    skill_burst_doneを立てて以降二度と発動しないようにする
+    (_skill_burst_should_collect参照)。
+    """
     meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
-        UpdateExpression="SET last_skill_burst_at = :now",
-        ExpressionAttributeValues={":now": now_jst_iso},
+        UpdateExpression="SET last_skill_burst_at = :now, skill_burst_done = :true",
+        ExpressionAttributeValues={":now": now_jst_iso, ":true": True},
     )
 
 
@@ -2139,7 +2145,7 @@ def reset_participants():
             Key={"match_id": META_PAIRING_PK},
             UpdateExpression=(
                 "SET cycle_index = :zero, refill_count = :zero "
-                "REMOVE last_mode, last_match_id, last_skill_burst_at"
+                "REMOVE last_mode, last_match_id, last_skill_burst_at, skill_burst_done"
             ),
             ExpressionAttributeValues={":zero": 0},
         )
