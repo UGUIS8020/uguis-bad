@@ -63,10 +63,9 @@ PAIRING_MODE_LABELS = {
     "ai_pairing": "AIペアリング",
     "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(参加回数の多い人を除外)
                                              # が適用された回のAIペアリング
-    "ai_pairing_full_balanced": "強調整AIペアリング",  # FULL_BALANCE_START_REFILL〜
-                                                    # FULL_BALANCE_END_REFILLの間、除外に
-                                                    # 加えて最も少ない人を強制参加させる強め
-                                                    # の調整
+    "ai_pairing_full_balanced": "強調整AIペアリング",  # スキルモード一斉入れ替え前の助走
+                                                    # (pre_skill_remaining)期間、除外に加えて
+                                                    # 最も少ない人を強制参加させる強めの調整
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
@@ -993,31 +992,33 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   2. 続くINITIAL_AI_PURE_COUNT回は調整なしの純粋なAIペアリング
 #   3. それ以降は、参加回数の多い人を除外する「調整AIペアリング」のみ
 #      (以前は3回ごとにオン/オフを切り替えていたが、常時オンに変更)
-#   4. ただし、前回スキルモードを差し込んでからSKILL_BURST_INTERVAL_MINUTES分
-#      以上経過したら、スキルモード一斉入れ替えを行う(練習中、繰り返し発動)。
-#      これは通常のモード選定(_next_refill_mode/1コートずつの補充)とは
-#      別の仕組みで、全コートが空くのを待ってから、待機中全員をスキル順に
-#      並べて一括で組み直す(_try_refill_court/_process_skill_burst/
-#      _execute_skill_burstを参照)。一斉入れ替えで作られた試合が個別に
-#      終わったあとは、通常の1コートずつの補充に戻る。
+#   4. 前回のスキルモード一斉入れ替えからPRE_SKILL_BALANCE_LEAD_MINUTES分
+#      経過したら、続くPRE_SKILL_BALANCE_REFILLS回だけ「強調整AIペアリング」
+#      (除外+最も少ない人を強制参加)の助走を行い、参加回数を一度揃えてから
+#      スキルモード一斉入れ替えに入る(実力バランスだけで組む一斉入れ替えの
+#      直前に、参加回数の偏りをリセットしておく狙い)。助走が終わると即座に
+#      スキルモード一斉入れ替えの収集を開始する(_try_refill_court/
+#      _process_skill_burst/_execute_skill_burstを参照)。結果として、
+#      スキルモード一斉入れ替え自体はPRE_SKILL_BALANCE_LEAD_MINUTES分より
+#      やや後(助走の数試合分だけ遅れて)に発動する。一斉入れ替えで作られた
+#      試合が個別に終わったあとは、通常の1コートずつの補充に戻る。
 # 休みの調整は二重構成:
 #   1. ランダム/AIペアリングは、_pop_next_from_play_queue()による永続
 #      キューの先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ
 #      「休む人を先に決める」発想。通常時の穏やかな公平性)
 #   2. さらにモードを問わず、WAIT_RESCUE_THRESHOLD回以上補充を逃し続けている
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
-#      長時間待ちを防ぐ保険)
+#      長時間待ちを防ぐ保険。ENABLE_RESCUE_MODEでオン/オフ切替可)
 #   3. さらに、調整AIペアリングの期間は毎回、参加回数が最も多い人を
 #      今回の候補から除外する「継続的バランス調整」を行う(休憩にはしない。
 #      次回はまた対象になりうる)
-#   4. ただし、FULL_BALANCE_START_REFILL〜FULL_BALANCE_END_REFILL回の間だけ
-#      「最も少ない人を強制参加」も併用する「強調整AIペアリング」を行い、
-#      除外のみでは是正しきれない偏りを練習後半で一度まとめて縮める
+#   4. ただし、スキルモード一斉入れ替え前の助走期間(上記4)だけ、
+#      「最も少ない人を強制参加」も併用する「強調整AIペアリング」を行う
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
 INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIペアリングを連続させる回数
-SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
-FULL_BALANCE_START_REFILL = 28  # 「最も少ない人を強制参加」も併用する強調整の開始refill_count
-FULL_BALANCE_END_REFILL = 30  # 同、終了refill_count(この回を含む)
+SKILL_BURST_INTERVAL_MINUTES = 60  # 参考値(実際の間隔は助走込みでこれよりやや長くなる)
+PRE_SKILL_BALANCE_LEAD_MINUTES = 45  # 前回のスキル優先から何分後に強調整AIペアリングの助走を始めるか
+PRE_SKILL_BALANCE_REFILLS = 3  # 助走(強調整AIペアリング)を何回の補充分行うか
 
 
 def _next_refill_mode(meta_table):
@@ -1047,21 +1048,16 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
 
     - 既に収集が始まっている(awaiting_skill_burstに1つでもコートがある)
       場合は、経過時間に関わらず最後まで合流させる(全コートが揃うまで待つ)。
-    - まだ始まっていなければ、前回のスキルモード一斉入れ替えから
-      SKILL_BURST_INTERVAL_MINUTES分以上経過しているかどうかで、新規に
-      収集を開始すべきか判定する(練習中、繰り返し発動する)。
+    - まだ始まっていなければ、強調整AIペアリングの助走(pre_skill_remaining)
+      を使い切ったかどうかで、新規に収集を開始すべきか判定する
+      (助走が始まっていなければFalse、使い切っていればTrue)。
     """
     if meta_current.get("awaiting_skill_burst"):
         return True
-    last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
-    if not last_burst_at_iso:
+    pre_skill_remaining = pairing_meta.get("pre_skill_remaining")
+    if pre_skill_remaining is None:
         return False
-    try:
-        last_burst_at = datetime.fromisoformat(last_burst_at_iso)
-    except Exception:
-        return False
-    elapsed_minutes = (datetime.now(JST) - last_burst_at).total_seconds() / 60
-    return elapsed_minutes >= SKILL_BURST_INTERVAL_MINUTES
+    return int(pre_skill_remaining) <= 0
 
 
 COURT_REFILL_DELAY_SECONDS = 15  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
@@ -1158,13 +1154,44 @@ def _try_refill_court(old_match_id, court_number):
     meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     court_count = int(meta_current_now.get("court_count", 0) or 0)
 
-    # ★スキルモード一斉入れ替え: 前回のスキルモード一斉入れ替えから
-    #   SKILL_BURST_INTERVAL_MINUTES分以上経過している場合、このコートは
-    #   単独では補充せず、全コートが空くまで待つ(awaiting_skill_burstに登録)。
-    #   全コート揃ったら_process_skill_burst()が待機中全員をスキル順に並べて
-    #   一括で組み直す。既に収集が始まっている場合は、経過時間に関わらず
-    #   最後まで合流させる(バッファが少ない場合のペア待ちより優先する)。
+    # ★スキルモード一斉入れ替えの前に、強調整AIペアリングの助走を挟む:
+    #   前回のスキル優先からPRE_SKILL_BALANCE_LEAD_MINUTES分経過していて、
+    #   まだ助走を始めていなければ、PRE_SKILL_BALANCE_REFILLS回分の助走を
+    #   開始する(pre_skill_remainingをセット)。以降の通常補充
+    #   (_select_and_start_court)はこのカウントを見て強調整AIペアリングを
+    #   適用し、使い切ったら自動的に0になる。
     pairing_meta_now = meta_table.get_item(Key={"match_id": META_PAIRING_PK}, ConsistentRead=True).get("Item", {}) or {}
+    if pairing_meta_now.get("pre_skill_remaining") is None:
+        last_burst_at_iso = pairing_meta_now.get("last_skill_burst_at")
+        if last_burst_at_iso:
+            try:
+                last_burst_at = datetime.fromisoformat(last_burst_at_iso)
+                elapsed_minutes = (datetime.now(JST) - last_burst_at).total_seconds() / 60
+            except Exception:
+                elapsed_minutes = 0
+            if elapsed_minutes >= PRE_SKILL_BALANCE_LEAD_MINUTES:
+                try:
+                    meta_table.update_item(
+                        Key={"match_id": META_PAIRING_PK},
+                        UpdateExpression="SET pre_skill_remaining = :n",
+                        ConditionExpression="attribute_not_exists(pre_skill_remaining)",
+                        ExpressionAttributeValues={":n": PRE_SKILL_BALANCE_REFILLS},
+                    )
+                    pairing_meta_now["pre_skill_remaining"] = PRE_SKILL_BALANCE_REFILLS
+                    current_app.logger.info(
+                        "[game2][continuous] 前回のスキル優先から%d分経過。強調整AIペアリングの助走(%d回)を開始",
+                        int(elapsed_minutes), PRE_SKILL_BALANCE_REFILLS,
+                    )
+                except ClientError as e:
+                    if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                        raise
+
+    # ★スキルモード一斉入れ替え: 助走(強調整AIペアリング)を使い切った場合、
+    #   このコートは単独では補充せず、全コートが空くまで待つ
+    #   (awaiting_skill_burstに登録)。全コート揃ったら_process_skill_burst()
+    #   が待機中全員をスキル順に並べて一括で組み直す。既に収集が始まっている
+    #   場合は、経過時間に関わらず最後まで合流させる(バッファが少ない場合の
+    #   ペア待ちより優先する)。
     if _skill_burst_should_collect(meta_current_now, pairing_meta_now):
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
@@ -1333,12 +1360,16 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             apply_continuous_balance = refill_count > (INITIAL_FULL_RANDOM_COUNT + INITIAL_AI_PURE_COUNT)
             continuous_balance_applied = apply_continuous_balance
 
-            # ★強調整(FULL_BALANCE_START_REFILL〜FULL_BALANCE_END_REFILL回の
-            #   ピンポイントの窓だけ): 除外のみでは是正しきれない偏りを一気に
+            # ★強調整(スキルモード一斉入れ替え前の助走期間、pre_skill_remaining
+            #   が残っている間だけ): 除外のみでは是正しきれない偏りを一気に
             #   縮めるため、この期間だけ「最も少ない人を強制参加」も併用する
             #   (除外のみを続けているとその場の巡り合わせで偏りが蓄積するため、
-            #   練習後半に一度、強めに補正する)。
-            apply_full_balance = FULL_BALANCE_START_REFILL <= refill_count <= FULL_BALANCE_END_REFILL
+            #   スキル優先の直前に一度、強めに補正する)。
+            pairing_meta_for_balance = meta_table.get_item(
+                Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
+            ).get("Item", {}) or {}
+            pre_skill_remaining = pairing_meta_for_balance.get("pre_skill_remaining")
+            apply_full_balance = pre_skill_remaining is not None and int(pre_skill_remaining) > 0
             full_balance_applied = False
 
             excluded_uid = None
@@ -1350,6 +1381,11 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                         forced = forced + [lowest]
                         forced_uids.add(lowest["user_id"])
                         full_balance_applied = True
+                    meta_table.update_item(
+                        Key={"match_id": META_PAIRING_PK},
+                        UpdateExpression="ADD pre_skill_remaining :neg1",
+                        ExpressionAttributeValues={":neg1": -1},
+                    )
 
                 remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
                 excluded_display_name = None
@@ -1703,10 +1739,14 @@ SKILL_BURST_MAX_WAIT_SECONDS = 300  # スキルモード一斉入れ替えで、
 
 
 def _mark_skill_burst_consumed(meta_table, now_jst_iso):
-    """このスキルモード一斉入れ替えを消費済みにする(次はSKILL_BURST_INTERVAL_MINUTES後)。"""
+    """
+    このスキルモード一斉入れ替えを消費済みにする(次はPRE_SKILL_BALANCE_LEAD_
+    MINUTES分後に強調整AIペアリングの助走から再スタート)。pre_skill_remaining
+    も削除し、次のサイクルで再度助走を開始できるようにする。
+    """
     meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
-        UpdateExpression="SET last_skill_burst_at = :now",
+        UpdateExpression="SET last_skill_burst_at = :now REMOVE pre_skill_remaining",
         ExpressionAttributeValues={":now": now_jst_iso},
     )
 
@@ -2173,7 +2213,7 @@ def reset_participants():
             Key={"match_id": META_PAIRING_PK},
             UpdateExpression=(
                 "SET cycle_index = :zero, refill_count = :zero "
-                "REMOVE last_mode, last_match_id, last_skill_burst_at"
+                "REMOVE last_mode, last_match_id, last_skill_burst_at, pre_skill_remaining"
             ),
             ExpressionAttributeValues={":zero": 0},
         )
