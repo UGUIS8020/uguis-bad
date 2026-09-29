@@ -598,6 +598,15 @@ def create_pairings():
     #   ConditionExpression(entry_status = :pending)で十分なので、ここでは
     #   条件を付けず、マッチング停止フラグ・古いawaiting_refillも一緒に
     #   クリアして再開できるようにする。
+    # ★court_owner: 「そのコート番号を今どの試合が使っているか」を保持する
+    #   マップ。_select_and_start_court/_execute_skill_burstが新しく試合を
+    #   割り当てる際、ここに「既に埋まっていないか」を確認してから登録する
+    #   ことで、何らかの理由で同じコート番号に2つの試合が同時に作られて
+    #   しまう(表示が8人になるなど)不具合を防ぐ。ここでは最初の組み合わせ
+    #   作成時点の全コートを、この1つのmatch_idで埋まっているものとして
+    #   初期化する。
+    owner_init = {str(c): {"S": str(match_id)} for c in range(1, len(matches) + 1)}
+
     tx_items = [{
         "Update": {
             "TableName": "bad-game-matches",
@@ -611,7 +620,8 @@ def create_pairings():
             #   されてしまう(実際に本番で二重登録・二重補充の原因になった)。
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc, "
-                "awaiting_refill = :empty, held_for_pairing = :empty, awaiting_skill_burst = :empty "
+                "awaiting_refill = :empty, held_for_pairing = :empty, awaiting_skill_burst = :empty, "
+                "court_owner = :owner_init "
                 "REMOVE matching_paused"
             ),
             "ExpressionAttributeNames": {
@@ -622,6 +632,7 @@ def create_pairings():
                 ":playing": {"S": "playing"}, ":mid": {"S": str(match_id)},
                 ":cc": {"N": str(len(matches))}, ":now": {"S": now_jst}, ":mode": {"S": mode},
                 ":maxc": {"N": str(max_courts)}, ":empty": {"M": {}},
+                ":owner_init": {"M": owner_init},
             },
         }
     }]
@@ -1106,6 +1117,22 @@ def _try_refill_court(old_match_id, court_number):
         )
         return
 
+    # ★court_owner解放: このコートを今使っていたのが確かにold_match_idで
+    #   あることを確認してから解放する(court_ownerの仕組み全体については
+    #   _select_and_start_courtのコメント参照)。既に解放済み/別の試合に
+    #   上書きされている場合は何もしない(ConditionExpressionが失敗するだけ)。
+    try:
+        _meta_table().update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="REMOVE court_owner.#c",
+            ConditionExpression="court_owner.#c = :mid",
+            ExpressionAttributeNames={"#c": str(court_number)},
+            ExpressionAttributeValues={":mid": str(old_match_id)},
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+
     result = results_table.get_item(Key={"result_id": f"{old_match_id}#{court_number}"}).get("Item")
     if not result:
         return
@@ -1404,21 +1431,41 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
     tx_items = []
+    # ★court_owner: このコート番号を今回のnew_match_idの「所有」として登録
+    #   する。attribute_not_exists(court_owner.#c)を条件にすることで、既に
+    #   別の試合がこのコート番号を使っている場合はトランザクション全体が
+    #   失敗する(4人の割り当ても行われない)。これにより、何らかの理由で
+    #   同じコート番号に2つの試合が同時に作られてしまう不具合(表示が8人に
+    #   なる)を、経路によらず確実に防ぐ。court_ownerは_try_refill_courtが
+    #   試合終了時に解放する。
+    #   clear_awaiting_refill=Trueの場合は、awaiting_refillの解除も同じ
+    #   Update操作にまとめる(同じテーブル・同じキーへの操作はトランザクション
+    #   内で1回しかできないため)。同時に2回呼ばれた場合、ConditionExpression
+    #   が無いとREMOVEは「既に無い属性の削除」をエラーにせず黙って成功させて
+    #   しまうため、attribute_existsも条件に含めて後から来た方を確実に失敗
+    #   させる。
     if clear_awaiting_refill:
         tx_items.append({
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                # ★同じコートに対して_select_and_start_courtが同時に2回呼ばれた場合
-                #   (例: ページ読み込みとsubmit_score直後の呼び出しが重なった場合)、
-                #   ConditionExpressionが無いとREMOVEは「既に無い属性の削除」を
-                #   エラーにせず黙って成功させてしまい、両方の呼び出しが別々の
-                #   4人を選んで同じコート番号に試合を作ってしまう(表示が
-                #   8人になるバグの原因になった)。attribute_existsを条件にする
-                #   ことで、後から来た方のトランザクションを確実に失敗させる。
-                "UpdateExpression": "REMOVE awaiting_refill.#c",
-                "ConditionExpression": "attribute_exists(awaiting_refill.#c)",
+                "UpdateExpression": "SET court_owner.#c = :new_mid REMOVE awaiting_refill.#c",
+                "ConditionExpression": (
+                    "attribute_exists(awaiting_refill.#c) AND attribute_not_exists(court_owner.#c)"
+                ),
                 "ExpressionAttributeNames": {"#c": str(court_number)},
+                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
+            }
+        })
+    else:
+        tx_items.append({
+            "Update": {
+                "TableName": "bad-game-matches",
+                "Key": {"match_id": {"S": META_CURRENT_PK}},
+                "UpdateExpression": "SET court_owner.#c = :new_mid",
+                "ConditionExpression": "attribute_not_exists(court_owner.#c)",
+                "ExpressionAttributeNames": {"#c": str(court_number)},
+                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
             }
         })
     for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
@@ -1779,6 +1826,9 @@ def _execute_skill_burst(court_numbers):
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
     tx_items = []
     assigned = []
+    owner_set_parts = []
+    owner_names = {}
+    owner_values = {}
     for i in range(usable_groups):
         court_number = court_numbers[i]
         four = candidates[i * 4:(i + 1) * 4]
@@ -1800,6 +1850,26 @@ def _execute_skill_burst(court_numbers):
                 }
             })
         assigned.append((court_number, new_match_id, diff, [e.get("display_name") for e in team_a_entries + team_b_entries]))
+        owner_set_parts.append(f"court_owner.#oc{i} = :omid{i}")
+        owner_names[f"#oc{i}"] = str(court_number)
+        owner_values[f":omid{i}"] = {"S": str(new_match_id)}
+
+    # ★court_owner: 一斉入れ替えで使う全コート番号を、他の経路(通常補充など)
+    #   に既に使われていないか確認してからまとめて取得する
+    #   (_select_and_start_courtのコメント参照)。1つでも既に使われていれば
+    #   トランザクション全体が失敗し、次のチェックで再試行される。
+    tx_items.append({
+        "Update": {
+            "TableName": "bad-game-matches",
+            "Key": {"match_id": {"S": META_CURRENT_PK}},
+            "UpdateExpression": "SET " + ", ".join(owner_set_parts),
+            "ConditionExpression": " AND ".join(
+                f"attribute_not_exists(court_owner.{name})" for name in owner_names
+            ),
+            "ExpressionAttributeNames": owner_names,
+            "ExpressionAttributeValues": owner_values,
+        }
+    })
 
     try:
         dynamodb_client.transact_write_items(TransactItems=tx_items)
@@ -2154,7 +2224,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
@@ -2234,7 +2304,10 @@ def emergency_transfer():
     meta_table = _meta_table()
     meta_table.update_item(
         Key={"match_id": META_CURRENT_PK},
-        UpdateExpression="SET #st = :idle, #ua = :now REMOVE current_match_id, court_count",
+        UpdateExpression=(
+            "SET #st = :idle, #ua = :now REMOVE current_match_id, court_count, max_courts, "
+            "awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner"
+        ),
         ExpressionAttributeNames={"#st": "status", "#ua": "updated_at"},
         ExpressionAttributeValues={":idle": "idle", ":now": now},
     )
