@@ -32,6 +32,8 @@ from game2.views import (
     INITIAL_FULL_RANDOM_COUNT,
     INITIAL_AI_PURE_COUNT,
     SKILL_BURST_INTERVAL_MINUTES,
+    FULL_BALANCE_START_REFILL,
+    FULL_BALANCE_END_REFILL,
 )
 
 NUM_PLAYERS = 18
@@ -122,6 +124,8 @@ def simulate(n_matches, seed=None,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
              enable_continuous_balance=True,
              continuous_balance_force_lowest=False,
+             full_balance_start=FULL_BALANCE_START_REFILL,
+             full_balance_end=FULL_BALANCE_END_REFILL,
              enable_rescue=True,
              wait_rescue_threshold=WAIT_RESCUE_THRESHOLD,
              late_joiner_refill_counts=None,
@@ -288,9 +292,13 @@ def simulate(n_matches, seed=None,
                     and refill_count > (initial_full_random + initial_ai_pure)
                 )
 
+                # ★強調整(full_balance_start〜full_balance_endの間だけ): 除外に
+                #   加えて最も少ない人も強制参加させる、練習後半の一括補正。
+                apply_full_balance = full_balance_start <= refill_count <= full_balance_end
+
                 excluded_uid = None
                 if apply_continuous_balance:
-                    if continuous_balance_force_lowest:
+                    if continuous_balance_force_lowest or apply_full_balance:
                         remaining = [p for p in pending if p["user_id"] not in forced_uids]
                         if remaining:
                             lowest = min(remaining, key=lambda p: p["match_count"])
