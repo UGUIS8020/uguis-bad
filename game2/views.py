@@ -63,6 +63,10 @@ PAIRING_MODE_LABELS = {
     "ai_pairing": "AIペアリング",
     "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(参加回数の多い人を除外)
                                              # が適用された回のAIペアリング
+    "ai_pairing_full_balanced": "強調整AIペアリング",  # FULL_BALANCE_START_REFILL〜
+                                                    # FULL_BALANCE_END_REFILLの間、除外に
+                                                    # 加えて最も少ない人を強制参加させる強め
+                                                    # の調整
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
@@ -1005,9 +1009,14 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   3. さらに、調整AIペアリングの期間は毎回、参加回数が最も多い人を
 #      今回の候補から除外する「継続的バランス調整」を行う(休憩にはしない。
 #      次回はまた対象になりうる)
+#   4. ただし、FULL_BALANCE_START_REFILL〜FULL_BALANCE_END_REFILL回の間だけ
+#      「最も少ない人を強制参加」も併用する「強調整AIペアリング」を行い、
+#      除外のみでは是正しきれない偏りを練習後半で一度まとめて縮める
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
 INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIペアリングを連続させる回数
 SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
+FULL_BALANCE_START_REFILL = 28  # 「最も少ない人を強制参加」も併用する強調整の開始refill_count
+FULL_BALANCE_END_REFILL = 30  # 同、終了refill_count(この回を含む)
 
 
 def _next_refill_mode(meta_table):
@@ -1250,6 +1259,7 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     mode, refill_count = _next_refill_mode(meta_table)
     all_pending = _all_pending_unordered(entry_table)
     continuous_balance_applied = False
+    full_balance_applied = False
 
     # ★完全ランダムは練習開始直後のINITIAL_FULL_RANDOM_COUNT回だけ使う、
     #   あえて何の調整もしないシンプルなモード。救済モード・永続キューに
@@ -1320,8 +1330,25 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             #   だけでも一定の公平性は保てる)。
             apply_continuous_balance = refill_count > (INITIAL_FULL_RANDOM_COUNT + INITIAL_AI_PURE_COUNT)
             continuous_balance_applied = apply_continuous_balance
+
+            # ★強調整(FULL_BALANCE_START_REFILL〜FULL_BALANCE_END_REFILL回の
+            #   ピンポイントの窓だけ): 除外のみでは是正しきれない偏りを一気に
+            #   縮めるため、この期間だけ「最も少ない人を強制参加」も併用する
+            #   (除外のみを続けているとその場の巡り合わせで偏りが蓄積するため、
+            #   練習後半に一度、強めに補正する)。
+            apply_full_balance = FULL_BALANCE_START_REFILL <= refill_count <= FULL_BALANCE_END_REFILL
+            full_balance_applied = False
+
             excluded_uid = None
             if apply_continuous_balance:
+                if apply_full_balance:
+                    remaining_low = [e for e in all_pending if e.get("user_id") not in forced_uids]
+                    if remaining_low:
+                        lowest = min(remaining_low, key=lambda e: int(e.get("match_count", 0) or 0))
+                        forced = forced + [lowest]
+                        forced_uids.add(lowest["user_id"])
+                        full_balance_applied = True
+
                 remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
                 excluded_display_name = None
                 if remaining2:
@@ -1329,8 +1356,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                     excluded_uid = highest["user_id"]
                     excluded_display_name = highest.get("display_name")
                 current_app.logger.info(
-                    "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): 除外=%s",
-                    court_number, refill_count, excluded_display_name,
+                    "[game2][continuous] court=%s %s(refill_count=%d): 優先=%s 除外=%s",
+                    court_number,
+                    "強調整AIペアリング" if full_balance_applied else "継続的バランス調整",
+                    refill_count,
+                    lowest.get("display_name") if apply_full_balance and remaining_low else None,
+                    excluded_display_name,
                 )
 
             rest_pool = [
@@ -1357,6 +1388,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
 
     if rescued:
         used_mode = "safety_valve"
+    elif full_balance_applied:
+        used_mode = "ai_pairing_full_balanced"
     elif continuous_balance_applied:
         used_mode = "ai_pairing_balanced"
     else:
