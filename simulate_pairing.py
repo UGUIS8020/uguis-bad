@@ -30,8 +30,8 @@ from game2.views import (
     WAIT_RESCUE_THRESHOLD,
     QUEUE_FORCE_COUNT,
     INITIAL_FULL_RANDOM_COUNT,
+    INITIAL_AI_PURE_COUNT,
     SKILL_BURST_INTERVAL_MINUTES,
-    CONTINUOUS_BALANCE_CYCLE,
 )
 
 NUM_PLAYERS = 18
@@ -118,9 +118,9 @@ def simulate(n_matches, seed=None,
              num_players=NUM_PLAYERS, num_courts=NUM_COURTS,
              minutes_per_match=10.0,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
+             initial_ai_pure=INITIAL_AI_PURE_COUNT,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
              enable_continuous_balance=True,
-             continuous_balance_cycle=CONTINUOUS_BALANCE_CYCLE,
              continuous_balance_force_lowest=False,
              enable_rescue=True,
              wait_rescue_threshold=WAIT_RESCUE_THRESHOLD,
@@ -134,10 +134,14 @@ def simulate(n_matches, seed=None,
     num_courts面並行で進むので、1回の補充ごとにminutes_per_match/num_courts
     分だけ経過したとみなす)。
 
-    スキルモードは本番と同じく「1コートずつ選ばれるモード」ではなく、前回の
-    一斉入れ替えからskill_burst_interval_minutes分経過したら、空いたコートを
-    即座には補充せず全コート(num_courts面)が空くまで集め、待機中全員を
-    スキル順の階層で一括採用する(held_courts集合でシミュレート)。
+    モードの流れ(本番と同じ): 最初のinitial_full_random回はランダム、続く
+    initial_ai_pure回は調整なしの純粋なAIペアリング、それ以降は毎回、参加
+    回数が最も多い人を除外する「調整AIペアリング」のみ。
+
+    スキルモードは、練習開始からskill_burst_interval_minutes分経過した時点で
+    1回だけ、空いたコートを即座には補充せず全コート(num_courts面)が空くまで
+    集め、待機中全員をスキル順の階層で一括採用する(held_courts集合で
+    シミュレート)。1回実行したら二度と発動しない(本番と同じ)。
     スキルバースト後は特別扱いせず、即座に通常のfull_random/ai_pairing
     ローテーションに戻る(本番と同じ)。
     """
@@ -159,6 +163,7 @@ def simulate(n_matches, seed=None,
     elapsed_minutes = 0.0
     # ★本番のcreate_pairings()と同じく、練習開始の瞬間を基準点にする
     last_skill_burst_at = 0.0
+    skill_burst_done = False  # 練習中に1回実行したら二度と発動しない
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
     for _ in range(n_matches):
@@ -214,10 +219,11 @@ def simulate(n_matches, seed=None,
                     print(f"#{refill_count} 新規参加登録: {new_id}")
 
         # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
-        #   に関わらず合流。まだなら、前回の一斉入れ替えからskill_burst_
-        #   interval_minutes分以上経過していれば新規に収集を始める。
+        #   に関わらず合流。まだなら、練習開始からskill_burst_interval_minutes分
+        #   以上経過していて、かつまだ1回も実行していなければ新規に収集を始める。
         skill_burst_collecting = bool(held_courts) or (
-            elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes
+            not skill_burst_done
+            and elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes
         )
 
         if skill_burst_collecting:
@@ -240,6 +246,7 @@ def simulate(n_matches, seed=None,
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
                 last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
+                skill_burst_done = True
             continue
 
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
@@ -275,17 +282,14 @@ def simulate(n_matches, seed=None,
                 assert forced, "pendingは直前に終わった4人を含むため通常は空にならない"
                 forced_uids = {p["user_id"] for p in forced}
 
-                # ★継続的バランス調整: 毎回のAIペアリングの補充で、参加回数が
-                #   最も少ない人を優先的に含め、逆に参加回数が最も多い人は
-                #   今回の候補から除外する(休憩にはしない。次回はまた対象に
-                #   なりうる)。毎回適用すると実力バランスの質が目に見えて落ちる
-                #   ため、continuous_balance_cycle回ごとにオン/オフを交互に切り
-                #   替える(例:3回=通常AI/3回=調整ありAI)。
-                if continuous_balance_cycle > 0:
-                    cycle_on = (((refill_count - 1) // continuous_balance_cycle) % 2) == 1
-                else:
-                    cycle_on = True
-                apply_continuous_balance = enable_continuous_balance and cycle_on
+                # ★継続的バランス調整: ランダムinitial_full_random回・純粋な
+                #   AIペアリングinitial_ai_pure回が終わった後は、毎回参加回数が
+                #   最も多い人を今回の候補から除外する(休憩にはしない。次回は
+                #   また対象になりうる)。
+                apply_continuous_balance = (
+                    enable_continuous_balance
+                    and refill_count > (initial_full_random + initial_ai_pure)
+                )
 
                 excluded_uid = None
                 if apply_continuous_balance:
