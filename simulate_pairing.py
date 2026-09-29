@@ -121,9 +121,10 @@ def simulate(n_matches, seed=None,
              skill_burst_interval_minutes=SKILL_BURST_INTERVAL_MINUTES,
              enable_continuous_balance=True,
              continuous_balance_cycle=CONTINUOUS_BALANCE_CYCLE,
+             continuous_balance_force_lowest=False,
              enable_rescue=True,
              wait_rescue_threshold=WAIT_RESCUE_THRESHOLD,
-             enable_post_skill_participation_priority=True,
+             late_joiner_refill_counts=None,
              trace=False):
     """
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
@@ -137,6 +138,8 @@ def simulate(n_matches, seed=None,
     一斉入れ替えからskill_burst_interval_minutes分経過したら、空いたコートを
     即座には補充せず全コート(num_courts面)が空くまで集め、待機中全員を
     スキル順の階層で一括採用する(held_courts集合でシミュレート)。
+    スキルバースト後は特別扱いせず、即座に通常のfull_random/ai_pairing
+    ローテーションに戻る(本番と同じ)。
     """
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
@@ -158,17 +161,8 @@ def simulate(n_matches, seed=None,
     last_skill_burst_at = 0.0
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
-    # ★スキルモード一斉入れ替え直後の「参加回数優先」割り込みモード:
-    #   スキルバーストで作られた3コートのうち、先に2つが終わるのを待って
-    #   参加回数優先でまとめて補充し、残り1つが終わったらそれも単独で
-    #   参加回数優先で補充する(合計3回)。3コートすべてが終わるのを待つ
-    #   より早く、通常のAIペアリングに戻すよりは参加回数の偏りに対抗できる
-    #   か検証する。
-    post_skill_courts = set()  # スキルバーストで作られ、まだこの特別処理の対象になっていないコート
-    held_for_participation = set()  # 参加回数優先バッチ待ちで、今は試合が無いコート
-
     for _ in range(n_matches):
-        playing_courts = [c for c in courts if c not in held_courts and c not in held_for_participation]
+        playing_courts = [c for c in courts if c not in held_courts]
         if not playing_courts:
             break
         # 実際の練習ではどのコートが次に終わるかはランダム(機械的な順番ではない)
@@ -196,36 +190,28 @@ def simulate(n_matches, seed=None,
         elapsed_minutes += minutes_per_match / num_courts
         del courts[court_num]  # このコートは今、試合が無い状態
 
-        # ★スキルモード一斉入れ替え直後の「参加回数優先」割り込み: このコートが
-        #   スキルバーストで作られた3コートのひとつなら、対象から外し
-        #   (2回目以降の通常補充ではこの特別扱いをしない)、2コート集まるまで
-        #   保留してからまとめて参加回数優先で補充する。3つ目は単独で処理する。
-        if court_num in post_skill_courts:
-            post_skill_courts.discard(court_num)
-            held_for_participation.add(court_num)
-            if trace:
-                print(f"#{refill_count} court={court_num} 参加回数優先バッチ待ちに登録"
-                      f" (held={sorted(held_for_participation)}, 残りスキルコート={sorted(post_skill_courts)})")
-
-            should_process = len(held_for_participation) >= 2 or not post_skill_courts
-            if should_process:
-                held_list = sorted(held_for_participation)
-                partner_counter, opponent_counter = get_recent_history_local(recent_results)
-                for c in held_list:
-                    candidates = sorted(pending, key=lambda p: p["match_count"])
-                    if len(candidates) < 4:
-                        break
-                    lowest4 = candidates[:4]
-                    team_a, team_b, _diff = _best_balanced_four(
-                        lowest4, partner_counter, opponent_counter, force_top_n=4
-                    )
-                    chosen_uids = {p["user_id"] for p in team_a + team_b}
-                    pending = [p for p in pending if p["user_id"] not in chosen_uids]
-                    courts[c] = {"team_a": team_a, "team_b": team_b}
-                    held_for_participation.discard(c)
-                    if trace:
-                        print(f"    → court={c} 参加回数優先補充: {sorted(chosen_uids)}")
-            continue
+        # ★遅れて来た参加者のシミュレーション: 指定したrefill_countの
+        #   タイミングで、match_count=0の新規参加者をpendingに追加する
+        #   (「参加回数が最も少ない人を強制参加」が遅れてきた人にどう
+        #   影響するかを検証するためのオプション)
+        if late_joiner_refill_counts:
+            new_count = late_joiner_refill_counts.count(refill_count)
+            for _ in range(new_count):
+                new_id = f"late{refill_count}_{len(by_uid)}"
+                newcomer = {
+                    "user_id": new_id,
+                    "display_name": f"遅刻{refill_count}",
+                    "skill_score": rng.randint(15, 70),
+                    "skill_sigma": 8.333,
+                    "match_count": 0,
+                    "wait_rounds": 0,
+                    "joined_refill_count": refill_count,
+                    "joined_at": f"9{refill_count:04d}",
+                }
+                by_uid[new_id] = newcomer
+                pending.append(newcomer)
+                if trace:
+                    print(f"#{refill_count} 新規参加登録: {new_id}")
 
         # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
         #   に関わらず合流。まだなら、前回の一斉入れ替えからskill_burst_
@@ -254,73 +240,78 @@ def simulate(n_matches, seed=None,
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
                 last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
-                if enable_post_skill_participation_priority:
-                    post_skill_courts |= set(held_list[:usable_groups])
             continue
 
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
         mode = "full_random" if refill_count <= initial_full_random else "ai_pairing"
 
-        # ★救済モード: wait_rescue_threshold回以上待った人がいれば、モードに
-        #   関わらず強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
-        rescued = sorted(
-            [p for p in pending if p["wait_rounds"] >= wait_rescue_threshold],
-            key=lambda p: -p["wait_rounds"],
-        )[:4] if enable_rescue else []
-
-        if rescued:
-            others = [p for p in pending if p not in rescued]
-            candidates = rescued + others
-            assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
-            partner_counter, opponent_counter = get_recent_history_local(recent_results)
-            team_a, team_b, _diff = _best_balanced_four(
-                candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
-            )
+        # ★完全ランダムは練習開始直後のinitial_full_random回だけ使う、あえて
+        #   何の調整もしないシンプルなモード。救済モード・永続キューによる
+        #   強制・継続的バランス調整は一切適用せず、待機中から純粋にランダムに
+        #   4人選ぶ(本番と同じ)。
+        if mode == "full_random":
+            rescued = []
+            assert len(pending) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
+            team_a, team_b, _diff = _full_random_four(pending, force_top_n=0)
         else:
-            # 完全ランダム/AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
-            forced = pop_next_from_queue_local(queue_state, pending, count=QUEUE_FORCE_COUNT)
-            assert forced, "pendingは直前に終わった4人を含むため通常は空にならない"
-            forced_uids = {p["user_id"] for p in forced}
+            # ★救済モード: wait_rescue_threshold回以上待った人がいれば、
+            #   強制的に含める(永続キューとは別枠の保険、本番と同じ二重構成)
+            rescued = sorted(
+                [p for p in pending if p["wait_rounds"] >= wait_rescue_threshold],
+                key=lambda p: -p["wait_rounds"],
+            )[:4] if enable_rescue else []
 
-            # ★継続的バランス調整: 毎回のAIペアリング/完全ランダムの補充で、
-            #   参加回数が最も少ない人を優先的に含め、逆に参加回数が最も多い
-            #   人は今回の候補から除外する(休憩にはしない。次回はまた対象に
-            #   なりうる)。毎回適用すると実力バランスの質が目に見えて落ちる
-            #   ため、continuous_balance_cycle回ごとにオン/オフを交互に切り
-            #   替える(例:3回=通常AI/3回=調整ありAI)。
-            if continuous_balance_cycle > 0:
-                cycle_on = (((refill_count - 1) // continuous_balance_cycle) % 2) == 1
+            if rescued:
+                others = [p for p in pending if p not in rescued]
+                candidates = rescued + others
+                assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
+                partner_counter, opponent_counter = get_recent_history_local(recent_results)
+                team_a, team_b, _diff = _best_balanced_four(
+                    candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
+                )
             else:
-                cycle_on = True
-            apply_continuous_balance = enable_continuous_balance and cycle_on
+                # AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
+                forced = pop_next_from_queue_local(queue_state, pending, count=QUEUE_FORCE_COUNT)
+                assert forced, "pendingは直前に終わった4人を含むため通常は空にならない"
+                forced_uids = {p["user_id"] for p in forced}
 
-            excluded_uid = None
-            if apply_continuous_balance:
-                remaining = [p for p in pending if p["user_id"] not in forced_uids]
-                if remaining:
-                    lowest = min(remaining, key=lambda p: p["match_count"])
-                    if lowest["user_id"] not in forced_uids:
-                        forced = forced + [lowest]
-                        forced_uids.add(lowest["user_id"])
-                remaining2 = [p for p in pending if p["user_id"] not in forced_uids]
-                if remaining2:
-                    highest = max(remaining2, key=lambda p: p["match_count"])
-                    excluded_uid = highest["user_id"]
+                # ★継続的バランス調整: 毎回のAIペアリングの補充で、参加回数が
+                #   最も少ない人を優先的に含め、逆に参加回数が最も多い人は
+                #   今回の候補から除外する(休憩にはしない。次回はまた対象に
+                #   なりうる)。毎回適用すると実力バランスの質が目に見えて落ちる
+                #   ため、continuous_balance_cycle回ごとにオン/オフを交互に切り
+                #   替える(例:3回=通常AI/3回=調整ありAI)。
+                if continuous_balance_cycle > 0:
+                    cycle_on = (((refill_count - 1) // continuous_balance_cycle) % 2) == 1
+                else:
+                    cycle_on = True
+                apply_continuous_balance = enable_continuous_balance and cycle_on
 
-            rest_pool = [
-                p for p in pending
-                if p["user_id"] not in forced_uids and p["user_id"] != excluded_uid
-            ]
-            candidates = forced + rest_pool
-            if len(candidates) < 4:
-                # 除外すると4人未満になる場合は、除外をやめて通常通りにする
-                rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
+                excluded_uid = None
+                if apply_continuous_balance:
+                    if continuous_balance_force_lowest:
+                        remaining = [p for p in pending if p["user_id"] not in forced_uids]
+                        if remaining:
+                            lowest = min(remaining, key=lambda p: p["match_count"])
+                            if lowest["user_id"] not in forced_uids:
+                                forced = forced + [lowest]
+                                forced_uids.add(lowest["user_id"])
+                    remaining2 = [p for p in pending if p["user_id"] not in forced_uids]
+                    if remaining2:
+                        highest = max(remaining2, key=lambda p: p["match_count"])
+                        excluded_uid = highest["user_id"]
+
+                rest_pool = [
+                    p for p in pending
+                    if p["user_id"] not in forced_uids and p["user_id"] != excluded_uid
+                ]
                 candidates = forced + rest_pool
-            assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
+                if len(candidates) < 4:
+                    # 除外すると4人未満になる場合は、除外をやめて通常通りにする
+                    rest_pool = [p for p in pending if p["user_id"] not in forced_uids]
+                    candidates = forced + rest_pool
+                assert len(candidates) >= 4, "num_players >= 4*num_courts を前提としており、通常は発生しない"
 
-            if mode == "full_random":
-                team_a, team_b, _diff = _full_random_four(candidates, force_top_n=len(forced))
-            else:  # ai_pairing
                 partner_counter, opponent_counter = get_recent_history_local(recent_results)
                 team_a, team_b, _diff = _best_balanced_four(candidates, partner_counter, opponent_counter, force_top_n=len(forced))
 
