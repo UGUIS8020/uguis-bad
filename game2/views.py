@@ -59,17 +59,17 @@ PAIRING_MODE_LABELS = {
     "random": "バランス考慮",
     "full_random": "ランダム",  # 人選は完全ランダムだがチーム分けは実力差を調整するため、
                               # 「完全」ランダムという表示は誤解を招く
-    "ai": "AIペアリング",
-    "ai_pairing": "AIペアリング",
-    "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(参加回数の多い人を除外)
-                                             # が適用された回のAIペアリング
-    "ai_pairing_full_balanced": "強調整AIペアリング",  # スキルモード一斉入れ替え前の助走
-                                                    # (pre_skill_remaining)期間、除外に加えて
-                                                    # 最も少ない人を強制参加させる強めの調整
+    "ai": "AIモード",
+    "ai_pairing": "AIモード",
+    "ai_pairing_balanced": "AI調整1モード",  # 継続的バランス調整(参加回数の多い人を除外)
+                                          # が適用された回のAIモード
+    "ai_pairing_full_balanced": "AI調整2モード",  # スキルモード一斉入れ替え前の助走
+                                                # (pre_skill_remaining)期間、除外に加えて
+                                                # 最も少ない人を強制参加させる強めの調整
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
-    "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
-                                    # 実体は_best_balanced_fourを使うAIペアリングと同じロジックのため表示を統合
+    "safety_valve": "AIモード",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
+                                # 実体は_best_balanced_fourを使うAIモードと同じロジックのため表示を統合
 }
 
 
