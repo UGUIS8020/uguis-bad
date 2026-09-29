@@ -988,8 +988,8 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   2. 続くINITIAL_AI_PURE_COUNT回は調整なしの純粋なAIペアリング
 #   3. それ以降は、参加回数の多い人を除外する「調整AIペアリング」のみ
 #      (以前は3回ごとにオン/オフを切り替えていたが、常時オンに変更)
-#   4. ただし、練習開始からSKILL_BURST_INTERVAL_MINUTES分経過した時点で
-#      一度だけ、スキルモード一斉入れ替えを行う(以降は繰り返さない)。
+#   4. ただし、前回スキルモードを差し込んでからSKILL_BURST_INTERVAL_MINUTES分
+#      以上経過したら、スキルモード一斉入れ替えを行う(練習中、繰り返し発動)。
 #      これは通常のモード選定(_next_refill_mode/1コートずつの補充)とは
 #      別の仕組みで、全コートが空くのを待ってから、待機中全員をスキル順に
 #      並べて一括で組み直す(_try_refill_court/_process_skill_burst/
@@ -1007,7 +1007,7 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #      次回はまた対象になりうる)
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
 INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIペアリングを連続させる回数
-SKILL_BURST_INTERVAL_MINUTES = 60  # 練習開始から何分後にスキルモード一斉入れ替えを行うか(1回のみ)
+SKILL_BURST_INTERVAL_MINUTES = 60  # 何分ごとにスキルモード一斉入れ替えを行うか
 
 
 def _next_refill_mode(meta_table):
@@ -1037,15 +1037,12 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
 
     - 既に収集が始まっている(awaiting_skill_burstに1つでもコートがある)
       場合は、経過時間に関わらず最後まで合流させる(全コートが揃うまで待つ)。
-    - まだ始まっていなければ、練習開始からSKILL_BURST_INTERVAL_MINUTES分
-      以上経過しているかどうかで、新規に収集を開始すべきか判定する。
-    - スキルモード一斉入れ替えは練習中に1回だけ行う仕様のため、既に
-      1回実行済み(skill_burst_done)なら、以降は二度と収集を開始しない。
+    - まだ始まっていなければ、前回のスキルモード一斉入れ替えから
+      SKILL_BURST_INTERVAL_MINUTES分以上経過しているかどうかで、新規に
+      収集を開始すべきか判定する(練習中、繰り返し発動する)。
     """
     if meta_current.get("awaiting_skill_burst"):
         return True
-    if pairing_meta.get("skill_burst_done"):
-        return False
     last_burst_at_iso = pairing_meta.get("last_skill_burst_at")
     if not last_burst_at_iso:
         return False
@@ -1151,8 +1148,8 @@ def _try_refill_court(old_match_id, court_number):
     meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     court_count = int(meta_current_now.get("court_count", 0) or 0)
 
-    # ★スキルモード一斉入れ替え: 練習開始からSKILL_BURST_INTERVAL_MINUTES分
-    #   以上経過していて、かつまだ1回も実行していない場合、このコートは
+    # ★スキルモード一斉入れ替え: 前回のスキルモード一斉入れ替えから
+    #   SKILL_BURST_INTERVAL_MINUTES分以上経過している場合、このコートは
     #   単独では補充せず、全コートが空くまで待つ(awaiting_skill_burstに登録)。
     #   全コート揃ったら_process_skill_burst()が待機中全員をスキル順に並べて
     #   一括で組み直す。既に収集が始まっている場合は、経過時間に関わらず
@@ -1671,15 +1668,11 @@ SKILL_BURST_MAX_WAIT_SECONDS = 300  # スキルモード一斉入れ替えで、
 
 
 def _mark_skill_burst_consumed(meta_table, now_jst_iso):
-    """
-    スキルモード一斉入れ替えを実行済みにする。練習中に1回だけ行う仕様のため、
-    skill_burst_doneを立てて以降二度と発動しないようにする
-    (_skill_burst_should_collect参照)。
-    """
+    """このスキルモード一斉入れ替えを消費済みにする(次はSKILL_BURST_INTERVAL_MINUTES後)。"""
     meta_table.update_item(
         Key={"match_id": META_PAIRING_PK},
-        UpdateExpression="SET last_skill_burst_at = :now, skill_burst_done = :true",
-        ExpressionAttributeValues={":now": now_jst_iso, ":true": True},
+        UpdateExpression="SET last_skill_burst_at = :now",
+        ExpressionAttributeValues={":now": now_jst_iso},
     )
 
 
@@ -2145,7 +2138,7 @@ def reset_participants():
             Key={"match_id": META_PAIRING_PK},
             UpdateExpression=(
                 "SET cycle_index = :zero, refill_count = :zero "
-                "REMOVE last_mode, last_match_id, last_skill_burst_at, skill_burst_done"
+                "REMOVE last_mode, last_match_id, last_skill_burst_at"
             ),
             ExpressionAttributeValues={":zero": 0},
         )

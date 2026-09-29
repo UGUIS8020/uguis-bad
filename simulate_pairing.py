@@ -138,10 +138,10 @@ def simulate(n_matches, seed=None,
     initial_ai_pure回は調整なしの純粋なAIペアリング、それ以降は毎回、参加
     回数が最も多い人を除外する「調整AIペアリング」のみ。
 
-    スキルモードは、練習開始からskill_burst_interval_minutes分経過した時点で
-    1回だけ、空いたコートを即座には補充せず全コート(num_courts面)が空くまで
-    集め、待機中全員をスキル順の階層で一括採用する(held_courts集合で
-    シミュレート)。1回実行したら二度と発動しない(本番と同じ)。
+    スキルモードは、前回の一斉入れ替えからskill_burst_interval_minutes分
+    経過するたびに、空いたコートを即座には補充せず全コート(num_courts面)が
+    空くまで集め、待機中全員をスキル順の階層で一括採用する(held_courts集合で
+    シミュレート、繰り返し発動)。
     スキルバースト後は特別扱いせず、即座に通常のfull_random/ai_pairing
     ローテーションに戻る(本番と同じ)。
     """
@@ -163,7 +163,6 @@ def simulate(n_matches, seed=None,
     elapsed_minutes = 0.0
     # ★本番のcreate_pairings()と同じく、練習開始の瞬間を基準点にする
     last_skill_burst_at = 0.0
-    skill_burst_done = False  # 練習中に1回実行したら二度と発動しない
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
     for _ in range(n_matches):
@@ -219,11 +218,10 @@ def simulate(n_matches, seed=None,
                     print(f"#{refill_count} 新規参加登録: {new_id}")
 
         # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
-        #   に関わらず合流。まだなら、練習開始からskill_burst_interval_minutes分
-        #   以上経過していて、かつまだ1回も実行していなければ新規に収集を始める。
+        #   に関わらず合流。まだなら、前回の一斉入れ替えからskill_burst_
+        #   interval_minutes分以上経過していれば新規に収集を始める(繰り返し発動)。
         skill_burst_collecting = bool(held_courts) or (
-            not skill_burst_done
-            and elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes
+            elapsed_minutes - last_skill_burst_at >= skill_burst_interval_minutes
         )
 
         if skill_burst_collecting:
@@ -246,7 +244,6 @@ def simulate(n_matches, seed=None,
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
                 last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
-                skill_burst_done = True
             continue
 
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
