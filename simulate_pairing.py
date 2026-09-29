@@ -10,9 +10,8 @@ _repeat_penalty2 など)を game2/views.py からそのまま import して使�
 比較を素早く・ノイズ少なく行える。
 
 使い方:
-  python simulate_pairing.py                    # 現在の本番サイクルで300試合
+  python simulate_pairing.py                    # 現在の本番スケジュールで300試合
   python simulate_pairing.py --matches 500       # 試合数を変える
-  python simulate_pairing.py --compare           # 複数のサイクル案を一括比較
 """
 import argparse
 import random
@@ -31,8 +30,10 @@ from game2.views import (
     QUEUE_FORCE_COUNT,
     INITIAL_FULL_RANDOM_COUNT,
     INITIAL_AI_PURE_COUNT,
-    SKILL_BURST_CYCLE_REFILLS,
     PRE_SKILL_BALANCE_REFILLS,
+    POST_SKILL_BALANCE_REFILLS_1,
+    POST_SKILL_AI1_REFILLS,
+    POST_SKILL_BALANCE_REFILLS_2,
 )
 
 NUM_PLAYERS = 18
@@ -119,8 +120,10 @@ def simulate(n_matches, seed=None,
              num_players=NUM_PLAYERS, num_courts=NUM_COURTS,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
              initial_ai_pure=INITIAL_AI_PURE_COUNT,
-             skill_burst_cycle_refills=SKILL_BURST_CYCLE_REFILLS,
              pre_skill_balance_refills=PRE_SKILL_BALANCE_REFILLS,
+             post_skill_balance_refills_1=POST_SKILL_BALANCE_REFILLS_1,
+             post_skill_ai1_refills=POST_SKILL_AI1_REFILLS,
+             post_skill_balance_refills_2=POST_SKILL_BALANCE_REFILLS_2,
              enable_continuous_balance=True,
              continuous_balance_force_lowest=False,
              enable_rescue=False,
@@ -131,20 +134,17 @@ def simulate(n_matches, seed=None,
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
     _process_skill_burst / _execute_skill_burst)+ 継続的バランス調整と同じ
     ロジックをシミュレートする。本番と同じく、時間ではなく補充回数
-    (refill_count)だけで全てのモード切り替えを判定する。
+    (refill_count)だけで、練習中1回だけの固定スケジュールとして全ての
+    モード切り替えを判定する:
 
-    モードの流れ(本番と同じ): 最初のinitial_full_random回はランダム、続く
-    initial_ai_pure回は調整なしの純粋な「AIモード」、それ以降は毎回、参加
-    回数が最も多い人を除外する「AI調整1モード」。
-
-    スキルモードは、前回の一斉入れ替えからskill_burst_cycle_refills回分の
-    補充が経過すると、続くpre_skill_balance_refills回だけ「AI調整2モード」
-    (除外+最も少ない人を強制参加)の助走を行い、それを使い切ったら空いた
-    コートを即座には補充せず全コート(num_courts面)が空くまで集め、待機中
-    全員をスキル順の階層で一括採用する(held_courts集合でシミュレート、
-    繰り返し発動)。
-    スキルバースト後は特別扱いせず、即座に通常のfull_random/ai_pairing
-    ローテーションに戻る(本番と同じ)。
+      1〜initial_full_random: ランダム
+      続くinitial_ai_pure回: 調整なしの純粋な「AIモード」
+      続くpre_skill_balance_refills回: 「AI調整2モード」
+      → ここでスキルモード一斉入れ替えが1回だけ発動(refill_countは消費しない)
+      続くpost_skill_balance_refills_1回: 「AI調整2モード」
+      続くpost_skill_ai1_refills回: 「AI調整1モード」
+      続くpost_skill_balance_refills_2回: 「AI調整2モード」
+      それ以降は練習終了まで「AI調整1モード」のまま(スキル優先は二度と発動しない)
     """
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
@@ -157,13 +157,19 @@ def simulate(n_matches, seed=None,
         courts[c] = {"team_a": four[:2], "team_b": four[2:]}
     pending = players[num_courts * 4:]
 
+    # 固定スケジュールの境界(累積refill_count)
+    boundary_1 = initial_full_random
+    boundary_2 = boundary_1 + initial_ai_pure
+    boundary_3 = boundary_2 + pre_skill_balance_refills  # スキル優先の発動点
+    boundary_4 = boundary_3 + post_skill_balance_refills_1
+    boundary_5 = boundary_4 + post_skill_ai1_refills
+    boundary_6 = boundary_5 + post_skill_balance_refills_2
+
     recent_results = []  # [(team_a, team_b), ...] 新しい順ではなく古い順に追加
     match_log = []  # 全試合: (court_num, team_a, team_b, diff)
     refill_count = 0
     queue_state = {"queue": [], "last_picked": []}  # 本番のDynamoDB永続キューに相当
-    # ★本番のcreate_pairings()と同じく、練習開始の瞬間を基準点にする
-    last_skill_burst_refill_count = 0
-    pre_skill_remaining = None  # Noneなら助走未開始、intなら助走の残り回数
+    skill_burst_done = False  # 練習中に1回発動したら二度と発動しない
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
     for _ in range(n_matches):
@@ -217,23 +223,12 @@ def simulate(n_matches, seed=None,
                 if trace:
                     print(f"#{refill_count} 新規参加登録: {new_id}")
 
-        # ★スキルモード一斉入れ替えの前に、AI調整2モードの助走を挟む:
-        #   前回の一斉入れ替えからskill_burst_cycle_refills回分の補充が経過
-        #   していてまだ助走を始めていなければ、pre_skill_balance_refills回分
-        #   の助走を開始する。
-        if (
-            pre_skill_remaining is None
-            and refill_count - last_skill_burst_refill_count >= skill_burst_cycle_refills
-        ):
-            pre_skill_remaining = pre_skill_balance_refills
-            if trace:
-                print(f"#{refill_count} AI調整2モードの助走({pre_skill_balance_refills}回)を開始")
-
-        # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
-        #   に関わらず合流。まだなら、助走(pre_skill_remaining)を使い切って
-        #   いれば新規に収集を始める(繰り返し発動)。
+        # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら合流。
+        #   まだなら、まだ発動していなくて(skill_burst_done=False)、かつ
+        #   refill_countがboundary_3(スキル優先直前のAI調整2モードの終わり)
+        #   に達していれば新規に収集を始める(練習中に1回だけ発動)。
         skill_burst_collecting = bool(held_courts) or (
-            pre_skill_remaining is not None and pre_skill_remaining <= 0
+            not skill_burst_done and refill_count >= boundary_3
         )
 
         if skill_burst_collecting:
@@ -255,8 +250,7 @@ def simulate(n_matches, seed=None,
                     if trace:
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
-                last_skill_burst_refill_count = refill_count  # このバーストを消費済みにする
-                pre_skill_remaining = None  # 次のサイクルでまた助走から再スタート
+                skill_burst_done = True  # 練習中に1回だけ発動、以降は二度と発動しない
             continue
 
         # ★本番_next_refill_mode()と同じ時間ベースのモード選定(full_random/ai_pairingのみ)
@@ -296,14 +290,14 @@ def simulate(n_matches, seed=None,
                 #   AIペアリングinitial_ai_pure回が終わった後は、毎回参加回数が
                 #   最も多い人を今回の候補から除外する(休憩にはしない。次回は
                 #   また対象になりうる)。
-                apply_continuous_balance = (
-                    enable_continuous_balance
-                    and refill_count > (initial_full_random + initial_ai_pure)
-                )
+                apply_continuous_balance = enable_continuous_balance and refill_count > boundary_2
 
-                # ★強調整(スキルモード一斉入れ替え前の助走期間、pre_skill_remaining
-                #   が残っている間だけ): 除外に加えて最も少ない人も強制参加させる。
-                apply_full_balance = pre_skill_remaining is not None and pre_skill_remaining > 0
+                # ★強調整(AI調整2モードの期間だけ): 除外に加えて最も少ない人も
+                #   強制参加させる。固定スケジュールのrefill_countで判定する。
+                apply_full_balance = (
+                    boundary_2 < refill_count <= boundary_4
+                    or boundary_5 < refill_count <= boundary_6
+                )
 
                 excluded_uid = None
                 if apply_continuous_balance:
@@ -314,8 +308,6 @@ def simulate(n_matches, seed=None,
                             if lowest["user_id"] not in forced_uids:
                                 forced = forced + [lowest]
                                 forced_uids.add(lowest["user_id"])
-                        if apply_full_balance:
-                            pre_skill_remaining -= 1
                     remaining2 = [p for p in pending if p["user_id"] not in forced_uids]
                     if remaining2:
                         highest = max(remaining2, key=lambda p: p["match_count"])
@@ -399,37 +391,14 @@ def evaluate(match_log, label, by_uid=None):
     }
 
 
-# --compareで比較する、AI調整2モードの助走を始めるまでの補充回数の候補
-CANDIDATE_BURST_INTERVALS = {
-    "12回後": 12,
-    "現行本番(18回後)": SKILL_BURST_CYCLE_REFILLS,
-    "24回後": 24,
-    "差し込みなし(9999回=実質無し)": 9999,
-}
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--matches", type=int, default=300)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--compare", action="store_true")
     args = parser.parse_args()
 
-    if args.compare:
-        results = {}
-        for label, interval in CANDIDATE_BURST_INTERVALS.items():
-            log, by_uid = simulate(args.matches, seed=args.seed, skill_burst_cycle_refills=interval)
-            results[label] = evaluate(log, label, by_uid)
-
-        print("\n" + "=" * 70)
-        print("=== まとめ ===")
-        print(f"{'スキル差し込み間隔':30s} {'待ち平均':>8s} {'待ち最大':>8s} {'差平均':>8s} {'差最大':>8s} {'重複計':>6s}")
-        for label, m in results.items():
-            total_repeat = m["repeat_partner"] + m["repeat_opp"]
-            print(f"{label:30s} {m['wait_avg']:8.2f} {m['wait_max']:8d} {m['diff_avg']:8.2f} {m['diff_max']:8.2f} {total_repeat:6d}")
-    else:
-        log, by_uid = simulate(args.matches, seed=args.seed)
-        evaluate(log, "現行本番設定", by_uid)
+    log, by_uid = simulate(args.matches, seed=args.seed)
+    evaluate(log, "現行本番設定", by_uid)
 
 
 if __name__ == "__main__":
