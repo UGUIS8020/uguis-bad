@@ -61,7 +61,7 @@ PAIRING_MODE_LABELS = {
                               # 「完全」ランダムという表示は誤解を招く
     "ai": "AIペアリング",
     "ai_pairing": "AIペアリング",
-    "ai_pairing_balanced": "AI調整ペアリング",  # 継続的バランス調整(CONTINUOUS_BALANCE_CYCLE
+    "ai_pairing_balanced": "調整AIペアリング",  # 継続的バランス調整(CONTINUOUS_BALANCE_CYCLE
                                              # 回ごとにオン/オフ)がオンの回のAIペアリング
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
