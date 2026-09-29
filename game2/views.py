@@ -61,6 +61,8 @@ PAIRING_MODE_LABELS = {
                               # 「完全」ランダムという表示は誤解を招く
     "ai": "AIペアリング",
     "ai_pairing": "AIペアリング",
+    "ai_pairing_balanced": "AI調整ペアリング",  # 継続的バランス調整(CONTINUOUS_BALANCE_CYCLE
+                                             # 回ごとにオン/オフ)がオンの回のAIペアリング
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "AIペアリング",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
@@ -1247,6 +1249,7 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
 
     mode, refill_count = _next_refill_mode(meta_table)
     all_pending = _all_pending_unordered(entry_table)
+    continuous_balance_applied = False
 
     # ★完全ランダムは練習開始直後のINITIAL_FULL_RANDOM_COUNT回だけ使う、
     #   あえて何の調整もしないシンプルなモード。救済モード・永続キューに
@@ -1316,6 +1319,7 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             apply_continuous_balance = (
                 ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
             ) == 1
+            continuous_balance_applied = apply_continuous_balance
             excluded_uid = None
             if apply_continuous_balance:
                 remaining = [e for e in all_pending if e.get("user_id") not in forced_uids]
@@ -1360,7 +1364,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 candidates, partner_counter, opponent_counter, force_top_n=len(forced)
             )
 
-    used_mode = "safety_valve" if rescued else mode
+    if rescued:
+        used_mode = "safety_valve"
+    elif continuous_balance_applied:
+        used_mode = "ai_pairing_balanced"
+    else:
+        used_mode = mode
     new_match_id = generate_match_id2()
 
     import boto3
