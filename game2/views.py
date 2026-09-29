@@ -602,9 +602,17 @@ def create_pairings():
         "Update": {
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
+            # ★awaiting_refill/held_for_pairing/awaiting_skill_burstは空マップとして
+            #   ここで確実に存在させておく(REMOVEではなくSETで空マップ)。こうする
+            #   ことで、各コートの登録処理は「マップがなければ作ってから」という
+            #   2段階の更新が不要になり、1回のUpdateItemで完結できる。2段階だと、
+            #   1段階目(マップ作成)と2段階目(コート番号のキー追加)の間に他の
+            #   リクエストが割り込むと、そのコートがまだ登録されていないと誤認
+            #   されてしまう(実際に本番で二重登録・二重補充の原因になった)。
             "UpdateExpression": (
-                "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc "
-                "REMOVE matching_paused, awaiting_refill, held_for_pairing, awaiting_skill_burst"
+                "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc, "
+                "awaiting_refill = :empty, held_for_pairing = :empty, awaiting_skill_burst = :empty "
+                "REMOVE matching_paused"
             ),
             "ExpressionAttributeNames": {
                 "#st": "status", "#cm": "current_match_id", "#cc": "court_count",
@@ -613,7 +621,7 @@ def create_pairings():
             "ExpressionAttributeValues": {
                 ":playing": {"S": "playing"}, ":mid": {"S": str(match_id)},
                 ":cc": {"N": str(len(matches))}, ":now": {"S": now_jst}, ":mode": {"S": mode},
-                ":maxc": {"N": str(max_courts)},
+                ":maxc": {"N": str(max_courts)}, ":empty": {"M": {}},
             },
         }
     }]
@@ -1170,11 +1178,9 @@ def _try_refill_court(old_match_id, court_number):
     #   練習中に1回だけ発動する仕様。
     pairing_meta_now = meta_table.get_item(Key={"match_id": META_PAIRING_PK}, ConsistentRead=True).get("Item", {}) or {}
     if _skill_burst_should_collect(meta_current_now, pairing_meta_now):
-        meta_table.update_item(
-            Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET awaiting_skill_burst = if_not_exists(awaiting_skill_burst, :empty)",
-            ExpressionAttributeValues={":empty": {}},
-        )
+        # ★create_pairings()で空マップとして初期化済みのため、1回の原子的な
+        #   更新で登録できる(以前は2段階の更新で、その間の一瞬を他のリクエスト
+        #   が「未登録」と誤認して別経路に二重登録してしまう不具合があった)。
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET awaiting_skill_burst.#c = :now",
@@ -1201,11 +1207,6 @@ def _try_refill_court(old_match_id, court_number):
     if court_count >= 2 and buffer <= LOW_BUFFER_THRESHOLD:
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET held_for_pairing = if_not_exists(held_for_pairing, :empty)",
-            ExpressionAttributeValues={":empty": {}},
-        )
-        meta_table.update_item(
-            Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET held_for_pairing.#c = :now",
             ExpressionAttributeNames={"#c": str(court_number)},
             ExpressionAttributeValues={":now": now_jst},
@@ -1219,13 +1220,8 @@ def _try_refill_court(old_match_id, court_number):
     # ★次の組み合わせはすぐには作らず、このコートを「空き」として記録するだけ。
     #   実際の補充は _process_awaiting_refills() が COURT_REFILL_DELAY_SECONDS
     #   経過後に行う（休憩したい人が申告する時間を確保するため）。
-    #   awaiting_refill はマップ属性なので、無い場合にネストしたSETが失敗しない
-    #   よう、先に空マップとして存在を保証してから値を入れる(2段階)。
-    meta_table.update_item(
-        Key={"match_id": META_CURRENT_PK},
-        UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
-        ExpressionAttributeValues={":empty": {}},
-    )
+    #   awaiting_refillはcreate_pairings()で空マップとして初期化済みのため、
+    #   1回の原子的な更新で登録できる。
     meta_table.update_item(
         Key={"match_id": META_CURRENT_PK},
         UpdateExpression="SET awaiting_refill.#c = :now",
@@ -1545,11 +1541,6 @@ def _process_new_court_opportunity():
     now_jst = datetime.now(JST).isoformat()
     meta_table.update_item(
         Key={"match_id": META_CURRENT_PK},
-        UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
-        ExpressionAttributeValues={":empty": {}},
-    )
-    meta_table.update_item(
-        Key={"match_id": META_CURRENT_PK},
         UpdateExpression="SET awaiting_refill.#c = :now",
         ExpressionAttributeNames={"#c": str(new_court_number)},
         ExpressionAttributeValues={":now": now_jst},
@@ -1602,11 +1593,6 @@ def _reconcile_orphaned_courts():
     for court_num in range(1, court_count + 1):
         if court_num in playing_courts or str(court_num) in tracked:
             continue
-        meta_table.update_item(
-            Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
-            ExpressionAttributeValues={":empty": {}},
-        )
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET awaiting_refill.#c = :now",
@@ -1725,11 +1711,6 @@ def _mark_skill_burst_consumed(meta_table):
 def _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst_iso):
     """スキルモード一斉入れ替えの対象から外れたコートを、通常の空き待ちに戻す。"""
     for c in court_numbers:
-        meta_table.update_item(
-            Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET awaiting_refill = if_not_exists(awaiting_refill, :empty)",
-            ExpressionAttributeValues={":empty": {}},
-        )
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET awaiting_refill.#c = :now",
