@@ -996,10 +996,9 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #      一度リセットしておく狙い
 #   4. → ここでスキルモード一斉入れ替えが1回だけ発動する(練習中に二度と
 #      発動しない)。一斉入れ替え自体はrefill_countを消費しない
-#   5. 続くPOST_SKILL_BALANCE_REFILLS_1回: 「AI調整2モード」
+#   5. 続くPOST_SKILL_BALANCE_REFILLS回: 「AI調整2モード」
 #   6. 続くPOST_SKILL_AI1_REFILLS回: 「AI調整1モード」(除外のみ)
-#   7. 続くPOST_SKILL_BALANCE_REFILLS_2回: 「AI調整2モード」
-#   8. それ以降は練習終了まで「AI調整1モード」のまま変更なし
+#   7. それ以降は練習終了まで「AI調整2モード」のまま変更なし
 # 休みの調整は二重構成:
 #   1. ランダム/AIモードは、_pop_next_from_play_queue()による永続キューの
 #      先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ「休む人を
@@ -1013,18 +1012,17 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
 INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIモードを連続させる回数
 PRE_SKILL_BALANCE_REFILLS = 3  # スキル優先直前のAI調整2モードの回数
-POST_SKILL_BALANCE_REFILLS_1 = 3  # スキル優先直後のAI調整2モードの回数
+POST_SKILL_BALANCE_REFILLS = 6  # スキル優先直後のAI調整2モードの回数
 POST_SKILL_AI1_REFILLS = 6  # その後のAI調整1モードの回数
-POST_SKILL_BALANCE_REFILLS_2 = 3  # その後、最後のAI調整2モードの回数
-# これ以降refillが増えても、上記境界を超えたらAI調整1モードのまま固定される
+# これ以降refillが増えても、上記境界を超えたらAI調整2モードのまま固定される
+# (練習が終わるまで変更なし)
 
 # 各フェーズの終わり(累積refill_count)を計算しておく
 _BOUNDARY_1 = INITIAL_FULL_RANDOM_COUNT  # ランダム終わり
 _BOUNDARY_2 = _BOUNDARY_1 + INITIAL_AI_PURE_COUNT  # AIモード終わり
 _BOUNDARY_3 = _BOUNDARY_2 + PRE_SKILL_BALANCE_REFILLS  # スキル優先直前のAI調整2終わり(=発動点)
-_BOUNDARY_4 = _BOUNDARY_3 + POST_SKILL_BALANCE_REFILLS_1  # スキル優先直後のAI調整2終わり
-_BOUNDARY_5 = _BOUNDARY_4 + POST_SKILL_AI1_REFILLS  # その後のAI調整1終わり
-_BOUNDARY_6 = _BOUNDARY_5 + POST_SKILL_BALANCE_REFILLS_2  # 最後のAI調整2終わり(以降ずっとAI調整1)
+_BOUNDARY_4 = _BOUNDARY_3 + POST_SKILL_BALANCE_REFILLS  # スキル優先直後のAI調整2終わり
+_BOUNDARY_5 = _BOUNDARY_4 + POST_SKILL_AI1_REFILLS  # その後のAI調整1終わり(以降ずっとAI調整2)
 
 
 def _next_refill_mode(meta_table):
@@ -1341,11 +1339,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
 
             # ★強調整(AI調整2モードの期間だけ): 除外のみでは是正しきれない
             #   偏りを一気に縮めるため、この期間だけ「最も少ない人を強制参加」
-            #   も併用する。固定スケジュール(_BOUNDARY_2〜_BOUNDARY_4、および
-            #   _BOUNDARY_5〜_BOUNDARY_6)のrefill_countかどうかだけで判定する。
+            #   も併用する。固定スケジュール上、_BOUNDARY_2〜_BOUNDARY_4
+            #   (スキル優先前後のAI調整2)と、_BOUNDARY_5より後(AI調整1の後、
+            #   練習終了までずっとAI調整2)のrefill_countかどうかで判定する。
             apply_full_balance = (
                 _BOUNDARY_2 < refill_count <= _BOUNDARY_4
-                or _BOUNDARY_5 < refill_count <= _BOUNDARY_6
+                or refill_count > _BOUNDARY_5
             )
             full_balance_applied = False
 
