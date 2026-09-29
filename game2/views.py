@@ -984,6 +984,7 @@ def _skill_priority_four(candidates, partner_counter=None):
     return team_a, team_b, key[1]
 
 
+ENABLE_RESCUE_MODE = False  # 救済モードを使うかどうか(いったんオフ。2026-09-29時点)
 WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら救済モードで強制的に含めるか
 QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
@@ -1280,14 +1281,15 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     else:
         # ★救済モード: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けて
         #   いる人がいれば、強制的に含める（極端な長時間待ちを防ぐ保険。
-        #   永続キューによる穏やかな公平性とは別枠で併存させる）
+        #   永続キューによる穏やかな公平性とは別枠で併存させる）。
+        #   ENABLE_RESCUE_MODE=Falseの間はいったん無効化(2026-09-29時点)。
         rescued = sorted(
             [
                 p for p in all_pending
                 if refill_count - int(p.get("pending_since_refill_count", refill_count)) >= WAIT_RESCUE_THRESHOLD
             ],
             key=lambda p: int(p.get("pending_since_refill_count", refill_count)),
-        )[:4]
+        )[:4] if ENABLE_RESCUE_MODE else []
 
         if rescued:
             rescued_uids = {p["entry_id"] for p in rescued}
