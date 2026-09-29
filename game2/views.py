@@ -57,7 +57,8 @@ META_PAIRING_PK = "meta#continuous_pairing"
 # コート表示に使う、ペアリングモードの日本語ラベル
 PAIRING_MODE_LABELS = {
     "random": "バランス考慮",
-    "full_random": "完全ランダム",
+    "full_random": "ランダム",  # 人選は完全ランダムだがチーム分けは実力差を調整するため、
+                              # 「完全」ランダムという表示は誤解を招く
     "ai": "AIペアリング",
     "ai_pairing": "AIペアリング",
     "balance_only": "スキルモード",
