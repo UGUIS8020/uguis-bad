@@ -31,9 +31,8 @@ from game2.views import (
     INITIAL_FULL_RANDOM_COUNT,
     INITIAL_AI_PURE_COUNT,
     PRE_SKILL_BALANCE_REFILLS,
-    POST_SKILL_BALANCE_REFILLS_1,
+    POST_SKILL_BALANCE_REFILLS,
     POST_SKILL_AI1_REFILLS,
-    POST_SKILL_BALANCE_REFILLS_2,
 )
 
 NUM_PLAYERS = 18
@@ -121,9 +120,8 @@ def simulate(n_matches, seed=None,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
              initial_ai_pure=INITIAL_AI_PURE_COUNT,
              pre_skill_balance_refills=PRE_SKILL_BALANCE_REFILLS,
-             post_skill_balance_refills_1=POST_SKILL_BALANCE_REFILLS_1,
+             post_skill_balance_refills=POST_SKILL_BALANCE_REFILLS,
              post_skill_ai1_refills=POST_SKILL_AI1_REFILLS,
-             post_skill_balance_refills_2=POST_SKILL_BALANCE_REFILLS_2,
              enable_continuous_balance=True,
              continuous_balance_force_lowest=False,
              enable_rescue=False,
@@ -141,10 +139,9 @@ def simulate(n_matches, seed=None,
       続くinitial_ai_pure回: 調整なしの純粋な「AIモード」
       続くpre_skill_balance_refills回: 「AI調整2モード」
       → ここでスキルモード一斉入れ替えが1回だけ発動(refill_countは消費しない)
-      続くpost_skill_balance_refills_1回: 「AI調整2モード」
+      続くpost_skill_balance_refills回: 「AI調整2モード」
       続くpost_skill_ai1_refills回: 「AI調整1モード」
-      続くpost_skill_balance_refills_2回: 「AI調整2モード」
-      それ以降は練習終了まで「AI調整1モード」のまま(スキル優先は二度と発動しない)
+      それ以降は練習終了まで「AI調整2モード」のまま(スキル優先は二度と発動しない)
     """
     rng = random.Random(seed)
     players = make_players(n=num_players, seed=seed)
@@ -161,9 +158,8 @@ def simulate(n_matches, seed=None,
     boundary_1 = initial_full_random
     boundary_2 = boundary_1 + initial_ai_pure
     boundary_3 = boundary_2 + pre_skill_balance_refills  # スキル優先の発動点
-    boundary_4 = boundary_3 + post_skill_balance_refills_1
-    boundary_5 = boundary_4 + post_skill_ai1_refills
-    boundary_6 = boundary_5 + post_skill_balance_refills_2
+    boundary_4 = boundary_3 + post_skill_balance_refills
+    boundary_5 = boundary_4 + post_skill_ai1_refills  # 以降ずっとAI調整2
 
     recent_results = []  # [(team_a, team_b), ...] 新しい順ではなく古い順に追加
     match_log = []  # 全試合: (court_num, team_a, team_b, diff)
@@ -296,7 +292,7 @@ def simulate(n_matches, seed=None,
                 #   強制参加させる。固定スケジュールのrefill_countで判定する。
                 apply_full_balance = (
                     boundary_2 < refill_count <= boundary_4
-                    or boundary_5 < refill_count <= boundary_6
+                    or refill_count > boundary_5
                 )
 
                 excluded_uid = None
