@@ -1087,7 +1087,8 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
 
 
 COURT_REFILL_DELAY_SECONDS = 10  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
-LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする
+LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする(3コート以上)
+LOW_BUFFER_THRESHOLD_2COURTS = 1  # 同上、2コートの場合だけ緩めた値(待ちが発生しにくい)
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
 
 
@@ -1225,13 +1226,15 @@ def _try_refill_court(old_match_id, court_number):
     #   このコートを除いた「今すぐ試合に戻れる人数(バッファ)」が
     #   LOW_BUFFER_THRESHOLD人以下の場合は、単独では補充せず、もう1コート
     #   分空くのを待ってから2コート分まとめて組み直すことで、混ざり合う
-    #   余地を作る。
+    #   余地を作る。2コートの場合は、待ちが発生しやすすぎるため
+    #   LOW_BUFFER_THRESHOLD_2COURTSという緩めた閾値を使う。
     active_items = entry_table.scan(
         FilterExpression=Attr("entry_status").is_in(["pending", "playing"]), ConsistentRead=True
     ).get("Items", [])
     buffer = len(active_items) - court_count * 4
+    low_buffer_threshold = LOW_BUFFER_THRESHOLD_2COURTS if court_count == 2 else LOW_BUFFER_THRESHOLD
 
-    if court_count >= 2 and buffer <= LOW_BUFFER_THRESHOLD:
+    if court_count >= 2 and buffer <= low_buffer_threshold:
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET held_for_pairing.#c = :now",
