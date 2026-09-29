@@ -1310,23 +1310,19 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             forced_uids = {p["user_id"] for p in forced}
 
             # ★継続的バランス調整: CONTINUOUS_BALANCE_CYCLE回ごとにオン/オフを
-            #   交互に切り替えながら、参加回数(match_count)が最も少ない人を
-            #   優先的に含め、最も多い人は今回の候補から除外する(休憩にはしない。
-            #   次回はまた対象になりうる)。毎回適用すると実力バランスの質が
-            #   目に見えて落ちるため、間欠的に効かせて公平性とのバランスを取る
-            #   (シミュレーションで確認済み: 毎回適用とほぼ同じ公平性改善を、
-            #   実力差への悪影響を4割ほど抑えて実現できる)。
+            #   交互に切り替えながら、参加回数(match_count)が最も多い人を
+            #   今回の候補から除外する(休憩にはしない。次回はまた対象になりうる)。
+            #   以前は「最も少ない人を強制参加」も併用していたが、遅れて参加
+            #   した人がmatch_count=0のため毎回最優先で拾われてしまう懸念があり、
+            #   シミュレーションで検証の上、除外のみに変更した(永続キュー自体が
+            #   参加回数の少ない人を優先する仕組みを既に持っているため、除外
+            #   だけでも一定の公平性は保てる)。
             apply_continuous_balance = (
                 ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
             ) == 1
             continuous_balance_applied = apply_continuous_balance
             excluded_uid = None
             if apply_continuous_balance:
-                remaining = [e for e in all_pending if e.get("user_id") not in forced_uids]
-                if remaining:
-                    lowest = min(remaining, key=lambda e: int(e.get("match_count", 0) or 0))
-                    forced = forced + [lowest]
-                    forced_uids.add(lowest["user_id"])
                 remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
                 excluded_display_name = None
                 if remaining2:
@@ -1334,12 +1330,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                     excluded_uid = highest["user_id"]
                     excluded_display_name = highest.get("display_name")
                 current_app.logger.info(
-                    "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): "
-                    "優先=%s(試合数%s) 除外=%s",
-                    court_number, refill_count,
-                    lowest.get("display_name") if remaining else None,
-                    lowest.get("match_count") if remaining else None,
-                    excluded_display_name,
+                    "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): 除外=%s",
+                    court_number, refill_count, excluded_display_name,
                 )
 
             rest_pool = [
