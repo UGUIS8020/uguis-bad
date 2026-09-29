@@ -1013,7 +1013,7 @@ INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続さ�
 INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIモードを連続させる回数
 PRE_SKILL_BALANCE_REFILLS = 3  # スキル優先直前のAI調整2モードの回数
 POST_SKILL_BALANCE_REFILLS = 6  # スキル優先直後のAI調整2モードの回数
-POST_SKILL_AI1_REFILLS = 6  # その後のAI調整1モードの回数
+POST_SKILL_AI1_REFILLS = 3  # その後のAI調整1モードの回数
 # これ以降refillが増えても、上記境界を超えたらAI調整2モードのまま固定される
 # (練習が終わるまで変更なし)
 
