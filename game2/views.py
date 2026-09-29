@@ -1284,104 +1284,115 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
         return
 
     mode, refill_count = _next_refill_mode(meta_table)
-
-    # ★救済モード: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けて
-    #   いる人がいれば、モードに関わらず強制的に含める（極端な長時間待ちを
-    #   防ぐ保険。永続キューによる穏やかな公平性とは別枠で併存させる）
     all_pending = _all_pending_unordered(entry_table)
-    rescued = sorted(
-        [
-            p for p in all_pending
-            if refill_count - int(p.get("pending_since_refill_count", refill_count)) >= WAIT_RESCUE_THRESHOLD
-        ],
-        key=lambda p: int(p.get("pending_since_refill_count", refill_count)),
-    )[:4]
 
-    if rescued:
-        rescued_uids = {p["entry_id"] for p in rescued}
-        others = [p for p in all_pending if p["entry_id"] not in rescued_uids]
-        candidates = rescued + others
-        if len(candidates) < 4:
+    # ★完全ランダムは練習開始直後のINITIAL_FULL_RANDOM_COUNT回だけ使う、
+    #   あえて何の調整もしないシンプルなモード。救済モード・永続キューに
+    #   よる強制・継続的バランス調整は一切適用せず、待機中から純粋に
+    #   ランダムに4人選ぶ(チーム分けの実力差調整のみ行う)。
+    if mode == "full_random":
+        rescued = []
+        if len(all_pending) < 4:
             current_app.logger.info(
                 "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
-                court_number, len(candidates),
+                court_number, len(all_pending),
             )
             return
-        partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
-        team_a_entries, team_b_entries, diff = _best_balanced_four(
-            candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
-        )
-        current_app.logger.info(
-            "[game2][continuous] court=%s 救済モード発動: %d人を強制的に含める(%s)",
-            court_number, len(rescued), [p.get("display_name") for p in rescued],
+        partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
+        team_a_entries, team_b_entries, diff = _full_random_four(
+            all_pending, force_top_n=0, partner_counter=partner_counter
         )
     else:
-        # 完全ランダム／AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
-        # (旧システムと同じ「休む人を先に決める」発想。通常時の公平性)
-        forced = _pop_next_from_play_queue(entry_table, meta_table, count=QUEUE_FORCE_COUNT)
-        if not forced:
-            current_app.logger.info(
-                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします",
-                court_number,
-            )
-            return
-        forced_uids = {p["user_id"] for p in forced}
+        # ★救済モード: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けて
+        #   いる人がいれば、強制的に含める（極端な長時間待ちを防ぐ保険。
+        #   永続キューによる穏やかな公平性とは別枠で併存させる）
+        rescued = sorted(
+            [
+                p for p in all_pending
+                if refill_count - int(p.get("pending_since_refill_count", refill_count)) >= WAIT_RESCUE_THRESHOLD
+            ],
+            key=lambda p: int(p.get("pending_since_refill_count", refill_count)),
+        )[:4]
 
-        # ★継続的バランス調整: CONTINUOUS_BALANCE_CYCLE回ごとにオン/オフを
-        #   交互に切り替えながら、参加回数(match_count)が最も少ない人を
-        #   優先的に含め、最も多い人は今回の候補から除外する(休憩にはしない。
-        #   次回はまた対象になりうる)。毎回適用すると実力バランスの質が
-        #   目に見えて落ちるため、間欠的に効かせて公平性とのバランスを取る
-        #   (シミュレーションで確認済み: 毎回適用とほぼ同じ公平性改善を、
-        #   実力差への悪影響を4割ほど抑えて実現できる)。
-        apply_continuous_balance = (
-            ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
-        ) == 1
-        excluded_uid = None
-        if apply_continuous_balance:
-            remaining = [e for e in all_pending if e.get("user_id") not in forced_uids]
-            if remaining:
-                lowest = min(remaining, key=lambda e: int(e.get("match_count", 0) or 0))
-                forced = forced + [lowest]
-                forced_uids.add(lowest["user_id"])
-            remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
-            excluded_display_name = None
-            if remaining2:
-                highest = max(remaining2, key=lambda e: int(e.get("match_count", 0) or 0))
-                excluded_uid = highest["user_id"]
-                excluded_display_name = highest.get("display_name")
-            current_app.logger.info(
-                "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): "
-                "優先=%s(試合数%s) 除外=%s",
-                court_number, refill_count,
-                lowest.get("display_name") if remaining else None,
-                lowest.get("match_count") if remaining else None,
-                excluded_display_name,
+        if rescued:
+            rescued_uids = {p["entry_id"] for p in rescued}
+            others = [p for p in all_pending if p["entry_id"] not in rescued_uids]
+            candidates = rescued + others
+            if len(candidates) < 4:
+                current_app.logger.info(
+                    "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
+                    court_number, len(candidates),
+                )
+                return
+            partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
+            team_a_entries, team_b_entries, diff = _best_balanced_four(
+                candidates, partner_counter, opponent_counter, force_top_n=len(rescued)
             )
+            current_app.logger.info(
+                "[game2][continuous] court=%s 救済モード発動: %d人を強制的に含める(%s)",
+                court_number, len(rescued), [p.get("display_name") for p in rescued],
+            )
+        else:
+            # AIペアリング: 永続キューの先頭QUEUE_FORCE_COUNT人を必ず含める
+            # (旧システムと同じ「休む人を先に決める」発想。通常時の公平性)
+            forced = _pop_next_from_play_queue(entry_table, meta_table, count=QUEUE_FORCE_COUNT)
+            if not forced:
+                current_app.logger.info(
+                    "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします",
+                    court_number,
+                )
+                return
+            forced_uids = {p["user_id"] for p in forced}
 
-        rest_pool = [
-            e for e in all_pending
-            if e.get("user_id") not in forced_uids and e.get("user_id") != excluded_uid
-        ]
-        candidates = forced + rest_pool
-        if len(candidates) < 4:
-            # ★除外すると4人未満になってしまう場合は、除外をやめて通常通りにする
-            rest_pool = [e for e in all_pending if e.get("user_id") not in forced_uids]
+            # ★継続的バランス調整: CONTINUOUS_BALANCE_CYCLE回ごとにオン/オフを
+            #   交互に切り替えながら、参加回数(match_count)が最も少ない人を
+            #   優先的に含め、最も多い人は今回の候補から除外する(休憩にはしない。
+            #   次回はまた対象になりうる)。毎回適用すると実力バランスの質が
+            #   目に見えて落ちるため、間欠的に効かせて公平性とのバランスを取る
+            #   (シミュレーションで確認済み: 毎回適用とほぼ同じ公平性改善を、
+            #   実力差への悪影響を4割ほど抑えて実現できる)。
+            apply_continuous_balance = (
+                ((refill_count - 1) // CONTINUOUS_BALANCE_CYCLE) % 2
+            ) == 1
+            excluded_uid = None
+            if apply_continuous_balance:
+                remaining = [e for e in all_pending if e.get("user_id") not in forced_uids]
+                if remaining:
+                    lowest = min(remaining, key=lambda e: int(e.get("match_count", 0) or 0))
+                    forced = forced + [lowest]
+                    forced_uids.add(lowest["user_id"])
+                remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
+                excluded_display_name = None
+                if remaining2:
+                    highest = max(remaining2, key=lambda e: int(e.get("match_count", 0) or 0))
+                    excluded_uid = highest["user_id"]
+                    excluded_display_name = highest.get("display_name")
+                current_app.logger.info(
+                    "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): "
+                    "優先=%s(試合数%s) 除外=%s",
+                    court_number, refill_count,
+                    lowest.get("display_name") if remaining else None,
+                    lowest.get("match_count") if remaining else None,
+                    excluded_display_name,
+                )
+
+            rest_pool = [
+                e for e in all_pending
+                if e.get("user_id") not in forced_uids and e.get("user_id") != excluded_uid
+            ]
             candidates = forced + rest_pool
+            if len(candidates) < 4:
+                # ★除外すると4人未満になってしまう場合は、除外をやめて通常通りにする
+                rest_pool = [e for e in all_pending if e.get("user_id") not in forced_uids]
+                candidates = forced + rest_pool
 
-        if len(candidates) < 4:
-            current_app.logger.info(
-                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
-                court_number, len(candidates),
-            )
-            return
+            if len(candidates) < 4:
+                current_app.logger.info(
+                    "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします(候補%d人)",
+                    court_number, len(candidates),
+                )
+                return
 
-        if mode == "full_random":
-            partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
-            team_a_entries, team_b_entries, diff = _full_random_four(
-                candidates, force_top_n=len(forced), partner_counter=partner_counter
-            )
-        else:  # ai_pairing
             partner_counter, opponent_counter = _get_recent_pair_history2(results_table)
             team_a_entries, team_b_entries, diff = _best_balanced_four(
                 candidates, partner_counter, opponent_counter, force_top_n=len(forced)
