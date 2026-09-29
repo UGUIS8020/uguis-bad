@@ -31,7 +31,7 @@ from game2.views import (
     QUEUE_FORCE_COUNT,
     INITIAL_FULL_RANDOM_COUNT,
     INITIAL_AI_PURE_COUNT,
-    PRE_SKILL_BALANCE_LEAD_MINUTES,
+    SKILL_BURST_CYCLE_REFILLS,
     PRE_SKILL_BALANCE_REFILLS,
 )
 
@@ -117,10 +117,9 @@ def pop_next_from_queue_local(queue_state, pending, count=1):
 
 def simulate(n_matches, seed=None,
              num_players=NUM_PLAYERS, num_courts=NUM_COURTS,
-             minutes_per_match=10.0,
              initial_full_random=INITIAL_FULL_RANDOM_COUNT,
              initial_ai_pure=INITIAL_AI_PURE_COUNT,
-             pre_skill_balance_lead_minutes=PRE_SKILL_BALANCE_LEAD_MINUTES,
+             skill_burst_cycle_refills=SKILL_BURST_CYCLE_REFILLS,
              pre_skill_balance_refills=PRE_SKILL_BALANCE_REFILLS,
              enable_continuous_balance=True,
              continuous_balance_force_lowest=False,
@@ -131,22 +130,19 @@ def simulate(n_matches, seed=None,
     """
     本番の_next_refill_mode() + スキルモード一斉入れ替え(_try_refill_court /
     _process_skill_burst / _execute_skill_burst)+ 継続的バランス調整と同じ
-    ロジックをシミュレートする。実際の壁時計時間の代わりに、1試合あたり
-    minutes_per_match分かかると仮定して経過時間を積算する(コートは
-    num_courts面並行で進むので、1回の補充ごとにminutes_per_match/num_courts
-    分だけ経過したとみなす)。
+    ロジックをシミュレートする。本番と同じく、時間ではなく補充回数
+    (refill_count)だけで全てのモード切り替えを判定する。
 
     モードの流れ(本番と同じ): 最初のinitial_full_random回はランダム、続く
-    initial_ai_pure回は調整なしの純粋なAIペアリング、それ以降は毎回、参加
-    回数が最も多い人を除外する「調整AIペアリング」。
+    initial_ai_pure回は調整なしの純粋な「AIモード」、それ以降は毎回、参加
+    回数が最も多い人を除外する「AI調整1モード」。
 
-    スキルモードは、前回の一斉入れ替えからpre_skill_balance_lead_minutes分
-    経過すると、続くpre_skill_balance_refills回だけ「強調整AIペアリング」
+    スキルモードは、前回の一斉入れ替えからskill_burst_cycle_refills回分の
+    補充が経過すると、続くpre_skill_balance_refills回だけ「AI調整2モード」
     (除外+最も少ない人を強制参加)の助走を行い、それを使い切ったら空いた
     コートを即座には補充せず全コート(num_courts面)が空くまで集め、待機中
     全員をスキル順の階層で一括採用する(held_courts集合でシミュレート、
-    繰り返し発動)。結果としてスキルモード自体はlead_minutesよりやや後
-    (助走の数試合分だけ遅れて)発動する(本番と同じ)。
+    繰り返し発動)。
     スキルバースト後は特別扱いせず、即座に通常のfull_random/ai_pairing
     ローテーションに戻る(本番と同じ)。
     """
@@ -165,9 +161,8 @@ def simulate(n_matches, seed=None,
     match_log = []  # 全試合: (court_num, team_a, team_b, diff)
     refill_count = 0
     queue_state = {"queue": [], "last_picked": []}  # 本番のDynamoDB永続キューに相当
-    elapsed_minutes = 0.0
     # ★本番のcreate_pairings()と同じく、練習開始の瞬間を基準点にする
-    last_skill_burst_at = 0.0
+    last_skill_burst_refill_count = 0
     pre_skill_remaining = None  # Noneなら助走未開始、intなら助走の残り回数
     held_courts = set()  # スキルモード一斉入れ替え待ちで、今は試合が無いコート
 
@@ -197,7 +192,6 @@ def simulate(n_matches, seed=None,
         recent_results.append((finished["team_a"], finished["team_b"]))
 
         refill_count += 1
-        elapsed_minutes += minutes_per_match / num_courts
         del courts[court_num]  # このコートは今、試合が無い状態
 
         # ★遅れて来た参加者のシミュレーション: 指定したrefill_countの
@@ -223,14 +217,17 @@ def simulate(n_matches, seed=None,
                 if trace:
                     print(f"#{refill_count} 新規参加登録: {new_id}")
 
-        # ★スキルモード一斉入れ替えの前に、強調整AIペアリングの助走を挟む:
-        #   前回の一斉入れ替えからpre_skill_balance_lead_minutes分経過していて
-        #   まだ助走を始めていなければ、pre_skill_balance_refills回分の助走を
-        #   開始する。
-        if pre_skill_remaining is None and elapsed_minutes - last_skill_burst_at >= pre_skill_balance_lead_minutes:
+        # ★スキルモード一斉入れ替えの前に、AI調整2モードの助走を挟む:
+        #   前回の一斉入れ替えからskill_burst_cycle_refills回分の補充が経過
+        #   していてまだ助走を始めていなければ、pre_skill_balance_refills回分
+        #   の助走を開始する。
+        if (
+            pre_skill_remaining is None
+            and refill_count - last_skill_burst_refill_count >= skill_burst_cycle_refills
+        ):
             pre_skill_remaining = pre_skill_balance_refills
             if trace:
-                print(f"#{refill_count} 強調整AIペアリングの助走({pre_skill_balance_refills}回)を開始")
+                print(f"#{refill_count} AI調整2モードの助走({pre_skill_balance_refills}回)を開始")
 
         # ★スキルモード一斉入れ替え: 収集中(held_courtsが既に非空)なら経過時間
         #   に関わらず合流。まだなら、助走(pre_skill_remaining)を使い切って
@@ -258,7 +255,7 @@ def simulate(n_matches, seed=None,
                     if trace:
                         print(f"    → court={c} スキルモード一斉補充: {sorted(chosen_uids)}")
                 held_courts -= set(held_list[:usable_groups])
-                last_skill_burst_at = elapsed_minutes  # このバーストを消費済みにする
+                last_skill_burst_refill_count = refill_count  # このバーストを消費済みにする
                 pre_skill_remaining = None  # 次のサイクルでまた助走から再スタート
             continue
 
@@ -402,12 +399,12 @@ def evaluate(match_log, label, by_uid=None):
     }
 
 
-# --compareで比較する、強調整AIペアリングの助走を始めるまでの時間(分)の候補
+# --compareで比較する、AI調整2モードの助走を始めるまでの補充回数の候補
 CANDIDATE_BURST_INTERVALS = {
-    "30分後": 30,
-    "現行本番(45分後)": PRE_SKILL_BALANCE_LEAD_MINUTES,
-    "60分後": 60,
-    "差し込みなし(999分=実質無し)": 999,
+    "12回後": 12,
+    "現行本番(18回後)": SKILL_BURST_CYCLE_REFILLS,
+    "24回後": 24,
+    "差し込みなし(9999回=実質無し)": 9999,
 }
 
 
@@ -421,7 +418,7 @@ def main():
     if args.compare:
         results = {}
         for label, interval in CANDIDATE_BURST_INTERVALS.items():
-            log, by_uid = simulate(args.matches, seed=args.seed, pre_skill_balance_lead_minutes=interval)
+            log, by_uid = simulate(args.matches, seed=args.seed, skill_burst_cycle_refills=interval)
             results[label] = evaluate(log, label, by_uid)
 
         print("\n" + "=" * 70)
