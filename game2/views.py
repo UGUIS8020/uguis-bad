@@ -1103,7 +1103,7 @@ COURT_REFILL_DELAY_SECONDS = 10  # スコア送信から次の組み合わせ開
 LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする(3コート以上)
 LOW_BUFFER_THRESHOLD_2COURTS = 1  # 同上、2コートの場合だけ緩めた値(待ちが発生しにくい)
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
-MIN_MATCH_DURATION_SECONDS = 120  # 試合開始からこの秒数未満のスコア送信は誤送信とみなして拒否する
+MIN_MATCH_DURATION_SECONDS = 180  # 試合開始からこの秒数未満のスコア送信は誤送信とみなして拒否する
 
 
 def _try_refill_court(old_match_id, court_number):
