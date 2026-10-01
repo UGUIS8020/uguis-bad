@@ -130,7 +130,7 @@
     <div class="card court-card">
         <div class="card-header">コート {{ court_num }}（{{ teams.mode_label }}）</div>
         <div class="card-body">
-            <form method="POST" action="{{ url_for('game2.submit_score', match_id=teams.match_id, court_number=court_num) }}">
+            <form method="POST" action="{{ url_for('game2.submit_score', match_id=teams.match_id, court_number=court_num) }}" class="score-submit-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="row">
                     <div class="col-6">
@@ -139,7 +139,7 @@
                             <ul class="mb-2">
                                 {% for p in teams.A %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
-                            <input type="number" name="team1_score" class="form-control" placeholder="Aチーム得点" value="21" required>
+                            <input type="number" name="team1_score" class="form-control score-input" placeholder="Aチーム得点" value="21" autocomplete="off" required>
                         </div>
                     </div>
                     <div class="col-6">
@@ -148,7 +148,7 @@
                             <ul class="mb-2">
                                 {% for p in teams.B %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
-                            <input type="number" name="team2_score" class="form-control" placeholder="Bチーム得点" value="21" required>
+                            <input type="number" name="team2_score" class="form-control score-input" placeholder="Bチーム得点" value="21" autocomplete="off" required>
                         </div>
                     </div>
                 </div>
@@ -233,6 +233,25 @@
 </div>
 
 <script>
+    // ブラウザが同じname属性の入力欄に前回入力した値を勝手に復元することがあり、
+    // 別の試合のスコア欄に古い値が残ったまま送信されてしまう事故を防ぐため、
+    // ページ読み込み時に必ずデフォルト値(21)へ明示的にリセットする。
+    document.querySelectorAll('input.score-input').forEach((el) => {
+        el.value = '21';
+    });
+
+    // 二重タップ等で同じフォームが2回送信されるのを防ぐため、送信開始直後に
+    // ボタンを無効化する（通常のフォーム送信なのでpreventDefaultはしない）。
+    document.querySelectorAll('form.score-submit-form').forEach((form) => {
+        form.addEventListener('submit', () => {
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '送信中...';
+            }
+        });
+    });
+
     // 10秒ごとに再読み込みするが、スコア入力欄を操作中(フォーカス中、または
     // 直近に入力した直後)は邪魔しないよう見送り、少し後に再チェックする。
     // ※以前はデフォルト値(21)と違う値が入っているだけで無期限にリロードを

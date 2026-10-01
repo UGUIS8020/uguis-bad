@@ -103,6 +103,19 @@ def generate_match_id2():
     return match_id
 
 
+def _match_started_at(match_id):
+    """
+    match_id (例: g2_20261001_193546_208d99) に埋め込まれた生成時刻を
+    generate_match_id2()と同じ naive datetime.now() 基準で取り出す。
+    パースできない場合はNoneを返す。
+    """
+    try:
+        parts = str(match_id).split("_")
+        return datetime.strptime(parts[1] + parts[2], "%Y%m%d%H%M%S")
+    except (IndexError, ValueError):
+        return None
+
+
 def has_ongoing_matches2():
     """テストコート側で進行中の試合があるか（既存システムとは独立に判定）"""
     try:
@@ -1090,6 +1103,7 @@ COURT_REFILL_DELAY_SECONDS = 10  # スコア送信から次の組み合わせ開
 LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単独補充せずペア待ちにする(3コート以上)
 LOW_BUFFER_THRESHOLD_2COURTS = 1  # 同上、2コートの場合だけ緩めた値(待ちが発生しにくい)
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
+MIN_MATCH_DURATION_SECONDS = 120  # 試合開始からこの秒数未満のスコア送信は誤送信とみなして拒否する
 
 
 def _try_refill_court(old_match_id, court_number):
@@ -1966,6 +1980,24 @@ def submit_score(match_id, court_number):
 
         winner = "A" if team1_score > team2_score else "B"
         court_number_int = int(court_number)
+
+        # ★試合開始から極端に短い時間でのスコア送信は、ブラウザに残った古い
+        #   入力値の誤送信などが疑われるため拒否する(実際の試合がこれほど
+        #   早く終わることはあり得ない)。
+        started_at = _match_started_at(match_id)
+        if started_at is not None:
+            elapsed = (datetime.now() - started_at).total_seconds()
+            if elapsed < MIN_MATCH_DURATION_SECONDS:
+                current_app.logger.warning(
+                    "[game2] 試合開始%.0f秒でのスコア送信を拒否: match_id=%s court=%s user=%s",
+                    elapsed, match_id, court_number, current_user.get_id(),
+                )
+                flash(
+                    f"試合開始からまだ{int(elapsed)}秒しか経っていないため送信できません。"
+                    "誤って古い画面から送信していないか確認してください。",
+                    "danger",
+                )
+                return redirect(url_for("game2.court"))
 
         entry_table = _entry_table()
         entries = entry_table.scan(
