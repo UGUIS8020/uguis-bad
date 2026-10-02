@@ -212,11 +212,16 @@
     </div>
 
     <div class="card mb-3">
-        <div class="card-body text-center">
+        <div class="card-body text-center d-flex justify-content-center gap-2 flex-wrap">
             <form method="POST" action="{{ url_for('game2.reset_participants') }}"
                   onsubmit="return confirm('テストコートの参加者全員を削除して練習を終了します。よろしいですか？');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-secondary btn-lg px-5">🏁 練習終了</button>
+            </form>
+            <form method="POST" action="{{ url_for('game2.force_end_matching') }}"
+                  onsubmit="return confirm('進行中のマッチングを強制終了します(スコアは記録されません)。参加者はテストコートに残り、待機中に戻ります。よろしいですか？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger btn-lg px-5">⏹ 強制終了</button>
             </form>
         </div>
     </div>
