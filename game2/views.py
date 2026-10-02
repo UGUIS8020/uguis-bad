@@ -2322,6 +2322,91 @@ def reset_participants():
     return redirect(url_for("game2.court"))
 
 
+@bp_game2.route("/force_end_matching", methods=["POST"])
+@login_required
+def force_end_matching():
+    """
+    強制終了ボタン: 何らかの不具合でコートが固まった等の場合に、進行中の
+    マッチングだけを強制的に終了する。スコア送信(submit_score)は一切経由
+    しないため、180秒ガードや同点拒否の影響を受けず、いつでも押せる。
+
+    ★スコアは記録せず、TrueSkillの更新も一切行わない（21-21等の結果を
+      submit_scoreに通すと、引き分けでもTrueSkillはわずかに実力値を
+      更新してしまうため、スキルへの影響をゼロにするには結果記録自体を
+      スキップする必要がある）。
+
+    退出(entry削除)は行わないので、全員テストコートに残ったまま
+    「待機中」に戻る。その後、管理者が「最初の組み合わせを作成」を押せば
+    新しいペアリングを始められる。
+    """
+    if not current_user.administrator:
+        flash("管理者のみ実行できます。", "danger")
+        return redirect(url_for("game2.court"))
+
+    entry_table = _entry_table()
+    meta_table = _meta_table()
+
+    try:
+        playing_entries = entry_table.scan(
+            FilterExpression=Attr("entry_status").eq("playing"), ConsistentRead=True
+        ).get("Items", [])
+
+        now_jst = datetime.now(JST).isoformat()
+        pairing_meta = meta_table.get_item(
+            Key={"match_id": META_PAIRING_PK}, ConsistentRead=True
+        ).get("Item", {}) or {}
+        refill_count_now = int(pairing_meta.get("refill_count", 0))
+
+        for e in playing_entries:
+            entry_id = e["entry_id"]
+            if e.get("rest_requested"):
+                entry_table.update_item(
+                    Key={"entry_id": entry_id},
+                    UpdateExpression=(
+                        "SET entry_status=:resting, updated_at=:now "
+                        "REMOVE court_number, team, match_id, rest_requested"
+                    ),
+                    ExpressionAttributeValues={":resting": "resting", ":now": now_jst},
+                )
+            else:
+                entry_table.update_item(
+                    Key={"entry_id": entry_id},
+                    UpdateExpression=(
+                        "SET entry_status=:pending, updated_at=:now, "
+                        "pending_since_refill_count=:rc "
+                        "REMOVE court_number, team, match_id"
+                    ),
+                    ExpressionAttributeValues={
+                        ":pending": "pending", ":now": now_jst, ":rc": refill_count_now,
+                    },
+                )
+
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression=(
+                "SET court_owner = :empty, awaiting_refill = :empty, "
+                "held_for_pairing = :empty, awaiting_skill_burst = :empty "
+                "REMOVE matching_paused"
+            ),
+            ExpressionAttributeValues={":empty": {}},
+        )
+
+        current_app.logger.warning(
+            "[game2][force_end_matching] 強制終了: %d人をpending/restingに戻しました by=%s",
+            len(playing_entries), current_user.get_id(),
+        )
+        flash(
+            f"マッチングを強制終了しました({len(playing_entries)}人を待機中に戻しました)。"
+            "スコアは記録されていません。「最初の組み合わせを作成」で再開できます。",
+            "info",
+        )
+    except Exception as e:
+        current_app.logger.error("[game2][force_end_matching] エラー: %s", e, exc_info=True)
+        flash("強制終了処理中にエラーが発生しました", "danger")
+
+    return redirect(url_for("game2.court"))
+
+
 @bp_game2.route("/emergency_transfer", methods=["POST"])
 @login_required
 def emergency_transfer():
