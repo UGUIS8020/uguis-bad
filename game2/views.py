@@ -1105,6 +1105,7 @@ LOW_BUFFER_THRESHOLD = 2  # 待機バッファがこの人数以下なら、単�
 LOW_BUFFER_THRESHOLD_2COURTS = 1  # 同上、2コートの場合だけ緩めた値(待ちが発生しにくい)
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
 MIN_MATCH_DURATION_SECONDS = 180  # 試合開始からこの秒数未満のスコア送信は誤送信とみなして拒否する
+RECONCILE_GRACE_SECONDS = 5  # 結果記録後、この秒数以上playingのままなら迷子コートとみなす
 
 
 def _try_refill_court(old_match_id, court_number):
@@ -1670,19 +1671,33 @@ def _reconcile_orphaned_courts():
     #   court_owner解放でTransactionConflictExceptionが起き、その場で処理全体が
     #   中断されて4人がpending化されないまま取り残された)。結果が既に記録済み
     #   なら_try_refill_court()をもう一度呼び、通常の補充経路に乗せ直す。
+    #   ★ただし「結果を記録する」→「4人をpendingに戻す」はsubmit_score内の
+    #   別ステップであり、その間の一瞬をここで捕まえてしまうと、本当は
+    #   固まっていない(直後に正常処理が完了する)のに毎回誤って再試行して
+    #   しまう(bot高負荷時に頻発した)。結果記録からRECONCILE_GRACE_SECONDS
+    #   以上経ってもまだplayingの場合だけ「本当に固まっている」とみなす。
     results_table = _results_table()
+    now = datetime.now(JST)
     for court_num, match_id in playing_courts.items():
         if not match_id:
             continue
         result = results_table.get_item(
             Key={"result_id": f"{match_id}#{court_num}"}
         ).get("Item")
-        if result:
-            current_app.logger.warning(
-                "[game2][continuous] court=%s 迷子状態(結果は記録済みなのにplayingのまま)を検知、補充を再試行します",
-                court_num,
-            )
-            _try_refill_court(match_id, court_num)
+        if not result:
+            continue
+        try:
+            created_at = datetime.fromisoformat(result.get("created_at", ""))
+            elapsed = (now - created_at).total_seconds()
+        except (ValueError, TypeError):
+            elapsed = RECONCILE_GRACE_SECONDS
+        if elapsed < RECONCILE_GRACE_SECONDS:
+            continue
+        current_app.logger.warning(
+            "[game2][continuous] court=%s 迷子状態(結果は記録済みなのにplayingのまま)を検知、補充を再試行します",
+            court_num,
+        )
+        _try_refill_court(match_id, court_num)
 
     now_jst = datetime.now(JST).isoformat()
     for court_num in range(1, court_count + 1):
