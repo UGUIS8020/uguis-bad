@@ -1808,7 +1808,7 @@ def _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst_iso):
     for c in court_numbers:
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET awaiting_refill.#c = :now",
+            UpdateExpression="SET awaiting_refill.#c = :now REMOVE held_for_pairing.#c",
             ExpressionAttributeNames={"#c": str(c)},
             ExpressionAttributeValues={":now": now_jst_iso},
         )
@@ -1838,7 +1838,20 @@ def _execute_skill_burst(court_numbers):
     now_jst = datetime.now(JST).isoformat()
 
     court_numbers = sorted(court_numbers)
-    remove_expr = "REMOVE " + ", ".join(f"awaiting_skill_burst.#c{i}" for i in range(len(court_numbers)))
+    # ★awaiting_skill_burstから外すのと同時に、held_for_pairingへ一時的に
+    #   登録しておく。この関数は「担当確定(ここ)」→「候補の並べ替え・tx実行
+    #   (この後)」の2段階に分かれており、その間はどの待ち行列にも載っていない
+    #   瞬間が生まれる。_reconcile_orphaned_courts()がちょうどその瞬間に
+    #   実行されると「誰にも追跡されていない迷子コート」と誤認し、
+    #   awaiting_refillへ誤登録してしまう(2026-10-02の実運用で実際に発生。
+    #   誤登録されたawaiting_refillはこの後の試合が本物の決着を迎えるまで
+    #   消えないため、該当コートへの無駄な補充リトライが数百〜数千回/数分間
+    #   発生し続けた)。held_for_pairingに載せておけば、この間もtracked扱いに
+    #   なり誤検知を防げる。
+    held_expr = ", ".join(f"held_for_pairing.#c{i} = :now" for i in range(len(court_numbers)))
+    remove_expr = "SET " + held_expr + " REMOVE " + ", ".join(
+        f"awaiting_skill_burst.#c{i}" for i in range(len(court_numbers))
+    )
     condition_expr = " AND ".join(f"attribute_exists(awaiting_skill_burst.#c{i})" for i in range(len(court_numbers)))
     names = {f"#c{i}": str(c) for i, c in enumerate(court_numbers)}
     try:
@@ -1847,6 +1860,7 @@ def _execute_skill_burst(court_numbers):
             UpdateExpression=remove_expr,
             ConditionExpression=condition_expr,
             ExpressionAttributeNames=names,
+            ExpressionAttributeValues={":now": now_jst},
         )
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
@@ -1906,11 +1920,15 @@ def _execute_skill_burst(court_numbers):
     #   に既に使われていないか確認してからまとめて取得する
     #   (_select_and_start_courtのコメント参照)。1つでも既に使われていれば
     #   トランザクション全体が失敗し、次のチェックで再試行される。
+    #   ★同時に、担当確定時に一時登録したheld_for_pairingも外す
+    #   (held_for_pairing.#ocと同じ名前プレースホルダを再利用できる)。
     tx_items.append({
         "Update": {
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
-            "UpdateExpression": "SET " + ", ".join(owner_set_parts),
+            "UpdateExpression": "SET " + ", ".join(owner_set_parts) + " REMOVE " + ", ".join(
+                f"held_for_pairing.{name}" for name in owner_names
+            ),
             "ConditionExpression": " AND ".join(
                 f"attribute_not_exists(court_owner.{name})" for name in owner_names
             ),
