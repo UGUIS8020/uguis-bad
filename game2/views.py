@@ -26,6 +26,7 @@ from decimal import Decimal
 import uuid
 import random
 import logging
+import time
 
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
@@ -1136,16 +1137,27 @@ def _try_refill_court(old_match_id, court_number):
     #   あることを確認してから解放する(court_ownerの仕組み全体については
     #   _select_and_start_courtのコメント参照)。既に解放済み/別の試合に
     #   上書きされている場合は何もしない(ConditionExpressionが失敗するだけ)。
-    try:
-        _meta_table().update_item(
-            Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="REMOVE court_owner.#c",
-            ConditionExpression="court_owner.#c = :mid",
-            ExpressionAttributeNames={"#c": str(court_number)},
-            ExpressionAttributeValues={":mid": str(old_match_id)},
-        )
-    except ClientError as e:
-        if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+    for attempt in range(3):
+        try:
+            _meta_table().update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression="REMOVE court_owner.#c",
+                ConditionExpression="court_owner.#c = :mid",
+                ExpressionAttributeNames={"#c": str(court_number)},
+                ExpressionAttributeValues={":mid": str(old_match_id)},
+            )
+            break
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code")
+            if code == "ConditionalCheckFailedException":
+                break
+            # ★TransactionConflictExceptionは「他の処理が同じ項目を今まさに
+            #   更新中」という一瞬のすれ違いで、再試行すればほぼ確実に成功する。
+            #   以前はここで即座に例外を再送出してしまい、_try_refill_court全体が
+            #   中断されて4人が「試合中」のまま永遠に取り残される不具合があった。
+            if code == "TransactionConflictException" and attempt < 2:
+                time.sleep(0.1)
+                continue
             raise
 
     result = results_table.get_item(Key={"result_id": f"{old_match_id}#{court_number}"}).get("Item")
@@ -1646,12 +1658,31 @@ def _reconcile_orphaned_courts():
     for key in ("awaiting_refill", "held_for_pairing", "awaiting_skill_burst"):
         tracked |= set((meta_current.get(key) or {}).keys())
 
-    playing_courts = set()
+    playing_courts = {}
     for e in entry_table.scan(
         FilterExpression=Attr("entry_status").eq("playing"), ConsistentRead=True
     ).get("Items", []):
         if e.get("court_number") is not None:
-            playing_courts.add(int(e["court_number"]))
+            playing_courts[int(e["court_number"])] = e.get("match_id")
+
+    # ★「playing中に見えるが、実はそのコートのスコアは既に送信済み」という
+    #   迷子パターンも検知する(2026-10-02の実運用で実際に発生: 補充処理の
+    #   court_owner解放でTransactionConflictExceptionが起き、その場で処理全体が
+    #   中断されて4人がpending化されないまま取り残された)。結果が既に記録済み
+    #   なら_try_refill_court()をもう一度呼び、通常の補充経路に乗せ直す。
+    results_table = _results_table()
+    for court_num, match_id in playing_courts.items():
+        if not match_id:
+            continue
+        result = results_table.get_item(
+            Key={"result_id": f"{match_id}#{court_num}"}
+        ).get("Item")
+        if result:
+            current_app.logger.warning(
+                "[game2][continuous] court=%s 迷子状態(結果は記録済みなのにplayingのまま)を検知、補充を再試行します",
+                court_num,
+            )
+            _try_refill_court(match_id, court_num)
 
     now_jst = datetime.now(JST).isoformat()
     for court_num in range(1, court_count + 1):
