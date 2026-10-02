@@ -1819,8 +1819,32 @@ def _mark_skill_burst_consumed(meta_table):
 
 
 def _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst_iso):
-    """スキルモード一斉入れ替えの対象から外れたコートを、通常の空き待ちに戻す。"""
+    """
+    スキルモード一斉入れ替えの対象から外れたコートを、通常の空き待ちに戻す。
+
+    ★一斉入れ替えの候補集め(courts_numbers)が確定した後、実行までのわずかな
+    間に、対象コートの一部が別の経路(通常の1コートずつの補充など)で既に
+    legitimate に試合を割り当て済み(court_owner設定済み)になっている場合が
+    ある。それを確認せずここで無条件にawaiting_refillへ登録すると、「使用中
+    なのに補充待ち」という矛盾した状態になり、以後そのコートへの補充が
+    (court_ownerの条件チェックで)永久に失敗し続ける無限リトライになって
+    しまう(2026-10-02の実運用で実際に発生)。court_ownerが既に設定されている
+    コートは対象から除外する。
+    """
+    meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    owned = set((meta_current.get("court_owner") or {}).keys())
     for c in court_numbers:
+        if str(c) in owned:
+            current_app.logger.info(
+                "[game2][continuous] court=%s は既に別経路で割り当て済みのため空き待ちには戻しません",
+                c,
+            )
+            meta_table.update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression="REMOVE held_for_pairing.#c",
+                ExpressionAttributeNames={"#c": str(c)},
+            )
+            continue
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression="SET awaiting_refill.#c = :now REMOVE held_for_pairing.#c",
