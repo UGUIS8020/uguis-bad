@@ -2399,14 +2399,24 @@ def force_end_matching():
                     },
                 )
 
+        # ★statusを一時的に"idle"にする: 3つの待ち行列をすべて空にすると、
+        #   _reconcile_orphaned_courts()が「誰にも追跡されていない迷子コート」
+        #   と誤認してawaiting_refillへ再登録し、管理者が「最初の組み合わせを
+        #   作成」を押す前に自動で次のマッチングが始まってしまう不具合が
+        #   実運用で発生した。_reconcile_orphaned_courts()はstatusが"playing"
+        #   でなければ何もしないため、ここで一時的に止める
+        #   (create_pairings()は以前のstatusの値に関わらず"playing"に
+        #   上書きするので、再開時には問題ない)。
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
             UpdateExpression=(
                 "SET court_owner = :empty, awaiting_refill = :empty, "
-                "held_for_pairing = :empty, awaiting_skill_burst = :empty "
+                "held_for_pairing = :empty, awaiting_skill_burst = :empty, "
+                "#st = :idle "
                 "REMOVE matching_paused"
             ),
-            ExpressionAttributeValues={":empty": {}},
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={":empty": {}, ":idle": "idle"},
         )
 
         current_app.logger.warning(
