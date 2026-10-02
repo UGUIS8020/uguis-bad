@@ -1106,6 +1106,7 @@ LOW_BUFFER_THRESHOLD_2COURTS = 1  # 同上、2コートの場合だけ緩めた�
 PAIR_HOLD_MAX_WAIT_SECONDS = 60  # ペア相手が来ない場合、単独補充に切り替えるまでの最大待ち時間
 MIN_MATCH_DURATION_SECONDS = 180  # 試合開始からこの秒数未満のスコア送信は誤送信とみなして拒否する
 RECONCILE_GRACE_SECONDS = 5  # 結果記録後、この秒数以上playingのままなら迷子コートとみなす
+ORPHAN_CONFIRM_GRACE_SECONDS = 3  # 迷子疑いと判定してから、この秒数以上経っても迷子のままなら確定
 
 
 def _try_refill_court(old_match_id, court_number):
@@ -1719,14 +1720,56 @@ def _reconcile_orphaned_courts():
     if meta_current.get("awaiting_skill_burst"):
         return
 
-    now_jst = datetime.now(JST).isoformat()
+    # ★_try_refill_court()はどの経路(awaiting_refill/held_for_pairing/
+    #   awaiting_skill_burst)でも「4人をpendingに戻す」→「待ち行列に登録する」
+    #   の2段階になっており、その間の一瞬はどの待ち行列にも載っていない状態を
+    #   通過する。この一瞬を別リクエストがここで捕まえると、まだ正常に処理中
+    #   なだけなのに「迷子」と誤認してawaiting_refillへ二重登録してしまい、
+    #   後続の正常な登録(held_for_pairing等)がawaiting_refillを巻き込まない
+    #   ため、誤登録だけが消えずに残り続ける(2026-10-03の実運用で実際に発生、
+    #   低バッファ時のペア待ち登録でも同じ隙が起きていた)。
+    #   そのため即座には確定させず、一度「怪しい」と記録するだけに留め、
+    #   ORPHAN_CONFIRM_GRACE_SECONDS以上経っても同じコートがまだ迷子のままの
+    #   場合だけ、本当に迷子だと確定してawaiting_refillへ登録する。
+    now = datetime.now(JST)
+    now_jst = now.isoformat()
+    orphan_suspected = meta_current.get("orphan_suspected") or {}
     for court_num in range(1, court_count + 1):
-        if court_num in playing_courts or str(court_num) in tracked:
+        key = str(court_num)
+        if court_num in playing_courts or key in tracked:
+            if key in orphan_suspected:
+                meta_table.update_item(
+                    Key={"match_id": META_CURRENT_PK},
+                    UpdateExpression="REMOVE orphan_suspected.#c",
+                    ExpressionAttributeNames={"#c": key},
+                )
             continue
+
+        suspected_at_iso = orphan_suspected.get(key)
+        if not suspected_at_iso:
+            meta_table.update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression=(
+                    "SET orphan_suspected = if_not_exists(orphan_suspected, :empty), "
+                    "orphan_suspected.#c = :now"
+                ),
+                ExpressionAttributeNames={"#c": key},
+                ExpressionAttributeValues={":now": now_jst, ":empty": {}},
+            )
+            continue
+
+        try:
+            suspected_at = datetime.fromisoformat(suspected_at_iso)
+            elapsed = (now - suspected_at).total_seconds()
+        except (ValueError, TypeError):
+            elapsed = ORPHAN_CONFIRM_GRACE_SECONDS
+        if elapsed < ORPHAN_CONFIRM_GRACE_SECONDS:
+            continue
+
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET awaiting_refill.#c = :now",
-            ExpressionAttributeNames={"#c": str(court_num)},
+            UpdateExpression="SET awaiting_refill.#c = :now REMOVE orphan_suspected.#c",
+            ExpressionAttributeNames={"#c": key},
             ExpressionAttributeValues={":now": now_jst},
         )
         current_app.logger.warning(
