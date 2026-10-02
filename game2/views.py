@@ -2043,7 +2043,7 @@ def submit_score(match_id, court_number):
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
                 flash(
-                    "このコートのスコアは既に記録されています。次のマッチングが始まりますので待機してください。",
+                    "送信完了。次の試合がマッチングされるまでお待ちください。",
                     "info",
                 )
                 return redirect(url_for("game2.court"))
