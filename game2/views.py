@@ -1298,6 +1298,29 @@ def _try_refill_court(old_match_id, court_number):
     )
 
 
+def _ensure_court_round_map(meta_table):
+    """
+    court_roundマップが存在することを保証する。DynamoDBのUpdateExpressionは
+    「court_round」と「court_round.1」のように親パスとネストしたパスを
+    同じ式の中で同時に参照できない(Two document paths overlapエラー)ため、
+    if_not_exists(court_round, :empty)を補充のtx_itemに含める形では
+    自己修復できない。ラウンド番号機能のデプロイ前から続いているセッション
+    ではcourt_roundが存在しないため、このように事前に別呼び出しで用意する
+    (2026-10-04の実運用で実際に発生: 存在しないマップへの書き込みで
+    ValidationExceptionが毎回発生し、補充が永久に失敗し続けた)。
+    """
+    try:
+        meta_table.update_item(
+            Key={"match_id": META_CURRENT_PK},
+            UpdateExpression="SET court_round = :empty",
+            ConditionExpression="attribute_not_exists(court_round)",
+            ExpressionAttributeValues={":empty": {}},
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+
+
 def _select_and_start_court(court_number, clear_awaiting_refill=True):
     """
     空いているコートに、休憩ローテーション上位の候補の中から実力バランスが
@@ -1469,6 +1492,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     #   ない可能性はあるが、表示用の目安であり厳密な連番保証は不要なため
     #   許容する。
     next_round = int((meta_current.get("court_round") or {}).get(str(court_number), 0)) + 1
+    if "court_round" not in meta_current:
+        _ensure_court_round_map(meta_table)
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
@@ -1492,8 +1517,7 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
                 "UpdateExpression": (
-                    "SET court_owner.#c = :new_mid, "
-                    "court_round = if_not_exists(court_round, :empty_map), court_round.#c = :round "
+                    "SET court_owner.#c = :new_mid, court_round.#c = :round "
                     "REMOVE awaiting_refill.#c"
                 ),
                 "ConditionExpression": (
@@ -1502,7 +1526,6 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 "ExpressionAttributeNames": {"#c": str(court_number)},
                 "ExpressionAttributeValues": {
                     ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
-                    ":empty_map": {"M": {}},
                 },
             }
         })
@@ -1511,15 +1534,11 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": (
-                    "SET court_owner.#c = :new_mid, "
-                    "court_round = if_not_exists(court_round, :empty_map), court_round.#c = :round"
-                ),
+                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round",
                 "ConditionExpression": "attribute_not_exists(court_owner.#c)",
                 "ExpressionAttributeNames": {"#c": str(court_number)},
                 "ExpressionAttributeValues": {
                     ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
-                    ":empty_map": {"M": {}},
                 },
             }
         })
@@ -1995,6 +2014,9 @@ def _execute_skill_burst(court_numbers):
 
     partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
 
+    if "court_round" not in meta_current_now:
+        _ensure_court_round_map(meta_table)
+
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
     tx_items = []
@@ -2042,8 +2064,7 @@ def _execute_skill_burst(court_numbers):
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
             "UpdateExpression": (
-                "SET court_round = if_not_exists(court_round, :empty_map), "
-                + ", ".join(owner_set_parts) + " REMOVE " + ", ".join(
+                "SET " + ", ".join(owner_set_parts) + " REMOVE " + ", ".join(
                     f"held_for_pairing.{name}" for name in owner_names
                 )
             ),
@@ -2051,7 +2072,7 @@ def _execute_skill_burst(court_numbers):
                 f"attribute_not_exists(court_owner.{name})" for name in owner_names
             ),
             "ExpressionAttributeNames": owner_names,
-            "ExpressionAttributeValues": dict(owner_values, **{":empty_map": {"M": {}}}),
+            "ExpressionAttributeValues": owner_values,
         }
     })
 
