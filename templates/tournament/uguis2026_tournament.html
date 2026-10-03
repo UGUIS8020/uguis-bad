@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）{% endblock %}
-{% block og_title_content %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）{% endblock %}
-{% block description %}越谷でバドミントン大会を開催予定。誰でも参加OK（年齢・性別・レベル不問）！第3回鶯バドミントン大会は2026年秋、越谷市内で開催予定。男子・女子・ミックス参加可、予選リーグ→上位/下位トーナメント、詳細は後日発表。{% endblock %}
-{% block keywords %}越谷, バドミントン, 大会, 誰でも参加OK, 初心者歓迎, 鶯バドミントン, 越谷市, ミックスダブルス, 2026年{% endblock %}
+{% block title %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年11月23日開催決定）{% endblock %}
+{% block og_title_content %}越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年11月23日開催決定）{% endblock %}
+{% block description %}越谷でバドミントン大会開催決定！誰でも参加OK（年齢・性別・レベル不問）！第3回鶯バドミントン大会は2026年11月23日(祝)9時30分開始、越谷市立西体育館にて開催。男子・女子・ミックス参加可、参加費1人2000円、予選リーグ→上位/下位トーナメント。{% endblock %}
+{% block keywords %}越谷, バドミントン, 大会, 誰でも参加OK, 初心者歓迎, 鶯バドミントン, 越谷市, ミックスダブルス, 2026年, 11月23日, 祝日{% endblock %}
 
 {% block extra_meta %}
   {# 正規URL（canonical） #}
@@ -16,8 +16,8 @@
 
   {# Open Graph（Facebook等のSNS用） #}
   <meta property="og:type" content="event">  
-  <meta property="og:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）">
-  <meta property="og:description" content="2026年秋 越谷市内で開催予定。年齢・性別・レベル不問、男子・女子・ミックス参加OK。リーグ戦→上位/下位トーナメントで最後まで楽しめます。詳細は後日発表。">
+  <meta property="og:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年11月23日開催決定）">
+  <meta property="og:description" content="2026年11月23日(祝)9時30分開始、越谷市立西体育館にて開催決定。年齢・性別・レベル不問、男子・女子・ミックス参加OK。リーグ戦→上位/下位トーナメントで最後まで楽しめます。">
   <meta property="og:url" content="https://uguis-bad.shibuya8020.com/tournament/uguis2026_tournament">
   <meta property="og:image" content="https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg">
   <meta property="og:image:width" content="1200">
@@ -28,8 +28,8 @@
 
   {# Twitter Card #}
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年秋開催予定）">
-  <meta name="twitter:description" content="越谷市内で開催予定。年齢・性別・レベル不問／男子・女子・ミックスOK。リーグ戦→トーナメントで最後まで楽しめる形式。">
+  <meta name="twitter:title" content="越谷 バドミントン 大会｜誰でも参加OK｜第3回鶯バドミントン大会（2026年11月23日開催決定）">
+  <meta name="twitter:description" content="2026年11月23日(祝)9時30分開始、越谷市立西体育館にて開催決定。年齢・性別・レベル不問／男子・女子・ミックスOK。リーグ戦→トーナメントで最後まで楽しめる形式。">
   <meta name="twitter:image" content="https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg">
   <meta name="twitter:image:alt" content="第3回鶯バドミントン大会2026のイメージ画像">
 
@@ -71,14 +71,20 @@
   "@context": "https://schema.org",
   "@type": "SportsEvent",
   "name": "鶯杯其の参（第3回 鶯バドミントン大会）",
-  "description": "年齢・性別・レベル不問。男子・女子・ミックス参加OK。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。詳細は後日発表。",
-  "startDate": "2026-10-01T09:00:00+09:00",
+  "description": "年齢・性別・レベル不問。男子・女子・ミックス参加OK。リーグ戦後に上位・下位トーナメントで最後まで楽しめます。",
+  "startDate": "2026-11-23T09:30:00+09:00",
   "eventStatus": "https://schema.org/EventScheduled",
   "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
   "image": ["https://uguis-bad.shibuya8020.com/static/images/2026/tournament2026_main.jpg"],
+  "offers": {
+    "@type": "Offer",
+    "price": "2000",
+    "priceCurrency": "JPY",
+    "availability": "https://schema.org/InStock"
+  },
   "location": {
     "@type": "Place",
-    "name": "越谷市内体育館（詳細は後日発表）",
+    "name": "越谷市立西体育館",
     "address": {
       "@type": "PostalAddress",
       "addressLocality": "越谷市",
@@ -114,7 +120,7 @@
       "name": "開催場所はどこですか？",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "越谷市内の体育館で開催予定です。詳細は後日発表いたします。"
+        "text": "越谷市立西体育館で開催します。開催日は2026年11月23日(祝)9時30分開始です。"
       }
     },
     {
@@ -122,7 +128,7 @@
       "name": "参加費と申込方法は？",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "参加費や申込方法の詳細は後日発表いたします。ページをブックマークしてお待ちください。"
+        "text": "参加費は1人2000円（ペアで4000円）です。申込方法の詳細は後日発表いたします。ページをブックマークしてお待ちください。"
       }
     }
   ]
@@ -413,13 +419,7 @@ img:not(.avatar-ig img) {
 <div class="coming-soon-wrapper">
     <h2>
         <div class="coming-soon-highlight">2026年11月23日(祝)<br>開催決定！</div>
-    </h2>
-    <p style="color: #333; font-size: 1.1em; margin: 20px 0;">
-        詳細な日程・会場は<br>後日発表いたします
-    </p>
-    <p style="color: #666; font-size: 0.95em;">
-        このページをブックマークして<br>お待ちください
-    </p>
+    </h2>   
 </div>
 
 <!-- トップ画像（準備中の場合はコメントアウト） -->
@@ -433,12 +433,6 @@ img:not(.avatar-ig img) {
     </div>
 </div>
 -->
-
-<!-- 前回大会の写真参考（2025年大会の写真を参考として表示する場合） -->
-<div style="text-align: center; margin: 30px 0;">
-    <h3 style="color: #333;">前回大会（2025年）の様子</h3>
-    <p style="color: #666; font-size: 0.9em;">※2026年大会のイメージとしてご参照ください</p>
-</div>
 
 <div style="text-align: center;"> 
   <img src="{{ url_for('static', filename='images/2025/018.jpg') }}"
@@ -494,12 +488,12 @@ img:not(.avatar-ig img) {
 </div>
 
 <div class="container05"> 
-    <h2>大会要項（予定）</h2>
+    <h2>大会要項</h2>
 </div>
 
 <div class="container04">
-    <h3>開催日時: 2026年秋（詳細は後日発表）</h3>
-    <h3>会場: 越谷市内体育館（詳細は後日発表）</h3>
+    <h3>開催日時: 2026年11月23日(祝)9時30分開始</h3>
+    <h3>会場: 越谷市立西体育館</h3>
 
     <h3>参加資格</h3>     
     <h3>基礎打ちができて、ルールがわかればだれでも参加OKです</h3>     
@@ -507,7 +501,7 @@ img:not(.avatar-ig img) {
     <h3>・男子ダブルス、女子ダブルス、ミックスダブルス全て参加可能</h3>
     <h3>・バドミントン初級者以上でルールを理解している方</h3>          
     <h3>※基礎打ちができない方、ルールが分からない方は参加をご遠慮ください</h3>
-    <h3>参加費:詳細は後日発表</h3>          
+    <h3>参加費:1人2000円(ペアで4000円です)</h3>          
 </div>
 
 <div class="container05"> 
