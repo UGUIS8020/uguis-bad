@@ -1557,13 +1557,6 @@ def _process_awaiting_refills():
     """
     meta_table = _meta_table()
     meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
-    # ★スキルモード一斉入れ替えの収集中(awaiting_skill_burstに1つでもコートが
-    #   ある間)は、他のコートの通常補充も含めて全部止める。収集対象のコートが
-    #   「4人をpendingに戻す」→「awaiting_skill_burstに登録する」の間の一瞬の
-    #   隙を、別のリクエストのこの関数が拾って誤って通常補充してしまう事故を
-    #   防ぐ(2026-10-02の実運用で実際に発生)。
-    if meta_current.get("awaiting_skill_burst"):
-        return
     awaiting = meta_current.get("awaiting_refill") or {}
     if not awaiting:
         return
@@ -1606,10 +1599,6 @@ def _process_new_court_opportunity():
     if meta_current.get("status") != "playing":
         return
     if meta_current.get("matching_paused"):
-        return
-    # ★スキルモード一斉入れ替えの収集中は、他の通常補充と同様にここも止める
-    # (_process_awaiting_refillsのコメント参照)。
-    if meta_current.get("awaiting_skill_burst"):
         return
 
     court_count = int(meta_current.get("court_count", 0) or 0)
@@ -1728,15 +1717,6 @@ def _reconcile_orphaned_courts():
         )
         _try_refill_court(match_id, court_num)
 
-    # ★スキルモード一斉入れ替えの収集中は、ここも含めて止める。収集対象の
-    #   コートは「4人をpendingに戻す」→「awaiting_skill_burstに登録する」の
-    #   間の一瞬、どの待ち行列にも載っていない状態を通過するため、この隙を
-    #   ここで迷子と誤認してawaiting_refillへ登録してしまうと、収集完了後に
-    #   「使用中なのに補充待ち」という事故につながる(2026-10-02の実運用で
-    #   実際に発生)。
-    if meta_current.get("awaiting_skill_burst"):
-        return
-
     # ★_try_refill_court()はどの経路(awaiting_refill/held_for_pairing/
     #   awaiting_skill_burst)でも「4人をpendingに戻す」→「待ち行列に登録する」
     #   の2段階になっており、その間の一瞬はどの待ち行列にも載っていない状態を
@@ -1830,10 +1810,6 @@ def _process_held_pairs():
     """
     meta_table = _meta_table()
     meta_current = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
-    # ★スキルモード一斉入れ替えの収集中は、他の通常補充と同様にここも止める
-    # (_process_awaiting_refillsのコメント参照)。
-    if meta_current.get("awaiting_skill_burst"):
-        return
     held = meta_current.get("held_for_pairing") or {}
     if not held:
         return
