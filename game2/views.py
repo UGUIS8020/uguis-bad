@@ -197,6 +197,7 @@ def court():
             courts.setdefault(c, {
                 "A": [], "B": [], "match_id": e.get("match_id"),
                 "mode_label": _mode_label(e.get("pairing_mode")),
+                "round": e.get("round"),
             })
             team = e.get("team", "A")
             courts[c][team].append(e)
@@ -620,6 +621,9 @@ def create_pairings():
     #   作成時点の全コートを、この1つのmatch_idで埋まっているものとして
     #   初期化する。
     owner_init = {str(c): {"S": str(match_id)} for c in range(1, len(matches) + 1)}
+    # ★court_round: 各コートが何試合目(ラウンド)かを表示するためのカウンター。
+    #   最初の組み合わせ作成時は、全コートとも1試合目として初期化する。
+    round_init = {str(c): {"N": "1"} for c in range(1, len(matches) + 1)}
 
     tx_items = [{
         "Update": {
@@ -635,7 +639,7 @@ def create_pairings():
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc, "
                 "awaiting_refill = :empty, held_for_pairing = :empty, awaiting_skill_burst = :empty, "
-                "court_owner = :owner_init "
+                "court_owner = :owner_init, court_round = :round_init "
                 "REMOVE matching_paused"
             ),
             "ExpressionAttributeNames": {
@@ -646,7 +650,7 @@ def create_pairings():
                 ":playing": {"S": "playing"}, ":mid": {"S": str(match_id)},
                 ":cc": {"N": str(len(matches))}, ":now": {"S": now_jst}, ":mode": {"S": mode},
                 ":maxc": {"N": str(max_courts)}, ":empty": {"M": {}},
-                ":owner_init": {"M": owner_init},
+                ":owner_init": {"M": owner_init}, ":round_init": {"M": round_init},
             },
         }
     }]
@@ -658,12 +662,14 @@ def create_pairings():
                 "Update": {
                     "TableName": "bad-game2-match_entries",
                     "Key": {"entry_id": {"S": entry_id}},
-                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
+                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm, #rd=:round",
                     "ConditionExpression": "entry_status = :pending",
+                    "ExpressionAttributeNames": {"#rd": "round"},
                     "ExpressionAttributeValues": {
                         ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                         ":mid": {"S": str(match_id)}, ":c": {"N": str(court_num)},
                         ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": mode},
+                        ":round": {"N": "1"},
                     },
                 }
             })
@@ -1458,6 +1464,11 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     else:
         used_mode = mode
     new_match_id = generate_match_id2()
+    # ★court_round: 表示用の「このコートの何試合目か」カウンター。
+    #   同時に複数リクエストが補充を試みた場合、ここでの読み取りが最新で
+    #   ない可能性はあるが、表示用の目安であり厳密な連番保証は不要なため
+    #   許容する。
+    next_round = int((meta_current.get("court_round") or {}).get(str(court_number), 0)) + 1
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
@@ -1480,12 +1491,14 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": "SET court_owner.#c = :new_mid REMOVE awaiting_refill.#c",
+                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round REMOVE awaiting_refill.#c",
                 "ConditionExpression": (
                     "attribute_exists(awaiting_refill.#c) AND attribute_not_exists(court_owner.#c)"
                 ),
                 "ExpressionAttributeNames": {"#c": str(court_number)},
-                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
+                "ExpressionAttributeValues": {
+                    ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
+                },
             }
         })
     else:
@@ -1493,10 +1506,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": "SET court_owner.#c = :new_mid",
+                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round",
                 "ConditionExpression": "attribute_not_exists(court_owner.#c)",
                 "ExpressionAttributeNames": {"#c": str(court_number)},
-                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
+                "ExpressionAttributeValues": {
+                    ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
+                },
             }
         })
     for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
@@ -1505,12 +1520,14 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game2-match_entries",
                 "Key": {"entry_id": {"S": pl["entry_id"]}},
-                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
+                "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm, #rd=:round",
                 "ConditionExpression": "entry_status = :pending",
+                "ExpressionAttributeNames": {"#rd": "round"},
                 "ExpressionAttributeValues": {
                     ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                     ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
                     ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": used_mode},
+                    ":round": {"N": str(next_round)},
                 },
             }
         })
@@ -1976,6 +1993,9 @@ def _execute_skill_burst(court_numbers):
             return
         raise
 
+    meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
+    court_round_now = meta_current_now.get("court_round") or {}
+
     candidates = _skill_sorted_pending(entry_table)
     usable_groups = min(len(court_numbers), len(candidates) // 4)
 
@@ -2002,25 +2022,29 @@ def _execute_skill_burst(court_numbers):
         four = candidates[i * 4:(i + 1) * 4]
         team_a_entries, team_b_entries, diff = _skill_priority_four(four, partner_counter=partner_counter)
         new_match_id = generate_match_id2()
+        next_round = int(court_round_now.get(str(court_number), 0)) + 1
         for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
                           (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
             tx_items.append({
                 "Update": {
                     "TableName": "bad-game2-match_entries",
                     "Key": {"entry_id": {"S": pl["entry_id"]}},
-                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm",
+                    "UpdateExpression": "SET entry_status=:playing, match_id=:mid, court_number=:c, team=:t, updated_at=:now, pairing_mode=:pm, #rd=:round",
                     "ConditionExpression": "entry_status = :pending",
+                    "ExpressionAttributeNames": {"#rd": "round"},
                     "ExpressionAttributeValues": {
                         ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                         ":mid": {"S": str(new_match_id)}, ":c": {"N": str(court_number)},
                         ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": "balance_only"},
+                        ":round": {"N": str(next_round)},
                     },
                 }
             })
         assigned.append((court_number, new_match_id, diff, [e.get("display_name") for e in team_a_entries + team_b_entries]))
-        owner_set_parts.append(f"court_owner.#oc{i} = :omid{i}")
+        owner_set_parts.append(f"court_owner.#oc{i} = :omid{i}, court_round.#oc{i} = :oround{i}")
         owner_names[f"#oc{i}"] = str(court_number)
         owner_values[f":omid{i}"] = {"S": str(new_match_id)}
+        owner_values[f":oround{i}"] = {"N": str(next_round)}
 
     # ★court_owner: 一斉入れ替えで使う全コート番号を、他の経路(通常補充など)
     #   に既に使われていないか確認してからまとめて取得する
@@ -2418,7 +2442,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, court_round",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
@@ -2595,7 +2619,7 @@ def emergency_transfer():
         Key={"match_id": META_CURRENT_PK},
         UpdateExpression=(
             "SET #st = :idle, #ua = :now REMOVE current_match_id, court_count, max_courts, "
-            "awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner"
+            "awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, court_round"
         ),
         ExpressionAttributeNames={"#st": "status", "#ua": "updated_at"},
         ExpressionAttributeValues={":idle": "idle", ":now": now},
