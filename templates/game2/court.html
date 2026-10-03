@@ -128,7 +128,10 @@
 
     {% for court_num, teams in courts.items() %}
     <div class="card court-card">
-        <div class="card-header">コート {{ court_num }}（{{ teams.mode_label }}）</div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>コート {{ court_num }}（{{ teams.mode_label }}）</span>
+            {% if teams.round %}<span class="text-muted small">round{{ teams.round }}</span>{% endif %}
+        </div>
         <div class="card-body">
             <form method="POST" action="{{ url_for('game2.submit_score', match_id=teams.match_id, court_number=court_num) }}" class="score-submit-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
