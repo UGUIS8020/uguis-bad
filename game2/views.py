@@ -1491,13 +1491,18 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round REMOVE awaiting_refill.#c",
+                "UpdateExpression": (
+                    "SET court_owner.#c = :new_mid, "
+                    "court_round = if_not_exists(court_round, :empty_map), court_round.#c = :round "
+                    "REMOVE awaiting_refill.#c"
+                ),
                 "ConditionExpression": (
                     "attribute_exists(awaiting_refill.#c) AND attribute_not_exists(court_owner.#c)"
                 ),
                 "ExpressionAttributeNames": {"#c": str(court_number)},
                 "ExpressionAttributeValues": {
                     ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
+                    ":empty_map": {"M": {}},
                 },
             }
         })
@@ -1506,11 +1511,15 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round",
+                "UpdateExpression": (
+                    "SET court_owner.#c = :new_mid, "
+                    "court_round = if_not_exists(court_round, :empty_map), court_round.#c = :round"
+                ),
                 "ConditionExpression": "attribute_not_exists(court_owner.#c)",
                 "ExpressionAttributeNames": {"#c": str(court_number)},
                 "ExpressionAttributeValues": {
                     ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
+                    ":empty_map": {"M": {}},
                 },
             }
         })
@@ -2032,14 +2041,17 @@ def _execute_skill_burst(court_numbers):
         "Update": {
             "TableName": "bad-game-matches",
             "Key": {"match_id": {"S": META_CURRENT_PK}},
-            "UpdateExpression": "SET " + ", ".join(owner_set_parts) + " REMOVE " + ", ".join(
-                f"held_for_pairing.{name}" for name in owner_names
+            "UpdateExpression": (
+                "SET court_round = if_not_exists(court_round, :empty_map), "
+                + ", ".join(owner_set_parts) + " REMOVE " + ", ".join(
+                    f"held_for_pairing.{name}" for name in owner_names
+                )
             ),
             "ConditionExpression": " AND ".join(
                 f"attribute_not_exists(court_owner.{name})" for name in owner_names
             ),
             "ExpressionAttributeNames": owner_names,
-            "ExpressionAttributeValues": owner_values,
+            "ExpressionAttributeValues": dict(owner_values, **{":empty_map": {"M": {}}}),
         }
     })
 
