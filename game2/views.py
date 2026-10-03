@@ -687,6 +687,11 @@ def create_pairings():
         dynamodb_client.transact_write_items(TransactItems=tx_items)
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
+            meta_table.update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression="ADD match_sequence :minus_n",
+                ExpressionAttributeValues={":minus_n": -len(matches)},
+            )
             flash("テストコート: 進行中の試合があるためペアリングできませんでした。", "warning")
             return redirect(url_for("game2.court"))
         raise
@@ -1554,6 +1559,17 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             current_app.logger.warning(
                 "[game2][continuous] court=%s 補充tx競合のためスキップ（次のチェックで再試行される）", court_number
             )
+            # ★失敗した試行の分、match_sequenceを使い戻す(返却)。先に加算して
+            #   おかないとtx_items内のround値が確定できないが、そのまま
+            #   失敗させると「試合が1つも作られていないのに番号だけ進む」
+            #   ことが高負荷時の再試行で積み重なり、表示が実際の試合数から
+            #   大きくズレてしまう(2026-10-04の実運用で実際に発生、27試合
+            #   しか終わっていないのにround76まで進んでいた)。
+            meta_table.update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression="ADD match_sequence :minus_one",
+                ExpressionAttributeValues={":minus_one": -1},
+            )
         else:
             raise
 
@@ -2073,6 +2089,13 @@ def _execute_skill_burst(court_numbers):
         if e.response.get("Error", {}).get("Code") == "TransactionCanceledException":
             current_app.logger.warning(
                 "[game2][continuous] スキルモード一斉入れ替えtx競合のため見送り(通常補充に戻します)"
+            )
+            # ★失敗した分のmatch_sequenceを使い戻す(_select_and_start_courtの
+            #   コメント参照)。
+            meta_table.update_item(
+                Key={"match_id": META_CURRENT_PK},
+                UpdateExpression="ADD match_sequence :minus_n",
+                ExpressionAttributeValues={":minus_n": -usable_groups},
             )
             _return_courts_to_awaiting_refill(meta_table, court_numbers, now_jst)
             return
