@@ -621,9 +621,17 @@ def create_pairings():
     #   作成時点の全コートを、この1つのmatch_idで埋まっているものとして
     #   初期化する。
     owner_init = {str(c): {"S": str(match_id)} for c in range(1, len(matches) + 1)}
-    # ★court_round: 各コートが何試合目(ラウンド)かを表示するためのカウンター。
-    #   最初の組み合わせ作成時は、全コートとも1試合目として初期化する。
-    round_init = {str(c): {"N": "1"} for c in range(1, len(matches) + 1)}
+    # ★match_sequence: 全コート通しの「何試合目か」を表す単純な連番カウンター
+    #   (コートごとではなく、練習全体で1,2,3...と増える)。最初の組み合わせ
+    #   作成時にコート数分まとめて進め、各コートへ1つずつ割り当てる。
+    seq_resp = meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="ADD match_sequence :n",
+        ExpressionAttributeValues={":n": len(matches)},
+        ReturnValues="UPDATED_NEW",
+    )
+    seq_end = int(seq_resp["Attributes"]["match_sequence"])
+    seq_start = seq_end - len(matches) + 1
 
     tx_items = [{
         "Update": {
@@ -639,7 +647,7 @@ def create_pairings():
             "UpdateExpression": (
                 "SET #st = :playing, #cm = :mid, #cc = :cc, #ua = :now, #pm = :mode, #mc = :maxc, "
                 "awaiting_refill = :empty, held_for_pairing = :empty, awaiting_skill_burst = :empty, "
-                "court_owner = :owner_init, court_round = :round_init "
+                "court_owner = :owner_init "
                 "REMOVE matching_paused"
             ),
             "ExpressionAttributeNames": {
@@ -650,12 +658,13 @@ def create_pairings():
                 ":playing": {"S": "playing"}, ":mid": {"S": str(match_id)},
                 ":cc": {"N": str(len(matches))}, ":now": {"S": now_jst}, ":mode": {"S": mode},
                 ":maxc": {"N": str(max_courts)}, ":empty": {"M": {}},
-                ":owner_init": {"M": owner_init}, ":round_init": {"M": round_init},
+                ":owner_init": {"M": owner_init},
             },
         }
     }]
 
     for court_num, ((a1, a2), (b1, b2)) in enumerate(matches, 1):
+        round_no = seq_start + court_num - 1
         for pl, team in [(a1, "A"), (a2, "A"), (b1, "B"), (b2, "B")]:
             entry_id = str(getattr(pl, "entry_id", "") or "")
             tx_items.append({
@@ -669,7 +678,7 @@ def create_pairings():
                         ":playing": {"S": "playing"}, ":pending": {"S": "pending"},
                         ":mid": {"S": str(match_id)}, ":c": {"N": str(court_num)},
                         ":t": {"S": team}, ":now": {"S": now_jst}, ":pm": {"S": mode},
-                        ":round": {"N": "1"},
+                        ":round": {"N": str(round_no)},
                     },
                 }
             })
@@ -1298,29 +1307,6 @@ def _try_refill_court(old_match_id, court_number):
     )
 
 
-def _ensure_court_round_map(meta_table):
-    """
-    court_roundマップが存在することを保証する。DynamoDBのUpdateExpressionは
-    「court_round」と「court_round.1」のように親パスとネストしたパスを
-    同じ式の中で同時に参照できない(Two document paths overlapエラー)ため、
-    if_not_exists(court_round, :empty)を補充のtx_itemに含める形では
-    自己修復できない。ラウンド番号機能のデプロイ前から続いているセッション
-    ではcourt_roundが存在しないため、このように事前に別呼び出しで用意する
-    (2026-10-04の実運用で実際に発生: 存在しないマップへの書き込みで
-    ValidationExceptionが毎回発生し、補充が永久に失敗し続けた)。
-    """
-    try:
-        meta_table.update_item(
-            Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET court_round = :empty",
-            ConditionExpression="attribute_not_exists(court_round)",
-            ExpressionAttributeValues={":empty": {}},
-        )
-    except ClientError as e:
-        if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
-            raise
-
-
 def _select_and_start_court(court_number, clear_awaiting_refill=True):
     """
     空いているコートに、休憩ローテーション上位の候補の中から実力バランスが
@@ -1487,13 +1473,16 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     else:
         used_mode = mode
     new_match_id = generate_match_id2()
-    # ★court_round: 表示用の「このコートの何試合目か」カウンター。
-    #   同時に複数リクエストが補充を試みた場合、ここでの読み取りが最新で
-    #   ない可能性はあるが、表示用の目安であり厳密な連番保証は不要なため
-    #   許容する。
-    next_round = int((meta_current.get("court_round") or {}).get(str(court_number), 0)) + 1
-    if "court_round" not in meta_current:
-        _ensure_court_round_map(meta_table)
+    # ★match_sequence: 全コート通しで「何試合目か」を表示するための連番。
+    #   ADDは対象属性が存在しなくても1から自動的に初期化されるため、
+    #   事前のマップ初期化は不要。
+    seq_resp = meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="ADD match_sequence :one",
+        ExpressionAttributeValues={":one": 1},
+        ReturnValues="UPDATED_NEW",
+    )
+    next_round = int(seq_resp["Attributes"]["match_sequence"])
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
@@ -1516,17 +1505,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": (
-                    "SET court_owner.#c = :new_mid, court_round.#c = :round "
-                    "REMOVE awaiting_refill.#c"
-                ),
+                "UpdateExpression": "SET court_owner.#c = :new_mid REMOVE awaiting_refill.#c",
                 "ConditionExpression": (
                     "attribute_exists(awaiting_refill.#c) AND attribute_not_exists(court_owner.#c)"
                 ),
                 "ExpressionAttributeNames": {"#c": str(court_number)},
-                "ExpressionAttributeValues": {
-                    ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
-                },
+                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
             }
         })
     else:
@@ -1534,12 +1518,10 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
             "Update": {
                 "TableName": "bad-game-matches",
                 "Key": {"match_id": {"S": META_CURRENT_PK}},
-                "UpdateExpression": "SET court_owner.#c = :new_mid, court_round.#c = :round",
+                "UpdateExpression": "SET court_owner.#c = :new_mid",
                 "ConditionExpression": "attribute_not_exists(court_owner.#c)",
                 "ExpressionAttributeNames": {"#c": str(court_number)},
-                "ExpressionAttributeValues": {
-                    ":new_mid": {"S": str(new_match_id)}, ":round": {"N": str(next_round)},
-                },
+                "ExpressionAttributeValues": {":new_mid": {"S": str(new_match_id)}},
             }
         })
     for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
@@ -1997,9 +1979,6 @@ def _execute_skill_burst(court_numbers):
             return
         raise
 
-    meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
-    court_round_now = meta_current_now.get("court_round") or {}
-
     candidates = _skill_sorted_pending(entry_table)
     usable_groups = min(len(court_numbers), len(candidates) // 4)
 
@@ -2014,8 +1993,16 @@ def _execute_skill_burst(court_numbers):
 
     partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
 
-    if "court_round" not in meta_current_now:
-        _ensure_court_round_map(meta_table)
+    # ★match_sequence: 全コート通しの連番を、このバッチで使う分(usable_groups)
+    #   まとめて進め、各コートへ1つずつ割り当てる。
+    seq_resp = meta_table.update_item(
+        Key={"match_id": META_CURRENT_PK},
+        UpdateExpression="ADD match_sequence :n",
+        ExpressionAttributeValues={":n": usable_groups},
+        ReturnValues="UPDATED_NEW",
+    )
+    seq_end = int(seq_resp["Attributes"]["match_sequence"])
+    seq_start = seq_end - usable_groups + 1
 
     import boto3
     dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
@@ -2029,7 +2016,7 @@ def _execute_skill_burst(court_numbers):
         four = candidates[i * 4:(i + 1) * 4]
         team_a_entries, team_b_entries, diff = _skill_priority_four(four, partner_counter=partner_counter)
         new_match_id = generate_match_id2()
-        next_round = int(court_round_now.get(str(court_number), 0)) + 1
+        next_round = seq_start + i
         for pl, team in [(team_a_entries[0], "A"), (team_a_entries[1], "A"),
                           (team_b_entries[0], "B"), (team_b_entries[1], "B")]:
             tx_items.append({
@@ -2048,10 +2035,9 @@ def _execute_skill_burst(court_numbers):
                 }
             })
         assigned.append((court_number, new_match_id, diff, [e.get("display_name") for e in team_a_entries + team_b_entries]))
-        owner_set_parts.append(f"court_owner.#oc{i} = :omid{i}, court_round.#oc{i} = :oround{i}")
+        owner_set_parts.append(f"court_owner.#oc{i} = :omid{i}")
         owner_names[f"#oc{i}"] = str(court_number)
         owner_values[f":omid{i}"] = {"S": str(new_match_id)}
-        owner_values[f":oround{i}"] = {"N": str(next_round)}
 
     # ★court_owner: 一斉入れ替えで使う全コート番号を、他の経路(通常補充など)
     #   に既に使われていないか確認してからまとめて取得する
@@ -2451,7 +2437,7 @@ def reset_participants():
 
         meta_table.update_item(
             Key={"match_id": META_CURRENT_PK},
-            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, court_round",
+            UpdateExpression="SET #st = :idle REMOVE current_match_id, court_count, max_courts, awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, match_sequence",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":idle": "idle"},
         )
@@ -2628,7 +2614,7 @@ def emergency_transfer():
         Key={"match_id": META_CURRENT_PK},
         UpdateExpression=(
             "SET #st = :idle, #ua = :now REMOVE current_match_id, court_count, max_courts, "
-            "awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, court_round"
+            "awaiting_refill, matching_paused, held_for_pairing, awaiting_skill_burst, court_owner, match_sequence"
         ),
         ExpressionAttributeNames={"#st": "status", "#ua": "updated_at"},
         ExpressionAttributeValues={":idle": "idle", ":now": now},
