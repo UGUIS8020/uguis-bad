@@ -139,7 +139,7 @@
                     <div class="col-6">
                         <div class="team-box">
                             <strong>Aチーム(手前)</strong>
-                            <ul class="mb-2">
+                            <ul class="mb-2" style="list-style: none; padding-left: 0;">
                                 {% for p in teams.A %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
                             <input type="number" name="team1_score" class="form-control score-input" placeholder="Aチーム得点" value="21" autocomplete="off" required>
@@ -148,7 +148,7 @@
                     <div class="col-6">
                         <div class="team-box">
                             <strong>Bチーム(奥)</strong>
-                            <ul class="mb-2">
+                            <ul class="mb-2" style="list-style: none; padding-left: 0;">
                                 {% for p in teams.B %}<li>{{ p.display_name }}</li>{% endfor %}
                             </ul>
                             <input type="number" name="team2_score" class="form-control score-input" placeholder="Bチーム得点" value="21" autocomplete="off" required>
