@@ -1748,14 +1748,27 @@ def _reconcile_orphaned_courts():
 
         suspected_at_iso = orphan_suspected.get(key)
         if not suspected_at_iso:
+            # ★DynamoDBは同じUpdateExpression内で親パス(orphan_suspected)と
+            #   子パス(orphan_suspected.#c)を同時に参照できない("Two document
+            #   paths overlap" ValidationException)。court_roundで過去に
+            #   踏んだのと同じ制約のため、先に空マップの存在を保証してから
+            #   (既に存在する場合はConditionalCheckFailedExceptionを無視)、
+            #   別のUpdateItemでキーをセットする2段階に分ける。
+            try:
+                meta_table.update_item(
+                    Key={"match_id": META_CURRENT_PK},
+                    UpdateExpression="SET orphan_suspected = :empty",
+                    ConditionExpression="attribute_not_exists(orphan_suspected)",
+                    ExpressionAttributeValues={":empty": {}},
+                )
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
             meta_table.update_item(
                 Key={"match_id": META_CURRENT_PK},
-                UpdateExpression=(
-                    "SET orphan_suspected = if_not_exists(orphan_suspected, :empty), "
-                    "orphan_suspected.#c = :now"
-                ),
+                UpdateExpression="SET orphan_suspected.#c = :now",
                 ExpressionAttributeNames={"#c": key},
-                ExpressionAttributeValues={":now": now_jst, ":empty": {}},
+                ExpressionAttributeValues={":now": now_jst},
             )
             continue
 
