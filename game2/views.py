@@ -62,11 +62,8 @@ PAIRING_MODE_LABELS = {
                               # 「完全」ランダムという表示は誤解を招く
     "ai": "AIモード",
     "ai_pairing": "AIモード",
-    "ai_pairing_balanced": "AI調整1モード",  # 継続的バランス調整(参加回数の多い人を除外)
-                                          # が適用された回のAIモード
-    "ai_pairing_full_balanced": "AI調整2モード",  # 固定スケジュール上のAI調整2モード期間、
-                                                # 除外に加えて最も少ない人を強制参加させる
-                                                # 強めの調整
+    "ai_pairing_balanced": "AI調整モード",  # 継続的バランス調整(参加回数の多い人を除外)
+                                        # が適用された回のAIモード
     "balance_only": "スキルモード",
     "fairness_first": "休憩優先",
     "safety_valve": "AIモード",  # 内部的には救済モード(待ちすぎの人を強制救済)だが、
@@ -1052,17 +1049,17 @@ WAIT_RESCUE_THRESHOLD = 5  # 何回の補充機会を待たされたら救済モ
 QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キューの先頭から必ず含める人数
 
 # モード選定ルール: 練習中1回だけの、補充回数(refill_count)ベースの
-# 固定スケジュール(時間には一切依存しない)。
-#   1. refill 1〜INITIAL_FULL_RANDOM_COUNT: ランダムモード
-#   2. 続くINITIAL_AI_PURE_COUNT回: 調整なしの純粋な「AIモード」
-#   3. 続くPRE_SKILL_BALANCE_REFILLS回: 「AI調整2モード」(除外+最も少ない
-#      人を強制参加)。スキルモード一斉入れ替えの直前に参加回数の偏りを
-#      一度リセットしておく狙い
-#   4. → ここでスキルモード一斉入れ替えが1回だけ発動する(練習中に二度と
-#      発動しない)。一斉入れ替え自体はrefill_countを消費しない
-#   5. 続くPOST_SKILL_BALANCE_REFILLS回: 「AI調整2モード」
-#   6. 続くPOST_SKILL_AI1_REFILLS回: 「AI調整1モード」(除外のみ)
-#   7. それ以降は練習終了まで「AI調整2モード」のまま変更なし
+# 固定スケジュール(時間には一切依存しない)。BLOCK_SIZE回ずつのブロックで
+# ランダムとAIモードを交互に繰り返し、スキル一斉入れ替えの前後だけ
+# AI調整(除外のみ)を挟む。
+#   ブロック1(1-3): ランダム
+#   ブロック2(4-6): AIモード
+#   ブロック3(7-9): ランダム
+#   ブロック4(10-12): AIモード
+#   ブロック5(13-15): AI調整 → 15到達時にスキル一斉入れ替えが1回だけ発動
+#      (一斉入れ替え自体はrefill_countを消費しない)
+#   ブロック6(16-18): AI調整
+#   ブロック7以降: ランダムとAIモードをBLOCK_SIZE回ずつ練習終了まで無限に交互
 # 休みの調整は二重構成:
 #   1. ランダム/AIモードは、_pop_next_from_play_queue()による永続キューの
 #      先頭QUEUE_FORCE_COUNT人を毎回必ず含める(旧システムと同じ「休む人を
@@ -1070,23 +1067,24 @@ QUEUE_FORCE_COUNT = 1  # 完全ランダム/AIペアリングで、永続キュ�
 #   2. さらにモードを問わず、WAIT_RESCUE_THRESHOLD回以上補充を逃し続けている
 #      人がいれば救済モードが割り込み、最大4人まで強制的に含める(極端な
 #      長時間待ちを防ぐ保険。ENABLE_RESCUE_MODEでオン/オフ切替可)
-#   3. さらに、AI調整1モードの期間は毎回、参加回数が最も多い人を今回の
+#   3. さらに、AI調整ブロックの間は毎回、参加回数が最も多い人を今回の
 #      候補から除外する(休憩にはしない。次回はまた対象になりうる)
-#   4. AI調整2モードの期間は、除外に加えて「最も少ない人を強制参加」も併用する
-INITIAL_FULL_RANDOM_COUNT = 6  # 練習開始直後、ランダムを連続させる回数
-INITIAL_AI_PURE_COUNT = 6  # ランダムの後、調整なしの純粋なAIモードを連続させる回数
-PRE_SKILL_BALANCE_REFILLS = 3  # スキル優先直前のAI調整2モードの回数
-POST_SKILL_BALANCE_REFILLS = 6  # スキル優先直後のAI調整2モードの回数
-POST_SKILL_AI1_REFILLS = 3  # その後のAI調整1モードの回数
-# これ以降refillが増えても、上記境界を超えたらAI調整2モードのまま固定される
-# (練習が終わるまで変更なし)
+# ★以前は上記3に加えて「最も少ない人を強制参加」させる強めの調整(旧AI調整
+#   2モード)もあったが、遅れて参加した人はmatch_countが低いのが当然なのに
+#   毎回最優先で拾われてしまい、途中参加者を不当に優先する結果になっていた。
+#   途中参加者にとっては「来てからの時間の中で試合と休憩がバランス良くある」
+#   方が自然という判断により廃止した(2026-10-08)。
+BLOCK_SIZE = 3  # 各モードを連続させる補充回数
+AI_ADJUST_BLOCKS = (5, 6)  # AI調整にするブロック番号(この間にスキル一斉入れ替えも発動)
+SKILL_BURST_TRIGGER_REFILL = BLOCK_SIZE * AI_ADJUST_BLOCKS[0]  # 15: ブロック5の終わりで発動
 
-# 各フェーズの終わり(累積refill_count)を計算しておく
-_BOUNDARY_1 = INITIAL_FULL_RANDOM_COUNT  # ランダム終わり
-_BOUNDARY_2 = _BOUNDARY_1 + INITIAL_AI_PURE_COUNT  # AIモード終わり
-_BOUNDARY_3 = _BOUNDARY_2 + PRE_SKILL_BALANCE_REFILLS  # スキル優先直前のAI調整2終わり(=発動点)
-_BOUNDARY_4 = _BOUNDARY_3 + POST_SKILL_BALANCE_REFILLS  # スキル優先直後のAI調整2終わり
-_BOUNDARY_5 = _BOUNDARY_4 + POST_SKILL_AI1_REFILLS  # その後のAI調整1終わり(以降ずっとAI調整2)
+
+def _block_mode(refill_count):
+    """refill_countからBLOCK_SIZE回区切りのブロック番号を求め、モードを決める。"""
+    block_num = (refill_count - 1) // BLOCK_SIZE + 1
+    if block_num in AI_ADJUST_BLOCKS:
+        return "ai_adjust"
+    return "full_random" if block_num % 2 == 1 else "ai_pairing"
 
 
 def _next_refill_mode(meta_table):
@@ -1102,11 +1100,7 @@ def _next_refill_mode(meta_table):
         ReturnValues="UPDATED_NEW",
     )
     refill_count = int(resp["Attributes"]["refill_count"])
-
-    if refill_count <= INITIAL_FULL_RANDOM_COUNT:
-        return "full_random", refill_count
-
-    return "ai_pairing", refill_count
+    return _block_mode(refill_count), refill_count
 
 
 def _skill_burst_should_collect(meta_current, pairing_meta):
@@ -1120,7 +1114,7 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
       場合は、既に発動済みかどうかに関わらず最後まで合流させる
       (全コートが揃うまで待つ)。
     - まだ始まっていなければ、発動済みでなく、かつrefill_countが
-      _BOUNDARY_3(スキル優先直前のAI調整2モードの終わり)に達している
+      SKILL_BURST_TRIGGER_REFILL(AI調整ブロック5の終わり)に達している
       かどうかで、新規に収集を開始すべきか判定する。
     """
     if meta_current.get("awaiting_skill_burst"):
@@ -1128,7 +1122,7 @@ def _skill_burst_should_collect(meta_current, pairing_meta):
     if pairing_meta.get("skill_burst_done"):
         return False
     refill_count_now = int(pairing_meta.get("refill_count", 0) or 0)
-    return refill_count_now >= _BOUNDARY_3
+    return refill_count_now >= SKILL_BURST_TRIGGER_REFILL
 
 
 COURT_REFILL_DELAY_SECONDS = 10  # スコア送信から次の組み合わせ開始までの猶予（休憩したい人が申告できる時間）
@@ -1256,8 +1250,8 @@ def _try_refill_court(old_match_id, court_number):
     meta_current_now = meta_table.get_item(Key={"match_id": META_CURRENT_PK}, ConsistentRead=True).get("Item", {}) or {}
     court_count = int(meta_current_now.get("court_count", 0) or 0)
 
-    # ★スキルモード一斉入れ替え: refill_countが_BOUNDARY_3(スキル優先直前の
-    #   AI調整2モードの終わり)に達していて、かつまだ発動していなければ、
+    # ★スキルモード一斉入れ替え: refill_countがSKILL_BURST_TRIGGER_REFILL
+    #   (AI調整ブロック5の終わり)に達していて、かつまだ発動していなければ、
     #   このコートは単独では補充せず、全コートが空くまで待つ
     #   (awaiting_skill_burstに登録)。全コート揃ったら_process_skill_burst()
     #   が待機中全員をスキル順に並べて一括で組み直す。既に収集が始まっている
@@ -1349,12 +1343,11 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     mode, refill_count = _next_refill_mode(meta_table)
     all_pending = _all_pending_unordered(entry_table)
     continuous_balance_applied = False
-    full_balance_applied = False
 
-    # ★完全ランダムは練習開始直後のINITIAL_FULL_RANDOM_COUNT回だけ使う、
-    #   あえて何の調整もしないシンプルなモード。救済モード・永続キューに
-    #   よる強制・継続的バランス調整は一切適用せず、待機中から純粋に
-    #   ランダムに4人選ぶ(チーム分けの実力差調整のみ行う)。
+    # ★完全ランダムはランダムブロックの間だけ使う、あえて何の調整もしない
+    #   シンプルなモード。救済モード・永続キューによる強制・継続的バランス
+    #   調整は一切適用せず、待機中から純粋にランダムに4人選ぶ(チーム分けの
+    #   実力差調整のみ行う)。
     if mode == "full_random":
         rescued = []
         if len(all_pending) < 4:
@@ -1410,39 +1403,19 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 return
             forced_uids = {p["user_id"] for p in forced}
 
-            # ★継続的バランス調整: 練習開始直後のランダムINITIAL_FULL_RANDOM_COUNT回・
-            #   純粋なAIペアリングINITIAL_AI_PURE_COUNT回が終わった後は、毎回
-            #   参加回数(match_count)が最も多い人を今回の候補から除外する
+            # ★継続的バランス調整: AI調整ブロックの間は毎回、参加回数
+            #   (match_count)が最も多い人を今回の候補から除外する
             #   (休憩にはしない。次回はまた対象になりうる)。
             #   以前は「最も少ない人を強制参加」も併用していたが、遅れて参加
-            #   した人がmatch_count=0のため毎回最優先で拾われてしまう懸念があり、
-            #   シミュレーションで検証の上、除外のみに変更した(永続キュー自体が
-            #   参加回数の少ない人を優先する仕組みを既に持っているため、除外
-            #   だけでも一定の公平性は保てる)。
-            apply_continuous_balance = refill_count > _BOUNDARY_2
+            #   した人は参加回数が少ないのが当然なのに毎回最優先で拾われて
+            #   しまい、途中参加者を不当に優先する結果になっていたため廃止した
+            #   (2026-10-08)。永続キュー自体が参加回数の少ない人を優先する
+            #   仕組みを既に持っているため、除外だけでも一定の公平性は保てる。
+            apply_continuous_balance = (mode == "ai_adjust")
             continuous_balance_applied = apply_continuous_balance
-
-            # ★強調整(AI調整2モードの期間だけ): 除外のみでは是正しきれない
-            #   偏りを一気に縮めるため、この期間だけ「最も少ない人を強制参加」
-            #   も併用する。固定スケジュール上、_BOUNDARY_2〜_BOUNDARY_4
-            #   (スキル優先前後のAI調整2)と、_BOUNDARY_5より後(AI調整1の後、
-            #   練習終了までずっとAI調整2)のrefill_countかどうかで判定する。
-            apply_full_balance = (
-                _BOUNDARY_2 < refill_count <= _BOUNDARY_4
-                or refill_count > _BOUNDARY_5
-            )
-            full_balance_applied = False
 
             excluded_uid = None
             if apply_continuous_balance:
-                if apply_full_balance:
-                    remaining_low = [e for e in all_pending if e.get("user_id") not in forced_uids]
-                    if remaining_low:
-                        lowest = min(remaining_low, key=lambda e: int(e.get("match_count", 0) or 0))
-                        forced = forced + [lowest]
-                        forced_uids.add(lowest["user_id"])
-                        full_balance_applied = True
-
                 remaining2 = [e for e in all_pending if e.get("user_id") not in forced_uids]
                 excluded_display_name = None
                 if remaining2:
@@ -1450,12 +1423,8 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                     excluded_uid = highest["user_id"]
                     excluded_display_name = highest.get("display_name")
                 current_app.logger.info(
-                    "[game2][continuous] court=%s %s(refill_count=%d): 優先=%s 除外=%s",
-                    court_number,
-                    "強調整AIペアリング" if full_balance_applied else "継続的バランス調整",
-                    refill_count,
-                    lowest.get("display_name") if apply_full_balance and remaining_low else None,
-                    excluded_display_name,
+                    "[game2][continuous] court=%s 継続的バランス調整(refill_count=%d): 除外=%s",
+                    court_number, refill_count, excluded_display_name,
                 )
 
             rest_pool = [
@@ -1482,8 +1451,6 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
 
     if rescued:
         used_mode = "safety_valve"
-    elif full_balance_applied:
-        used_mode = "ai_pairing_full_balanced"
     elif continuous_balance_applied:
         used_mode = "ai_pairing_balanced"
     else:
