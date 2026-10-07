@@ -504,11 +504,22 @@ def resume():
             return redirect(url_for("game2.court"))
 
         entry = items[0]
+        if entry.get("entry_status") != "resting":
+            current_app.logger.warning(
+                "[game2][resume] user=%s entry_id=%s 休憩中ではない(status=%s)ため復帰をスキップ",
+                user_id, entry["entry_id"], entry.get("entry_status"),
+            )
+            if entry.get("entry_status") == "playing":
+                flash("既に試合に参加しています。", "info")
+            return redirect(url_for("game2.court"))
+
         entry_table.update_item(
             Key={"entry_id": entry["entry_id"]},
             UpdateExpression="SET entry_status = :pending, match_id = :pending, resumed_at = :now",
+            ConditionExpression="entry_status = :resting",
             ExpressionAttributeValues={
                 ":pending": "pending", ":now": datetime.now(JST).isoformat(),
+                ":resting": "resting",
             },
         )
         current_app.logger.info("[game2][resume] user=%s entry_id=%s 復帰", user_id, entry["entry_id"])
