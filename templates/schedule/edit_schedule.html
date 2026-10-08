@@ -242,6 +242,15 @@
                 currentEndTime
             });
         
+            // 日付から曜日を自動設定する関数
+            function updateDayOfWeek() {
+                if (dateField && dateField.value) {
+                    const date = new Date(dateField.value);
+                    const days = ['日', '月', '火', '水', '木', '金', '土'];
+                    dayOfWeekField.value = days[date.getDay()];
+                }
+            }
+
             // 終了時間の更新関数を修正
             function updateEndTimeOptions() {
                 if (startTimeSelect && startTimeSelect.value) {
