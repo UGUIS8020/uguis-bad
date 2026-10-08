@@ -1344,10 +1344,12 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
     all_pending = _all_pending_unordered(entry_table)
     continuous_balance_applied = False
 
-    # ★完全ランダムはランダムブロックの間だけ使う、あえて何の調整もしない
-    #   シンプルなモード。救済モード・永続キューによる強制・継続的バランス
-    #   調整は一切適用せず、待機中から純粋にランダムに4人選ぶ(チーム分けの
-    #   実力差調整のみ行う)。
+    # ★完全ランダムはランダムブロックの間だけ使う、調整なしのシンプルな
+    #   モード。除外・継続的バランス調整は適用しないが、「誰が出るか」の
+    #   最低保証として永続キューの先頭QUEUE_FORCE_COUNT人だけは必ず含める
+    #   (これが無いとランダムブロックの間、参加回数の偏りが完全に無防備に
+    #   なり、ブロックを繰り返すたびに差が開いてしまうため。2026-10-08)。
+    #   残りの枠・チーム分けは完全ランダム(実力差調整のみ行う)。
     if mode == "full_random":
         rescued = []
         if len(all_pending) < 4:
@@ -1356,9 +1358,19 @@ def _select_and_start_court(court_number, clear_awaiting_refill=True):
                 court_number, len(all_pending),
             )
             return
+        forced = _pop_next_from_play_queue(entry_table, meta_table, count=QUEUE_FORCE_COUNT)
+        if not forced:
+            current_app.logger.info(
+                "[game2][continuous] court=%s 補充する人数が足りないため空けたままにします",
+                court_number,
+            )
+            return
+        forced_uids = {p["user_id"] for p in forced}
+        rest_pool = [e for e in all_pending if e.get("user_id") not in forced_uids]
+        candidates = forced + rest_pool
         partner_counter, _opponent_counter = _get_recent_pair_history2(results_table)
         team_a_entries, team_b_entries, diff = _full_random_four(
-            all_pending, force_top_n=0, partner_counter=partner_counter
+            candidates, force_top_n=len(forced), partner_counter=partner_counter
         )
     else:
         # ★救済モード: WAIT_RESCUE_THRESHOLD回以上、補充のチャンスを逃し続けて
