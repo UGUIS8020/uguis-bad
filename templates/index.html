@@ -262,8 +262,8 @@
                       {# 参加者アイコン（未ログインでも表示） #}
                             {% set plist = schedule.participants_info | default([]) %}
                             {% if plist %}
-                                <div class="mt-1 d-flex align-items-center flex-wrap gap-1">
-                                {% for p in plist[:7] %}
+                                <div class="mt-1" style="display:grid; grid-template-columns:repeat(10, 34px); gap:3px;">
+                                {% for p in plist %}
                                     {% if p.is_first_timer %}
                                         {% set ring_color = '#2ecc71' %}
                                         {% set ring_width = '3px' %}
@@ -286,9 +286,6 @@
                                         onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default.jpg') }}'">
                                     </span>
                                 {% endfor %}
-                                {% if plist|length > 7 %}
-                                    <span class="badge bg-secondary ms-1">+{{ plist|length - 7 }}</span>
-                                {% endif %}
                                 </div>
                             {% endif %}
 
