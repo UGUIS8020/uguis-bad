@@ -111,7 +111,7 @@
     {% if is_admin and not courts %}
     <div class="card mb-3">
         <div class="card-body">
-            <p class="text-muted">最初の組み合わせを作成してください。以降は、あるコートの試合が終わるたびに、そのコートだけ自動的に次の組み合わせが作られます。</p>
+            <p class="text-muted">「ゲームスタート」を押してください。以降は、あるコートの試合が終わるたびに、そのコートだけ自動的に次の組み合わせが作られます。</p>
             <form method="POST" action="{{ url_for('game2.create_pairings') }}" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label>コート数:</label>
