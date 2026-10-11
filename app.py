@@ -2589,6 +2589,12 @@ def video_link():
     return render_template("video_link.html")
 
 
+@app.route("/concept")
+def concept():
+    selected_image = random.choice([f"images/top{i:03d}.jpg" for i in range(1, 6)])
+    return render_template("explanation.html", selected_image=selected_image)
+
+
 CONTACT_RECIPIENT = "shibuyamasahiko@gmail.com"
 
 
